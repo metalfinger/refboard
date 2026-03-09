@@ -85,8 +85,9 @@ export default function LayerPanel({
   function getTypeIcon(type: string, isGroup: boolean) {
     if (isGroup) return '\u25B8'; // triangle
     if (type === 'image') return '\u{1F5BC}';
-    if (type === 'i-text') return 'T';
+    if (type === 'text' || type === 'i-text') return 'T';
     if (type === 'path') return '\u270E';
+    if (type === 'video') return '\u25B6';
     return '\u25C7';
   }
 

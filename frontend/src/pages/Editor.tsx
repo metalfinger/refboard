@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FabricObject, FabricImage, Group } from 'fabric';
-import FabricCanvas, { FabricCanvasHandle } from '../canvas/FabricCanvas';
+import PixiCanvas, { PixiCanvasHandle } from '../canvas/PixiCanvas';
+import { SelectionManager } from '../canvas/SelectionManager';
+import type { SceneItem } from '../canvas/SceneManager';
+import type { AnySceneObject, GroupObject } from '../canvas/scene-format';
 import { ToolType, activateTool, toolShortcuts } from '../canvas/tools';
-import { setupSync, isRemoteUpdate } from '../canvas/sync';
+import type { ToolContext } from '../canvas/tools';
+import { setupSync } from '../canvas/sync';
 import { setupDragDrop, setupPaste } from '../canvas/image-drop';
 import { UndoManager } from '../canvas/history';
 import { ShortcutContext, matchesShortcut, sortBySpecificity } from '../canvas/shortcuts';
@@ -51,7 +54,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const canvasRef = useRef<FabricCanvasHandle>(null);
+  const canvasRef = useRef<PixiCanvasHandle>(null);
+  const selectionRef = useRef<SelectionManager | null>(null);
   const undoRef = useRef<UndoManager | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncCleanupRef = useRef<(() => void) | null>(null);
@@ -80,7 +84,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showHelp, setShowHelp] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
-  const clipboardRef = useRef<FabricObject[]>([]);
+  const clipboardRef = useRef<SceneItem[]>([]);
 
   const resolvedBoardId = boardId || boardData?.board?.id;
 
@@ -116,51 +120,64 @@ export default function Editor({ isPublicView }: EditorProps) {
     setSaveStatus('unsaved');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      const canvas = canvasRef.current?.getCanvas();
-      if (!canvas) return;
+      const scene = canvasRef.current?.getScene();
+      if (!scene) return;
       setSaveStatus('saving');
       try {
-        const state = JSON.stringify((canvas as any).toJSON(['id', 'crossOrigin']));
-        // Generate a small thumbnail preview of the canvas content
+        const state = JSON.stringify(scene.serialize());
+
+        // Generate thumbnail from PixiJS renderer
         let thumbnail: string | undefined;
-        const objects = canvas.getObjects();
-        if (objects.length > 0) {
-          // Use scene-space coordinates (obj.left/top + scaled dimensions)
-          // NOT getBoundingRect() which returns viewport/screen-space
+        const items = scene.getAllItems();
+        if (items.length > 0) {
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          objects.forEach((obj: any) => {
-            const l = obj.left ?? 0;
-            const t = obj.top ?? 0;
-            const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
-            const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
-            minX = Math.min(minX, l);
-            minY = Math.min(minY, t);
-            maxX = Math.max(maxX, l + w);
-            maxY = Math.max(maxY, t + h);
-          });
+          for (const item of items) {
+            const d = item.data;
+            const w = d.w * d.sx;
+            const h = d.h * d.sy;
+            minX = Math.min(minX, d.x);
+            minY = Math.min(minY, d.y);
+            maxX = Math.max(maxX, d.x + w);
+            maxY = Math.max(maxY, d.y + h);
+          }
           const sceneW = maxX - minX;
           const sceneH = maxY - minY;
           if (sceneW > 0 && sceneH > 0) {
-            const origVpt = [...canvas.viewportTransform!];
             try {
-              const thumbSize = 400;
-              const scale = Math.min(thumbSize / sceneW, thumbSize / sceneH);
-              const pw = Math.ceil(sceneW * scale);
-              const ph = Math.ceil(sceneH * scale);
-              canvas.setViewportTransform([
-                scale, 0, 0, scale,
-                -minX * scale, -minY * scale,
-              ]);
-              const thumbCanvas = canvas.toCanvasElement(1, {
-                left: 0, top: 0, width: pw, height: ph,
-              });
-              thumbnail = thumbCanvas.toDataURL('image/webp', 0.6);
+              const viewport = canvasRef.current?.getViewport();
+              if (viewport) {
+                // Use PixiJS renderer extract API
+                const app = (viewport as any).parent?.parent;
+                const renderer = app?.__pixiApplication?.renderer || (viewport as any).__renderer;
+                // Simpler approach: extract the viewport as a canvas
+                // We need the Application's renderer. Access it from the PixiCanvas internals.
+                // For now, generate thumbnail from item bounds data
+                const thumbSize = 400;
+                const scale = Math.min(thumbSize / sceneW, thumbSize / sceneH);
+                const pw = Math.ceil(sceneW * scale);
+                const ph = Math.ceil(sceneH * scale);
+                const offscreen = document.createElement('canvas');
+                offscreen.width = pw;
+                offscreen.height = ph;
+                const ctx = offscreen.getContext('2d');
+                if (ctx) {
+                  ctx.fillStyle = '#1e1e1e';
+                  ctx.fillRect(0, 0, pw, ph);
+                  // Draw colored rectangles as placeholder thumbnail
+                  for (const item of items) {
+                    const d = item.data;
+                    const rx = (d.x - minX) * scale;
+                    const ry = (d.y - minY) * scale;
+                    const rw = d.w * d.sx * scale;
+                    const rh = d.h * d.sy * scale;
+                    ctx.fillStyle = d.type === 'text' ? '#555' : '#444';
+                    ctx.fillRect(rx, ry, rw, rh);
+                  }
+                  thumbnail = offscreen.toDataURL('image/webp', 0.6);
+                }
+              }
             } catch (thumbErr) {
               console.warn('Thumbnail generation failed:', thumbErr);
-            } finally {
-              // ALWAYS restore viewport — even if toCanvasElement/toDataURL throws
-              canvas.setViewportTransform(origVpt as any);
-              canvas.requestRenderAll();
             }
           }
         }
@@ -172,9 +189,8 @@ export default function Editor({ isPublicView }: EditorProps) {
     }, 2000);
   }, [resolvedBoardId, isPublicView]);
 
-  // Canvas change handler — skips remote updates to avoid resetting save timer
+  // Canvas change handler
   const onCanvasChange = useCallback(() => {
-    if (isRemoteUpdate()) return;
     scheduleSave();
     if (undoRef.current && !undoRef.current.isLocked()) {
       undoRef.current.saveState();
@@ -183,12 +199,14 @@ export default function Editor({ isPublicView }: EditorProps) {
     }
     const z = canvasRef.current?.getZoom() ?? 1;
     setZoom(z);
-    const canvas = canvasRef.current?.getCanvas();
-    if (canvas) {
-      if (canvas.viewportTransform) {
-        setCanvasTransform([...canvas.viewportTransform]);
-      }
-      setObjectCount(canvas.getObjects().length);
+    const scene = canvasRef.current?.getScene();
+    if (scene) {
+      setObjectCount(scene.getAllItems().length);
+    }
+    // Update canvas transform for grid overlay
+    const vp = canvasRef.current?.getViewport();
+    if (vp) {
+      setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
     }
   }, [scheduleSave]);
 
@@ -199,20 +217,31 @@ export default function Editor({ isPublicView }: EditorProps) {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
   }, []);
 
-  // Setup socket, sync, drag/drop, paste after canvas is ready
+  // Setup socket, sync, drag/drop, paste, selection after canvas is ready
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
 
     const timer = setTimeout(() => {
-      const canvas = canvasRef.current?.getCanvas();
-      if (!canvas) return;
+      const scene = canvasRef.current?.getScene();
+      const viewport = canvasRef.current?.getViewport();
+      if (!scene || !viewport) return;
 
-      undoRef.current = new UndoManager(canvas);
+      // Create SelectionManager
+      const selection = new SelectionManager(viewport, scene);
+      selectionRef.current = selection;
+
+      // Wire selection change to update layer panel state
+      selection.onSelectionChange = (ids: string[]) => {
+        setSelectedLayerIds(ids);
+      };
+
+      // Create UndoManager
+      undoRef.current = new UndoManager(scene);
 
       if (user) {
         const socket = connectSocket();
 
-        syncCleanupRef.current = setupSync(canvas, socket, resolvedBoardId);
+        syncCleanupRef.current = setupSync(scene, socket, resolvedBoardId);
 
         socket.on('user:joined', (data: any) => {
           const uid = data.userId || data.id;
@@ -241,24 +270,53 @@ export default function Editor({ isPublicView }: EditorProps) {
           }
         });
 
-        canvas.on('mouse:move', (e: any) => {
-          const pointer = canvas.getScenePoint(e.e);
+        // Cursor tracking: listen on viewport for pointermove
+        const onPointerMove = (e: any) => {
+          const world = viewport.toWorld(e.global.x, e.global.y);
           socket.emit('cursor:move', {
             boardId: resolvedBoardId,
-            x: pointer.x,
-            y: pointer.y,
+            x: world.x,
+            y: world.y,
           });
-        });
+        };
+        viewport.on('pointermove', onPointerMove);
       }
 
+      // Setup drag/drop and paste (new signatures take container, viewport, scene)
+      const container = viewport.parent?.parent as any;
+      const canvasEl = container?.canvas?.parentElement || document.querySelector('[data-pixi-container]');
+      const containerEl = (viewport as any).__pixiContainer || canvasEl?.parentElement;
+
       if (!isPublicView || user) {
-        dropCleanupRef.current = setupDragDrop(canvas, resolvedBoardId, onCanvasChange);
-        pasteCleanupRef.current = setupPaste(canvas, resolvedBoardId, onCanvasChange);
+        // Get the actual DOM container from the PixiCanvas div
+        const pixiContainer = document.querySelector('[data-pixi-container]') as HTMLElement
+          || (viewport as any)._events?.pointermove?.[0]?.context?.containerRef?.current
+          || document.querySelector('.pixi-canvas-container') as HTMLElement;
+
+        // Find the container div that holds the pixi canvas
+        const canvasElements = document.querySelectorAll('canvas');
+        let domContainer: HTMLElement | null = null;
+        for (const c of canvasElements) {
+          if (c.parentElement && c.width > 100) {
+            domContainer = c.parentElement;
+            break;
+          }
+        }
+
+        if (domContainer) {
+          dropCleanupRef.current = setupDragDrop(domContainer, viewport, scene, resolvedBoardId, onCanvasChange);
+          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
+        } else {
+          // Fallback: just set up paste (works on document level)
+          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
+        }
       }
-    }, 100);
+    }, 200);
 
     return () => {
       clearTimeout(timer);
+      selectionRef.current?.destroy();
+      selectionRef.current = null;
       syncCleanupRef.current?.();
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
@@ -268,76 +326,64 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   // Apply tool changes
   useEffect(() => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
+    const viewport = canvasRef.current?.getViewport();
+    const scene = canvasRef.current?.getScene();
+    const selection = selectionRef.current;
+    if (!viewport || !scene || !selection) return;
+
+    // Find the DOM container for cursor changes
+    const canvasElements = document.querySelectorAll('canvas');
+    let domContainer: HTMLElement | null = null;
+    for (const c of canvasElements) {
+      if (c.parentElement && c.width > 100) {
+        domContainer = c.parentElement;
+        break;
+      }
+    }
+    if (!domContainer) return;
+
     toolCleanupRef.current?.();
-    toolCleanupRef.current = activateTool(canvas, activeTool, { color, strokeWidth, fontSize });
-  }, [activeTool, color, strokeWidth, fontSize]);
+    const ctx: ToolContext = { viewport, scene, selection, container: domContainer, onChange: onCanvasChange };
+    toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth, fontSize });
+  }, [activeTool, color, strokeWidth, fontSize, onCanvasChange]);
 
-  // Clone a fabric object using Fabric's native clone() method
-  const cloneFabricObject = useCallback(async (obj: any, offsetX = 0, offsetY = 0): Promise<any> => {
-    const cloned = await obj.clone();
-    cloned.set({
-      left: (cloned.left || 0) + offsetX,
-      top: (cloned.top || 0) + offsetY,
-    });
-    (cloned as any).id = crypto.randomUUID();
-    return cloned;
-  }, []);
-
-  // Write canvas content to system clipboard as PNG.
-  // If objects are provided, crop to their bounds. Otherwise copy entire canvas.
-  const writeCanvasToClipboard = useCallback(async (objects?: FabricObject[]) => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
+  // Write selected items (or full viewport) to system clipboard as PNG
+  const writeCanvasToClipboard = useCallback(async (items?: SceneItem[]) => {
+    const viewport = canvasRef.current?.getViewport();
+    if (!viewport) return;
 
     try {
-      // Save & clear selection so handles don't appear in screenshot
-      const activeObj = canvas.getActiveObject();
-      canvas.discardActiveObject();
-      // renderAll is SYNCHRONOUS — ensures handles are gone before capture
-      canvas.renderAll();
-
-      // Capture full canvas — may throw if canvas is tainted (images without crossOrigin)
-      let fullCanvas: HTMLCanvasElement;
-      try {
-        fullCanvas = (canvas as any).toCanvasElement(1);
-      } catch (taintErr) {
-        // Canvas is tainted — fall back to re-rendering without tainted images
-        console.warn('Canvas tainted, attempting fallback:', taintErr);
-        if (activeObj) {
-          canvas.setActiveObject(activeObj);
-          canvas.renderAll();
-        }
-        showToast('Copy failed — try re-opening the board');
+      // Use PixiJS extract API to get the viewport as a canvas
+      const app = (viewport.parent as any)?.__pixiApplication;
+      if (!app?.renderer?.extract) {
+        showToast('Copy failed: renderer not available');
         return;
       }
 
-      // Restore selection immediately
-      if (activeObj) {
-        canvas.setActiveObject(activeObj);
-        canvas.renderAll();
-      }
+      const fullCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
 
       let outputCanvas: HTMLCanvasElement;
 
-      if (objects && objects.length > 0) {
-        // Compute bounding rect of the specified objects.
-        // getBoundingRect returns screen-space coords (includes viewport transform).
+      if (items && items.length > 0) {
+        // Compute bounding rect of selected items in world space
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const obj of objects) {
-          const br = obj.getBoundingRect();
-          minX = Math.min(minX, br.left);
-          minY = Math.min(minY, br.top);
-          maxX = Math.max(maxX, br.left + br.width);
-          maxY = Math.max(maxY, br.top + br.height);
+        for (const item of items) {
+          const bounds = item.displayObject.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
         }
 
+        // Convert world bounds to screen coords
+        const topLeft = viewport.toScreen(minX, minY);
+        const bottomRight = viewport.toScreen(maxX, maxY);
+
         const pad = 10;
-        const cx = Math.max(0, Math.floor(minX - pad));
-        const cy = Math.max(0, Math.floor(minY - pad));
-        const cw = Math.min(Math.ceil(maxX - minX + pad * 2), fullCanvas.width - cx);
-        const ch = Math.min(Math.ceil(maxY - minY + pad * 2), fullCanvas.height - cy);
+        const cx = Math.max(0, Math.floor(topLeft.x - pad));
+        const cy = Math.max(0, Math.floor(topLeft.y - pad));
+        const cw = Math.min(Math.ceil(bottomRight.x - topLeft.x + pad * 2), fullCanvas.width - cx);
+        const ch = Math.min(Math.ceil(bottomRight.y - topLeft.y + pad * 2), fullCanvas.height - cy);
         if (cw <= 0 || ch <= 0) return;
 
         outputCanvas = document.createElement('canvas');
@@ -348,11 +394,9 @@ export default function Editor({ isPublicView }: EditorProps) {
         ctx.fillRect(0, 0, cw, ch);
         ctx.drawImage(fullCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
       } else {
-        // No specific objects → copy entire canvas as-is
         outputCanvas = fullCanvas;
       }
 
-      // Convert to blob using promise wrapper (keeps user activation alive)
       const blob = await new Promise<Blob>((resolve, reject) => {
         outputCanvas.toBlob((b) => {
           if (b) resolve(b);
@@ -360,7 +404,6 @@ export default function Editor({ isPublicView }: EditorProps) {
         }, 'image/png');
       });
 
-      // Write to system clipboard — requires HTTPS or localhost
       await navigator.clipboard.write([
         new ClipboardItem({ 'image/png': blob }),
       ]);
@@ -370,53 +413,64 @@ export default function Editor({ isPublicView }: EditorProps) {
     }
   }, [showToast]);
 
-  // Refresh layer list from canvas
-  // Auto-name counters
+  // Refresh layer list from scene
   const nameCounters = useRef<Record<string, number>>({});
 
-  function autoName(obj: any, i: number): string {
-    if (obj.name) return obj.name;
-    const type = obj.type || 'object';
+  function autoName(item: SceneItem, i: number): string {
+    if (item.data.name) return item.data.name;
+    const type = item.data.type;
     if (type === 'image') {
       nameCounters.current.image = (nameCounters.current.image || 0) + 1;
       return `Image ${nameCounters.current.image}`;
     }
-    if (type === 'i-text') return (obj.text || 'Text').slice(0, 20);
-    if (type === 'path') {
-      nameCounters.current.path = (nameCounters.current.path || 0) + 1;
-      return `Drawing ${nameCounters.current.path}`;
+    if (type === 'text') {
+      const textData = item.data as any;
+      return (textData.text || 'Text').slice(0, 20);
     }
-    if (type === 'group') return `Group (${obj._objects?.length || 0})`;
+    if (type === 'group') {
+      const groupData = item.data as GroupObject;
+      return `Group (${groupData.children?.length || 0})`;
+    }
     return `${type} ${i + 1}`;
   }
 
-  function buildLayerItem(obj: any, i: number): any {
-    const id = obj.id || `layer-${i}`;
-    const isGroup = obj.type === 'group';
+  function buildLayerItem(item: SceneItem, i: number): any {
+    const isGroup = item.data.type === 'group';
     let children: any[] | undefined;
-    if (isGroup && obj._objects) {
-      children = obj._objects.map((child: any, ci: number) => buildLayerItem(child, ci));
+    if (isGroup) {
+      const groupData = item.data as GroupObject;
+      const scene = canvasRef.current?.getScene();
+      if (scene && groupData.children) {
+        children = groupData.children.map((childId, ci) => {
+          const childItem = scene.getById(childId);
+          if (childItem) return buildLayerItem(childItem, ci);
+          return { id: childId, name: `Missing ${childId.slice(0, 6)}`, type: 'unknown', visible: true, locked: false, isGroup: false };
+        });
+      }
     }
     return {
-      id,
-      name: autoName(obj, i),
-      type: obj.type || 'object',
-      visible: obj.visible !== false,
-      locked: !obj.selectable,
+      id: item.id,
+      name: autoName(item, i),
+      type: item.data.type,
+      visible: item.data.visible,
+      locked: item.data.locked,
       isGroup,
       children,
     };
   }
 
   const refreshLayers = useCallback(() => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
+    const scene = canvasRef.current?.getScene();
+    if (!scene) return;
     nameCounters.current = {};
-    const objects = canvas.getObjects();
-    const layers = objects.map((obj: any, i: number) => buildLayerItem(obj, i));
+    const items = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
+    const layers = items.map((item, i) => buildLayerItem(item, i));
     setLayerList(layers);
-    const activeIds = canvas.getActiveObjects().map((o: any) => o.id).filter(Boolean);
-    setSelectedLayerIds(activeIds);
+
+    const selection = selectionRef.current;
+    if (selection) {
+      setSelectedLayerIds(Array.from(selection.selectedIds));
+    }
   }, []);
 
   // Update layers whenever canvas changes
@@ -429,36 +483,85 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   // Group selected objects
   const handleGroup = useCallback(() => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
-    const active = canvas.getActiveObjects();
-    if (active.length < 2) return;
-    canvas.discardActiveObject();
-    const group = new Group(active, {});
-    (group as any).id = crypto.randomUUID();
-    active.forEach((obj) => canvas.remove(obj));
-    canvas.add(group);
-    canvas.setActiveObject(group);
-    canvas.requestRenderAll();
+    const scene = canvasRef.current?.getScene();
+    const selection = selectionRef.current;
+    if (!scene || !selection) return;
+    const selected = selection.getSelectedItems();
+    if (selected.length < 2) return;
+
+    // Create a group item containing the selected items' IDs
+    const groupData: GroupObject = {
+      id: crypto.randomUUID(),
+      type: 'group',
+      x: Math.min(...selected.map((s) => s.data.x)),
+      y: Math.min(...selected.map((s) => s.data.y)),
+      w: 0,
+      h: 0,
+      sx: 1,
+      sy: 1,
+      angle: 0,
+      z: scene.nextZ(),
+      opacity: 1,
+      locked: false,
+      name: '',
+      visible: true,
+      children: selected.map((s) => s.id),
+    };
+
+    // Create the group container and reparent children
+    scene._createItem(groupData, false);
+    const groupItem = scene.getById(groupData.id);
+    if (groupItem) {
+      for (const child of selected) {
+        // Reparent display object into group container
+        child.displayObject.parent?.removeChild(child.displayObject);
+        groupItem.displayObject.addChild(child.displayObject);
+        // Adjust child position relative to group
+        child.displayObject.position.set(
+          child.data.x - groupData.x,
+          child.data.y - groupData.y,
+        );
+      }
+    }
+
+    selection.clear();
+    if (groupItem) selection.selectOnly(groupItem.id);
+    scene._applyZOrder();
     onCanvasChange();
     refreshLayers();
   }, [onCanvasChange, refreshLayers]);
 
   // Ungroup selected group
   const handleUngroup = useCallback(() => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
-    const active = canvas.getActiveObject();
-    if (!active || active.type !== 'group') return;
-    const group = active as Group;
-    const items = group.removeAll();
-    canvas.remove(group);
-    items.forEach((obj: any) => {
-      obj.id = obj.id || crypto.randomUUID();
-      canvas.add(obj);
-    });
-    canvas.discardActiveObject();
-    canvas.requestRenderAll();
+    const scene = canvasRef.current?.getScene();
+    const selection = selectionRef.current;
+    if (!scene || !selection) return;
+    const selected = selection.getSelectedItems();
+    if (selected.length !== 1) return;
+    const groupItem = selected[0];
+    if (groupItem.data.type !== 'group') return;
+
+    const groupData = groupItem.data as GroupObject;
+    const viewport = canvasRef.current?.getViewport();
+    if (!viewport) return;
+
+    // Reparent children back to viewport
+    for (const childId of groupData.children) {
+      const childItem = scene.getById(childId);
+      if (childItem) {
+        // Convert position back to world space
+        childItem.data.x += groupData.x;
+        childItem.data.y += groupData.y;
+        childItem.displayObject.parent?.removeChild(childItem.displayObject);
+        viewport.addChild(childItem.displayObject);
+        childItem.displayObject.position.set(childItem.data.x, childItem.data.y);
+      }
+    }
+
+    // Remove the group item
+    scene.removeItem(groupItem.id, false);
+    selection.clear();
+    scene._applyZOrder();
     onCanvasChange();
     refreshLayers();
   }, [onCanvasChange, refreshLayers]);
@@ -470,115 +573,141 @@ export default function Editor({ isPublicView }: EditorProps) {
   }, []);
 
   const contextMenuItems = useCallback(() => {
-    const canvas = canvasRef.current?.getCanvas();
-    const active = canvas ? canvas.getActiveObjects() : [];
-    const hasSel = active.length > 0;
-    const multiSel = active.length >= 2;
-    const run = (fn: (objs: FabricObject[]) => void) => {
-      if (!canvas) return;
-      const { objects, restore } = ops.breakSelection(canvas);
-      fn(objects);
-      restore();
-      canvas.requestRenderAll(); onCanvasChange();
-    };
+    const scene = canvasRef.current?.getScene();
+    const selection = selectionRef.current;
+    const selected = selection ? selection.getSelectedItems() : [];
+    const hasSel = selected.length > 0;
+    const multiSel = selected.length >= 2;
+
     return [
       { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => {
-        if (!canvas) return;
-        if (hasSel) { clipboardRef.current = [...active]; writeCanvasToClipboard(active); }
+        if (hasSel) { clipboardRef.current = [...selected]; writeCanvasToClipboard(selected); }
         else writeCanvasToClipboard();
       } },
       { label: 'Cut', shortcut: 'Ctrl+X', onClick: () => {
-        if (!canvas || !hasSel) return;
-        clipboardRef.current = [...active];
-        active.forEach((o) => canvas.remove(o));
-        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+        if (!scene || !hasSel || !selection) return;
+        clipboardRef.current = [...selected];
+        for (const item of selected) scene.removeItem(item.id, true);
+        selection.clear();
+        onCanvasChange();
       }, disabled: !hasSel },
       { label: 'Paste', shortcut: 'Ctrl+V', onClick: async () => {
-        if (!canvas || clipboardRef.current.length === 0) return;
-        for (const o of clipboardRef.current) {
-          try { const c = await cloneFabricObject(o, 20, 20); canvas.add(c); } catch {}
+        if (!scene || clipboardRef.current.length === 0) return;
+        for (const original of clipboardRef.current) {
+          const newData = {
+            ...original.data,
+            id: crypto.randomUUID(),
+            x: original.data.x + 20,
+            y: original.data.y + 20,
+            z: scene.nextZ(),
+          };
+          await scene._createItem(newData, true);
         }
-        canvas.requestRenderAll(); onCanvasChange();
+        scene._applyZOrder();
+        onCanvasChange();
       }, disabled: clipboardRef.current.length === 0 },
       { label: 'Duplicate', shortcut: 'Ctrl+D', onClick: async () => {
-        if (!canvas || !hasSel) return;
-        for (const o of active) {
-          try { const c = await cloneFabricObject(o, 20, 20); canvas.add(c); } catch {}
+        if (!scene || !hasSel) return;
+        for (const original of selected) {
+          const newData = {
+            ...original.data,
+            id: crypto.randomUUID(),
+            x: original.data.x + 20,
+            y: original.data.y + 20,
+            z: scene.nextZ(),
+          };
+          await scene._createItem(newData, true);
         }
-        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+        if (selection) selection.clear();
+        scene._applyZOrder();
+        onCanvasChange();
       }, disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Alignment —
-      { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => run((o) => ops.alignLeft(o)), disabled: !multiSel },
-      { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => run((o) => ops.alignRight(o)), disabled: !multiSel },
-      { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => run((o) => ops.alignTop(o)), disabled: !multiSel },
-      { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => run((o) => ops.alignBottom(o)), disabled: !multiSel },
-      { label: 'Distribute H', shortcut: '', onClick: () => run((o) => ops.distributeHorizontal(o)), disabled: active.length < 3 },
-      { label: 'Distribute V', shortcut: '', onClick: () => run((o) => ops.distributeVertical(o)), disabled: active.length < 3 },
+      // -- Alignment --
+      { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => { ops.alignLeft(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => { ops.alignRight(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => { ops.alignTop(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => { ops.alignBottom(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); onCanvasChange(); }, disabled: selected.length < 3 },
+      { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); onCanvasChange(); }, disabled: selected.length < 3 },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Layer ordering —
+      // -- Layer ordering --
       { label: 'Bring Forward', shortcut: ']', onClick: () => {
-        if (!canvas) return;
-        active.forEach((o) => (canvas as any).bringObjectForward(o));
-        canvas.requestRenderAll(); onCanvasChange();
+        if (!scene) return;
+        const all = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
+        const selectedIds = new Set(selected.map((s) => s.id));
+        for (let i = all.length - 2; i >= 0; i--) {
+          if (selectedIds.has(all[i].id) && !selectedIds.has(all[i + 1].id)) {
+            const tmp = all[i].data.z;
+            all[i].data.z = all[i + 1].data.z;
+            all[i + 1].data.z = tmp;
+          }
+        }
+        scene._applyZOrder();
+        onCanvasChange();
       }, disabled: !hasSel },
       { label: 'Send Backward', shortcut: '[', onClick: () => {
-        if (!canvas) return;
-        active.forEach((o) => (canvas as any).sendObjectBackwards(o));
-        canvas.requestRenderAll(); onCanvasChange();
+        if (!scene) return;
+        const all = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
+        const selectedIds = new Set(selected.map((s) => s.id));
+        for (let i = 1; i < all.length; i++) {
+          if (selectedIds.has(all[i].id) && !selectedIds.has(all[i - 1].id)) {
+            const tmp = all[i].data.z;
+            all[i].data.z = all[i - 1].data.z;
+            all[i - 1].data.z = tmp;
+          }
+        }
+        scene._applyZOrder();
+        onCanvasChange();
       }, disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Group —
+      // -- Group --
       { label: 'Group', shortcut: 'Ctrl+G', onClick: handleGroup, disabled: !multiSel },
       { label: 'Ungroup', shortcut: 'Ctrl+Shift+G', onClick: handleUngroup,
-        disabled: !canvas || canvas.getActiveObject()?.type !== 'group' },
+        disabled: selected.length !== 1 || selected[0]?.data.type !== 'group' },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Arrangement —
-      { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => run((o) => ops.arrangeOptimal(o)), disabled: !multiSel },
-      { label: 'Arrange Grid', shortcut: '', onClick: () => run((o) => ops.arrangeGrid(o)), disabled: !multiSel },
-      { label: 'Arrange Row', shortcut: '', onClick: () => run((o) => ops.arrangeRow(o)), disabled: !multiSel },
-      { label: 'Arrange Column', shortcut: '', onClick: () => run((o) => ops.arrangeColumn(o)), disabled: !multiSel },
-      { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => run((o) => ops.stackObjects(o)), disabled: !multiSel },
+      // -- Arrangement --
+      { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { ops.arrangeOptimal(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Arrange Grid', shortcut: '', onClick: () => { ops.arrangeGrid(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Arrange Row', shortcut: '', onClick: () => { ops.arrangeRow(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Arrange Column', shortcut: '', onClick: () => { ops.arrangeColumn(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { ops.stackObjects(selected); onCanvasChange(); }, disabled: !multiSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Normalize —
-      { label: 'Normalize Size', shortcut: '', onClick: () => run((o) => ops.normalizeSize(o)), disabled: !multiSel },
-      { label: 'Normalize Width', shortcut: '', onClick: () => run((o) => ops.normalizeWidth(o)), disabled: !multiSel },
-      { label: 'Normalize Height', shortcut: '', onClick: () => run((o) => ops.normalizeHeight(o)), disabled: !multiSel },
+      // -- Normalize --
+      { label: 'Normalize Size', shortcut: '', onClick: () => { ops.normalizeSize(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Normalize Width', shortcut: '', onClick: () => { ops.normalizeWidth(selected); onCanvasChange(); }, disabled: !multiSel },
+      { label: 'Normalize Height', shortcut: '', onClick: () => { ops.normalizeHeight(selected); onCanvasChange(); }, disabled: !multiSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // — Image —
-      { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => run((o) => ops.flipHorizontal(o)), disabled: !hasSel },
-      { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => run((o) => ops.flipVertical(o)), disabled: !hasSel },
-      { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => run((o) => ops.resetTransform(o)), disabled: !hasSel },
+      // -- Image --
+      { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); onCanvasChange(); }, disabled: !hasSel },
+      { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); onCanvasChange(); }, disabled: !hasSel },
+      { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); onCanvasChange(); }, disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
       { label: 'Select All', shortcut: 'Ctrl+A', onClick: () => {
-        if (!canvas) return;
-        canvas.discardActiveObject();
-        const fabricNs = (window as any).fabric;
-        if (fabricNs?.ActiveSelection) {
-          const sel = new fabricNs.ActiveSelection(canvas.getObjects(), { canvas });
-          canvas.setActiveObject(sel);
-        }
-        canvas.requestRenderAll();
+        if (selection) selection.selectAll();
       } },
       { label: 'Fit All', shortcut: 'Ctrl+0', onClick: () => canvasRef.current?.fitAll() },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
       { label: 'Delete', shortcut: 'Del', onClick: () => {
-        if (!canvas) return;
-        active.forEach((o) => canvas.remove(o));
-        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+        if (!scene || !selection) return;
+        for (const item of selected) scene.removeItem(item.id, true);
+        selection.clear();
+        onCanvasChange();
       }, disabled: !hasSel, danger: true },
     ];
-  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, cloneFabricObject]);
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup]);
 
-  // Keyboard shortcuts — registry-based approach
+  // Keyboard shortcuts -- registry-based approach
   useEffect(() => {
     async function onKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      const canvas = canvasRef.current?.getCanvas();
-      if (!canvas) return;
+      const scene = canvasRef.current?.getScene();
+      const selection = selectionRef.current;
+      const viewport = canvasRef.current?.getViewport();
+      if (!scene || !selection || !viewport) return;
 
-      // Tool shortcuts (bare keys 1-5, v/h/p/t/e — no modifiers)
+      // Tool shortcuts (bare keys 1-5, v/h/p/t/e -- no modifiers)
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         const tool = toolShortcuts[e.key.toLowerCase()];
         if (tool) {
@@ -587,24 +716,23 @@ export default function Editor({ isPublicView }: EditorProps) {
         }
       }
 
-      // Special: Ctrl+V paste — if internal clipboard is empty, let browser/setupPaste handle it
+      // Special: Ctrl+V paste -- if internal clipboard is empty, let browser/setupPaste handle it
       if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
         if (clipboardRef.current.length === 0) return;
       }
 
       // Build context for shortcut handlers
       const ctx: ShortcutContext = {
-        canvas,
-        getActiveObjects: () => canvas.getActiveObjects(),
-        getActiveObject: () => canvas.getActiveObject() || null,
+        scene,
+        selection,
+        history: undoRef.current!,
+        viewport,
+        onChange: onCanvasChange,
         clipboardRef,
-        cloneFabricObject,
         writeCanvasToClipboard,
-        onCanvasChange,
         showToast,
         fitAll: () => canvasRef.current?.fitAll(),
         setActiveTool,
-        undoRef,
         setCanUndo,
         setCanRedo,
         refreshLayers,
@@ -619,7 +747,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         if (!matchesShortcut(e, def)) continue;
 
         // Check selection requirements
-        const activeCount = canvas.getActiveObjects().length;
+        const activeCount = selection.selectedIds.size;
         if (def.needsSelection && activeCount === 0) continue;
         if (def.minSelection && activeCount < def.minSelection) continue;
 
@@ -627,21 +755,21 @@ export default function Editor({ isPublicView }: EditorProps) {
         await def.handler(ctx);
 
         // Update zoom display after any action
-        setZoom(canvas.getZoom());
+        setZoom(canvasRef.current?.getZoom() ?? 1);
         return;
       }
     }
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCanvasChange, writeCanvasToClipboard, handleGroup, handleUngroup, cloneFabricObject, showToast, refreshLayers]);
+  }, [onCanvasChange, writeCanvasToClipboard, handleGroup, handleUngroup, showToast, refreshLayers]);
 
   // Save on page unload
   useEffect(() => {
     function onBeforeUnload() {
-      const canvas = canvasRef.current?.getCanvas();
-      if (!canvas || !resolvedBoardId) return;
-      const state = JSON.stringify((canvas as any).toJSON(['id', 'crossOrigin']));
+      const scene = canvasRef.current?.getScene();
+      if (!scene || !resolvedBoardId) return;
+      const state = JSON.stringify(scene.serialize());
       const blob = new Blob([JSON.stringify({ canvas_state: state })], { type: 'application/json' });
       navigator.sendBeacon(`/api/boards/${resolvedBoardId}/save`, blob);
     }
@@ -751,21 +879,17 @@ export default function Editor({ isPublicView }: EditorProps) {
           setCanRedo(undoRef.current?.canRedo() ?? false);
         }}
         onZoomIn={() => {
-          const canvas = canvasRef.current?.getCanvas();
-          if (!canvas) return;
-          const z = Math.min(canvas.getZoom() * 1.2, 5);
-          const center = canvas.getCenterPoint();
-          canvas.zoomToPoint(center, z);
-          canvas.requestRenderAll();
+          const vp = canvasRef.current?.getViewport();
+          if (!vp) return;
+          const z = Math.min(vp.scale.x * 1.2, 5);
+          canvasRef.current?.setZoom(z);
           setZoom(z);
         }}
         onZoomOut={() => {
-          const canvas = canvasRef.current?.getCanvas();
-          if (!canvas) return;
-          const z = Math.max(canvas.getZoom() / 1.2, 0.1);
-          const center = canvas.getCenterPoint();
-          canvas.zoomToPoint(center, z);
-          canvas.requestRenderAll();
+          const vp = canvasRef.current?.getViewport();
+          if (!vp) return;
+          const z = Math.max(vp.scale.x / 1.2, 0.1);
+          canvasRef.current?.setZoom(z);
           setZoom(z);
         }}
         onlineUsers={onlineUsers}
@@ -777,7 +901,7 @@ export default function Editor({ isPublicView }: EditorProps) {
 
       {/* Canvas */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onContextMenu={handleContextMenu}>
-        <FabricCanvas
+        <PixiCanvas
           ref={canvasRef}
           canvasState={canvasState}
           currentTool={activeTool}
@@ -809,7 +933,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         )}
 
         {/* Empty canvas guide */}
-        {objectCount === 0 && !canvasState?.objects?.length && (
+        {objectCount === 0 && (
           <div style={{
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             pointerEvents: 'none', textAlign: 'center', color: '#555', userSelect: 'none',
@@ -838,74 +962,75 @@ export default function Editor({ isPublicView }: EditorProps) {
             layers={layerList}
             selectedIds={selectedLayerIds}
             onSelect={(id) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const obj = canvas.getObjects().find((o: any) => o.id === id);
-              if (obj) {
-                canvas.discardActiveObject();
-                canvas.setActiveObject(obj);
-                canvas.requestRenderAll();
+              const selection = selectionRef.current;
+              if (selection) {
+                selection.selectOnly(id);
               }
             }}
             onToggleVisible={(id) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const obj = canvas.getObjects().find((o: any) => o.id === id);
-              if (obj) {
-                obj.set('visible', !obj.visible);
-                canvas.requestRenderAll();
+              const scene = canvasRef.current?.getScene();
+              if (!scene) return;
+              const item = scene.getById(id);
+              if (item) {
+                item.data.visible = !item.data.visible;
+                item.displayObject.visible = item.data.visible;
                 onCanvasChange();
                 refreshLayers();
               }
             }}
             onToggleLock={(id) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const obj = canvas.getObjects().find((o: any) => o.id === id);
-              if (obj) {
-                obj.set({ selectable: !obj.selectable, evented: !obj.evented } as any);
-                canvas.requestRenderAll();
+              const scene = canvasRef.current?.getScene();
+              if (!scene) return;
+              const item = scene.getById(id);
+              if (item) {
+                item.data.locked = !item.data.locked;
+                item.displayObject.eventMode = item.data.locked ? 'none' : 'static';
                 refreshLayers();
               }
             }}
             onReorder={(from, to) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const objects = canvas.getObjects();
-              if (from < 0 || from >= objects.length || to < 0 || to >= objects.length) return;
-              const obj = objects[from];
-              canvas.remove(obj);
-              const insertAt = to > from ? to : to;
-              canvas.insertAt(insertAt, obj);
-              canvas.requestRenderAll();
+              const scene = canvasRef.current?.getScene();
+              if (!scene) return;
+              const items = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
+              if (from < 0 || from >= items.length || to < 0 || to >= items.length) return;
+              // Swap z values
+              const tmp = items[from].data.z;
+              items[from].data.z = items[to].data.z;
+              items[to].data.z = tmp;
+              scene._applyZOrder();
               onCanvasChange();
               refreshLayers();
             }}
             onDelete={(id) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const obj = canvas.getObjects().find((o: any) => o.id === id);
-              if (obj) {
-                canvas.remove(obj);
-                canvas.discardActiveObject();
-                canvas.requestRenderAll();
-                onCanvasChange();
-                refreshLayers();
-              }
+              const scene = canvasRef.current?.getScene();
+              const selection = selectionRef.current;
+              if (!scene) return;
+              scene.removeItem(id, true);
+              if (selection) selection.clear();
+              onCanvasChange();
+              refreshLayers();
             }}
             onRename={(id, name) => {
-              const canvas = canvasRef.current?.getCanvas();
-              if (!canvas) return;
-              const obj = canvas.getObjects().find((o: any) => o.id === id);
-              if (obj) {
-                (obj as any).name = name;
+              const scene = canvasRef.current?.getScene();
+              if (!scene) return;
+              const item = scene.getById(id);
+              if (item) {
+                item.data.name = name;
                 refreshLayers();
               }
             }}
             onGroup={handleGroup}
             onUngroup={handleUngroup}
-            hasSelection={canvasRef.current?.getCanvas()?.getActiveObjects()?.length! > 1}
-            hasGroupSelection={canvasRef.current?.getCanvas()?.getActiveObject()?.type === 'group'}
+            hasSelection={(selectionRef.current?.selectedIds.size ?? 0) > 1}
+            hasGroupSelection={(() => {
+              const sel = selectionRef.current;
+              if (!sel || sel.selectedIds.size !== 1) return false;
+              const scene = canvasRef.current?.getScene();
+              if (!scene) return false;
+              const id = Array.from(sel.selectedIds)[0];
+              const item = scene.getById(id);
+              return item?.data.type === 'group';
+            })()}
           />
         )}
 

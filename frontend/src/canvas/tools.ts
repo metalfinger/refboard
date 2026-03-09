@@ -1,4 +1,16 @@
-import { Canvas, PencilBrush, IText, FabricObject } from 'fabric';
+/**
+ * Tools — PixiJS version.
+ *
+ * SELECT/PAN are handled by the viewport (pixi-viewport) and SelectionManager.
+ * PEN/TEXT/ERASER need PixiJS implementations.
+ * For now, only SELECT and PAN are fully functional; PEN/TEXT/ERASER are stubs
+ * that will be implemented when drawing support is added.
+ */
+
+import type { Viewport } from 'pixi-viewport';
+import type { SceneManager } from './SceneManager';
+import type { SelectionManager } from './SelectionManager';
+import { Text, TextStyle } from 'pixi.js';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -22,99 +34,103 @@ const defaultOptions: ToolOptions = {
 
 type CleanupFn = (() => void) | null;
 
+export interface ToolContext {
+  viewport: Viewport;
+  scene: SceneManager;
+  selection: SelectionManager;
+  container: HTMLElement;
+  onChange: () => void;
+}
+
 export function activateTool(
-  canvas: Canvas,
+  ctx: ToolContext,
   tool: ToolType,
   options: ToolOptions = {}
 ): CleanupFn {
   const opts = { ...defaultOptions, ...options };
+  const { viewport, scene, selection, container } = ctx;
 
-  // Reset common state
-  canvas.isDrawingMode = false;
-  canvas.selection = false;
-  canvas.defaultCursor = 'default';
-  canvas.hoverCursor = 'default';
-  canvas.forEachObject((obj: FabricObject) => {
-    obj.selectable = false;
-    obj.evented = false;
-  });
+  // Reset cursor
+  container.style.cursor = '';
 
   switch (tool) {
     case ToolType.SELECT: {
-      canvas.selection = true;
-      canvas.defaultCursor = 'default';
-      canvas.hoverCursor = 'move';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = true;
-        obj.evented = true;
-      });
+      container.style.cursor = 'default';
+      // SelectionManager handles click/rubber-band selection
       return null;
     }
 
     case ToolType.PAN: {
-      canvas.defaultCursor = 'grab';
-      canvas.hoverCursor = 'grab';
-      // Pan is handled by FabricCanvas component directly
-      return null;
-    }
-
-    case ToolType.PEN: {
-      canvas.isDrawingMode = true;
-      const brush = new PencilBrush(canvas);
-      brush.color = opts.color!;
-      brush.width = opts.strokeWidth!;
-      canvas.freeDrawingBrush = brush;
+      container.style.cursor = 'grab';
+      // Space+drag is handled by PixiCanvas; this just sets cursor
       return null;
     }
 
     case ToolType.TEXT: {
-      canvas.defaultCursor = 'text';
-      canvas.hoverCursor = 'text';
+      container.style.cursor = 'text';
 
-      const handler = (e: any) => {
-        const pointer = canvas.getScenePoint(e.e);
-        const text = new IText('Type here', {
-          left: pointer.x,
-          top: pointer.y,
+      const onClick = (e: PointerEvent) => {
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+        const textData = {
+          id: crypto.randomUUID(),
+          type: 'text' as const,
+          x: world.x,
+          y: world.y,
+          w: 200,
+          h: 30,
+          sx: 1,
+          sy: 1,
+          angle: 0,
+          z: scene.nextZ(),
+          opacity: 1,
+          locked: false,
+          name: '',
+          visible: true,
+          text: 'Type here',
           fontSize: opts.fontSize!,
           fill: opts.color!,
           fontFamily: 'sans-serif',
-          editable: true,
-        });
-        canvas.add(text);
-        canvas.setActiveObject(text);
-        text.enterEditing();
-        text.selectAll();
+        };
+
+        scene._createItem(textData, true);
+        scene._applyZOrder();
+        ctx.onChange();
+
         // Remove handler after placing text
-        canvas.off('mouse:down', handler);
+        container.removeEventListener('pointerdown', onClick);
       };
 
-      canvas.on('mouse:down', handler);
+      container.addEventListener('pointerdown', onClick);
       return () => {
-        canvas.off('mouse:down', handler);
+        container.removeEventListener('pointerdown', onClick);
       };
     }
 
     case ToolType.ERASER: {
-      canvas.defaultCursor = 'crosshair';
-      canvas.hoverCursor = 'crosshair';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = true;
-      });
+      container.style.cursor = 'crosshair';
 
-      const handler = (e: any) => {
-        const target = e.target;
-        if (target) {
-          canvas.remove(target);
-          canvas.requestRenderAll();
+      const onClick = (e: PointerEvent) => {
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const hit = selection._hitTest(world.x, world.y);
+        if (hit) {
+          scene.removeItem(hit.id, true);
+          ctx.onChange();
         }
       };
 
-      canvas.on('mouse:down', handler);
+      container.addEventListener('pointerdown', onClick);
       return () => {
-        canvas.off('mouse:down', handler);
+        container.removeEventListener('pointerdown', onClick);
       };
+    }
+
+    case ToolType.PEN: {
+      container.style.cursor = 'crosshair';
+      // Drawing mode stub — will be implemented later
+      return null;
     }
 
     default:
