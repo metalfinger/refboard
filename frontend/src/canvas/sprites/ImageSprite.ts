@@ -1,25 +1,24 @@
-import { Sprite, Texture, Graphics } from "pixi.js";
-import { DropShadowFilter } from "pixi-filters";
-import { TextureManager, LODTier } from "../TextureManager";
+import { Container, Sprite, Texture, Graphics } from "pixi.js";
+import { TextureManager } from "../TextureManager";
 
 /**
- * A Sprite subclass that manages LOD tier switching and lazy loading.
- * Shows a placeholder shimmer rect until the first texture tier loads,
- * then swaps textures as zoom level changes.
+ * A Container holding a shadow graphic + sprite with lazy texture loading.
+ * Uses a lightweight Graphics shadow instead of DropShadowFilter (GPU-heavy).
  */
 // Shadow defaults (resting state)
-const SHADOW_REST = { offsetX: 3, offsetY: 3, blur: 4, alpha: 0.25 };
+const SHADOW_REST = { offsetX: 3, offsetY: 3, alpha: 0.2 };
 // Shadow lifted state (during drag)
-const SHADOW_LIFT = { offsetX: 6, offsetY: 8, blur: 8, alpha: 0.35 };
+const SHADOW_LIFT = { offsetX: 6, offsetY: 8, alpha: 0.3 };
 
-export class ImageSprite extends Sprite {
+export class ImageSprite extends Container {
   readonly assetKey: string;
-  readonly shadow: DropShadowFilter;
 
   private textures: TextureManager;
-  private currentTier: LODTier | null = null;
+  private loaded = false;
   private loading = false;
   private placeholder: Graphics | null = null;
+  private _sprite: Sprite;
+  private _shadow: Graphics;
   private _naturalWidth: number;
   private _naturalHeight: number;
 
@@ -29,24 +28,23 @@ export class ImageSprite extends Sprite {
     h: number,
     textures: TextureManager,
   ) {
-    super(Texture.EMPTY);
+    super();
 
     this.assetKey = assetKey;
     this.textures = textures;
     this._naturalWidth = w;
     this._naturalHeight = h;
 
-    this.width = w;
-    this.height = h;
+    // Shadow: simple dark rect behind the sprite (cheap, no GPU filter)
+    this._shadow = new Graphics();
+    this._drawShadow(SHADOW_REST);
+    this.addChild(this._shadow);
 
-    // Drop shadow for photos-on-a-desk feel
-    this.shadow = new DropShadowFilter({
-      offset: { x: SHADOW_REST.offsetX, y: SHADOW_REST.offsetY },
-      blur: SHADOW_REST.blur,
-      alpha: SHADOW_REST.alpha,
-      color: 0x000000,
-    });
-    this.filters = [this.shadow];
+    // Main sprite
+    this._sprite = new Sprite(Texture.EMPTY);
+    this._sprite.width = w;
+    this._sprite.height = h;
+    this.addChild(this._sprite);
 
     // Create placeholder: dark rect shown until first texture loads
     const placeholder = new Graphics();
@@ -54,40 +52,39 @@ export class ImageSprite extends Sprite {
     this.placeholder = placeholder;
     this.addChild(placeholder);
 
-    // Immediately start loading the thumbnail tier
-    this.loadTier("thumb");
+    // Immediately start loading the full texture
+    this.loadTexture();
+  }
+
+  private _drawShadow(cfg: { offsetX: number; offsetY: number; alpha: number }): void {
+    this._shadow.clear();
+    this._shadow.rect(cfg.offsetX, cfg.offsetY, this._naturalWidth, this._naturalHeight);
+    this._shadow.fill({ color: 0x000000, alpha: cfg.alpha });
   }
 
   /** Expand shadow for drag-lift effect. */
   liftShadow(): void {
-    this.shadow.offset = { x: SHADOW_LIFT.offsetX, y: SHADOW_LIFT.offsetY };
-    this.shadow.blur = SHADOW_LIFT.blur;
-    this.shadow.alpha = SHADOW_LIFT.alpha;
+    this._drawShadow(SHADOW_LIFT);
   }
 
   /** Restore shadow to resting state. */
   dropShadow(): void {
-    this.shadow.offset = { x: SHADOW_REST.offsetX, y: SHADOW_REST.offsetY };
-    this.shadow.blur = SHADOW_REST.blur;
-    this.shadow.alpha = SHADOW_REST.alpha;
+    this._drawShadow(SHADOW_REST);
   }
 
-  /**
-   * Load a specific LOD tier texture for this sprite.
-   * Skips if already at the requested tier or currently loading.
-   */
-  async loadTier(tier: LODTier): Promise<void> {
-    if (this.currentTier === tier || this.loading) return;
+  /** Load the full-res texture. GPU handles scaling natively. */
+  async loadTexture(): Promise<void> {
+    if (this.loaded || this.loading) return;
 
     this.loading = true;
     try {
-      const tex = await this.textures.load(this.assetKey, tier);
-      this.texture = tex;
-      this.width = this._naturalWidth;
-      this.height = this._naturalHeight;
-      this.currentTier = tier;
+      const tex = await this.textures.load(this.assetKey);
+      this._sprite.texture = tex;
+      this._sprite.width = this._naturalWidth;
+      this._sprite.height = this._naturalHeight;
+      this.loaded = true;
 
-      // Remove placeholder after first successful load
+      // Remove placeholder after successful load
       if (this.placeholder) {
         this.removeChild(this.placeholder);
         this.placeholder.destroy();
@@ -95,29 +92,11 @@ export class ImageSprite extends Sprite {
       }
     } catch (err) {
       console.warn(
-        `[ImageSprite] Failed to load tier "${tier}" for "${this.assetKey}":`,
+        `[ImageSprite] Failed to load "${this.assetKey}":`,
         err,
       );
     } finally {
       this.loading = false;
     }
-  }
-
-  /**
-   * Evaluate the current zoom level and switch LOD tier if needed.
-   */
-  updateLOD(zoom: number): void {
-    const needed = this.textures.tierForZoom(zoom);
-    if (needed !== this.currentTier) {
-      this.loadTier(needed);
-    }
-  }
-
-  /**
-   * Release the current texture (for off-screen sprites to free GPU memory).
-   */
-  unloadTexture(): void {
-    this.texture = Texture.EMPTY;
-    this.currentTier = null;
   }
 }

@@ -6,9 +6,10 @@
  * Each handle is draggable and applies scale/rotation transforms to the items.
  */
 
-import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
+import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
-import type { SceneItem } from './SceneManager';
+import { type SceneItem, getItemWorldBounds } from './SceneManager';
+import type { SnapGuides } from './SnapGuides';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -19,11 +20,8 @@ const BORDER_WIDTH = 1.5;
 const HANDLE_SIZE = 8;
 const HANDLE_FILL = 0xffffff;
 const HANDLE_STROKE = 0x4a90d9;
-const ROTATE_COLOR = 0x55aa55;
-const ROTATE_OFFSET = 25;
-const ROTATE_RADIUS = 5;
 
-type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br' | 'rot';
+type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
 
 const HANDLE_CURSORS: Record<HandleId, string> = {
   tl: 'nwse-resize',
@@ -34,7 +32,6 @@ const HANDLE_CURSORS: Record<HandleId, string> = {
   bc: 'ns-resize',
   ml: 'ew-resize',
   mr: 'ew-resize',
-  rot: 'grab',
 };
 
 // ---------------------------------------------------------------------------
@@ -45,6 +42,7 @@ interface DragState {
   handleId: HandleId;
   startX: number;
   startY: number;
+  origBounds: { x: number; y: number; w: number; h: number };
   origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number }>;
 }
 
@@ -55,11 +53,22 @@ interface DragState {
 export class TransformBox extends Container {
   private _border: Graphics;
   private _handles: Map<HandleId, Graphics> = new Map();
-  private _rotateLine: Graphics;
   private _items: SceneItem[] = [];
   private _bounds = { x: 0, y: 0, w: 0, h: 0 };
   private _drag: DragState | null = null;
   private _viewport: Viewport | null = null;
+  private _onItemTransform: ((item: SceneItem) => void) | null = null;
+  private _snapGuides: SnapGuides | null = null;
+  private _dimLabel!: Text;
+  private _dimLabelBg!: Graphics;
+
+  set onItemTransform(fn: (item: SceneItem) => void) {
+    this._onItemTransform = fn;
+  }
+
+  setSnapGuides(sg: SnapGuides): void {
+    this._snapGuides = sg;
+  }
 
   constructor() {
     super();
@@ -70,12 +79,29 @@ export class TransformBox extends Container {
     this._border = new Graphics();
     this.addChild(this._border);
 
-    // Rotate stem line
-    this._rotateLine = new Graphics();
-    this.addChild(this._rotateLine);
+
+    // Dimension label (shown during resize)
+    this._dimLabel = new Text({
+      text: '',
+      style: new TextStyle({
+        fontSize: 11,
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        fill: '#ffffff',
+        fontWeight: '500',
+      }),
+    });
+    this._dimLabel.visible = false;
+    this._dimLabel.label = '__dim_label';
+
+    this._dimLabelBg = new Graphics();
+    this._dimLabelBg.visible = false;
+    this._dimLabelBg.label = '__dim_label_bg';
+
+    this.addChild(this._dimLabelBg);
+    this.addChild(this._dimLabel);
 
     // Create all handles
-    const ids: HandleId[] = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br', 'rot'];
+    const ids: HandleId[] = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
     for (const id of ids) {
       const handle = new Graphics();
       handle.eventMode = 'static';
@@ -103,23 +129,25 @@ export class TransformBox extends Container {
   update(items: SceneItem[]): void {
     this._items = items;
 
+    // Hide dimension label when not actively dragging
+    if (!this._drag) {
+      this._dimLabel.visible = false;
+      this._dimLabelBg.visible = false;
+    }
+
     if (items.length === 0) {
       this.visible = false;
       return;
     }
 
-    // Compute combined bounding rect in WORLD space using item data
-    // (not getBounds() which returns screen-space and causes offset)
+    // Compute combined bounding rect via canonical getItemWorldBounds()
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
     for (const item of items) {
-      const ix = item.data.x;
-      const iy = item.data.y;
-      const iw = item.data.w * Math.abs(item.data.sx);
-      const ih = item.data.h * Math.abs(item.data.sy);
+      const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
       if (ix < minX) minX = ix;
       if (iy < minY) minY = iy;
       if (ix + iw > maxX) maxX = ix + iw;
@@ -141,12 +169,6 @@ export class TransformBox extends Container {
     this._border.rect(x, y, w, h);
     this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH });
 
-    // Rotate line (from top-center up to rotate handle)
-    this._rotateLine.clear();
-    this._rotateLine.moveTo(x + w / 2, y);
-    this._rotateLine.lineTo(x + w / 2, y - ROTATE_OFFSET);
-    this._rotateLine.stroke({ color: BORDER_COLOR, width: 1 });
-
     // Position handles
     const cx = x + w / 2;
     const cy = y + h / 2;
@@ -160,25 +182,16 @@ export class TransformBox extends Container {
       bl: { px: x, py: y + h },
       bc: { px: cx, py: y + h },
       br: { px: x + w, py: y + h },
-      rot: { px: cx, py: y - ROTATE_OFFSET },
     };
 
     for (const [id, handle] of this._handles) {
       const pos = positions[id];
       handle.clear();
 
-      if (id === 'rot') {
-        // Green circle for rotation
-        handle.circle(0, 0, ROTATE_RADIUS);
-        handle.fill(ROTATE_COLOR);
-        handle.stroke({ color: HANDLE_STROKE, width: 1 });
-      } else {
-        // White square with blue stroke for resize
-        const half = HANDLE_SIZE / 2;
-        handle.rect(-half, -half, HANDLE_SIZE, HANDLE_SIZE);
-        handle.fill(HANDLE_FILL);
-        handle.stroke({ color: HANDLE_STROKE, width: 1 });
-      }
+      const half = HANDLE_SIZE / 2;
+      handle.rect(-half, -half, HANDLE_SIZE, HANDLE_SIZE);
+      handle.fill(HANDLE_FILL);
+      handle.stroke({ color: HANDLE_STROKE, width: 1 });
 
       handle.position.set(pos.px, pos.py);
     }
@@ -204,108 +217,181 @@ export class TransformBox extends Container {
       handleId: id,
       startX: e.global.x,
       startY: e.global.y,
+      origBounds: { ...this._bounds },
       origTransforms,
     };
+
+    // Begin snap session excluding current items
+    const itemIds = new Set(this._items.map((it) => it.id));
+    this._snapGuides?.beginSession(itemIds);
   }
 
   private _onHandleMove(e: FederatedPointerEvent): void {
     if (!this._drag) return;
 
-    // Convert screen-space deltas to world-space by dividing by viewport zoom
-    const zoom = this._viewport?.scale.x ?? 1;
-    const dx = (e.global.x - this._drag.startX) / zoom;
-    const dy = (e.global.y - this._drag.startY) / zoom;
-    const { handleId, origTransforms } = this._drag;
+    // Convert mouse position to world space
+    const world = this._viewport!.toWorld(e.global.x, e.global.y);
+    const { handleId, origBounds: ob, origTransforms } = this._drag;
 
-    // Use bounding box size as reference for scale sensitivity
-    const { w: bw, h: bh } = this._bounds;
-    const refSize = Math.max(bw, bh, 100); // avoid division by tiny numbers
+    // Compute scale factors: new size / original size
+    // Each handle has a fixed edge — the opposite side stays put
+    const MIN = 0.05;
+    let fx = 1; // horizontal scale multiplier
+    let fy = 1; // vertical scale multiplier
+
+    switch (handleId) {
+      // --- Corner handles (proportional) ---
+      case 'br': {
+        // Fixed edge: top-left. New size = mouse - top-left.
+        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
+        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        // Proportional: use average
+        const f = (fx + fy) / 2;
+        fx = f; fy = f;
+        break;
+      }
+      case 'tl': {
+        // Fixed edge: bottom-right
+        const right = ob.x + ob.w;
+        const bottom = ob.y + ob.h;
+        fx = Math.max(MIN, (right - world.x) / ob.w);
+        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        const f = (fx + fy) / 2;
+        fx = f; fy = f;
+        break;
+      }
+      case 'tr': {
+        // Fixed edge: bottom-left
+        const bottom = ob.y + ob.h;
+        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
+        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        const f = (fx + fy) / 2;
+        fx = f; fy = f;
+        break;
+      }
+      case 'bl': {
+        // Fixed edge: top-right
+        const right = ob.x + ob.w;
+        fx = Math.max(MIN, (right - world.x) / ob.w);
+        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        const f = (fx + fy) / 2;
+        fx = f; fy = f;
+        break;
+      }
+      // --- Edge handles (proportional by default, hold Shift for free-form) ---
+      case 'mr': {
+        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
+        if (!e.shiftKey) fy = fx;
+        break;
+      }
+      case 'ml': {
+        const right = ob.x + ob.w;
+        fx = Math.max(MIN, (right - world.x) / ob.w);
+        if (!e.shiftKey) fy = fx;
+        break;
+      }
+      case 'bc': {
+        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        if (!e.shiftKey) fx = fy;
+        break;
+      }
+      case 'tc': {
+        const bottom = ob.y + ob.h;
+        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        if (!e.shiftKey) fx = fy;
+        break;
+      }
+    }
 
     for (const item of this._items) {
       const orig = origTransforms.get(item.id);
       if (!orig) continue;
 
+      // Apply scale factors relative to original
+      item.data.sx = orig.sx * fx;
+      item.data.sy = orig.sy * fy;
+
+      // Reposition to keep fixed edge in place
       switch (handleId) {
-        case 'br': {
-          // Proportional scale — drag distance relative to object size
-          const factor = 1 + (dx + dy) / refSize;
-          const clampedFactor = Math.max(0.05, factor);
-          item.data.sx = orig.sx * clampedFactor;
-          item.data.sy = orig.sy * clampedFactor;
-          break;
-        }
-        case 'mr': {
-          const factor = 1 + dx / (bw || refSize);
-          item.data.sx = orig.sx * Math.max(0.05, factor);
-          break;
-        }
-        case 'bc': {
-          const factor = 1 + dy / (bh || refSize);
-          item.data.sy = orig.sy * Math.max(0.05, factor);
-          break;
-        }
-        case 'tl': {
-          // Proportional scale + reposition (bottom-right stays fixed)
-          const factor = 1 - (dx + dy) / refSize;
-          const clampedFactor = Math.max(0.05, factor);
-          item.data.sx = orig.sx * clampedFactor;
-          item.data.sy = orig.sy * clampedFactor;
-          const dw = (item.data.sx - orig.sx) * item.data.w;
-          const dh = (item.data.sy - orig.sy) * item.data.h;
-          item.data.x = orig.x - dw;
-          item.data.y = orig.y - dh;
-          break;
-        }
-        case 'rot': {
-          // Rotation: 1 world pixel = ~0.3 degrees
-          item.data.angle = orig.angle + dx * 0.3;
-          break;
-        }
-        case 'tr': {
-          const factor = 1 + (dx - dy) / refSize;
-          const clampedFactor = Math.max(0.05, factor);
-          item.data.sx = orig.sx * clampedFactor;
-          item.data.sy = orig.sy * clampedFactor;
-          // Top-right: left edge stays fixed
-          item.data.y = orig.y - (item.data.sy - orig.sy) * item.data.h;
-          break;
-        }
-        case 'bl': {
-          const factor = 1 + (-dx + dy) / refSize;
-          const clampedFactor = Math.max(0.05, factor);
-          item.data.sx = orig.sx * clampedFactor;
-          item.data.sy = orig.sy * clampedFactor;
-          // Bottom-left: right edge stays fixed
-          item.data.x = orig.x - (item.data.sx - orig.sx) * item.data.w;
-          break;
-        }
-        case 'tc': {
-          const factor = 1 - dy / (bh || refSize);
-          item.data.sy = orig.sy * Math.max(0.05, factor);
-          // Top-center: bottom edge stays fixed
+        case 'tl':
+          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
           item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
           break;
-        }
-        case 'ml': {
-          const factor = 1 - dx / (bw || refSize);
-          item.data.sx = orig.sx * Math.max(0.05, factor);
-          // Middle-left: right edge stays fixed
+        case 'tc':
+          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
+          break;
+        case 'tr':
+          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
+          break;
+        case 'ml':
           item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
           break;
-        }
+        case 'bl':
+          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
+          break;
+        // br, mr, bc: top-left is fixed, no reposition needed
       }
 
-      // Apply to display object
       item.displayObject.scale.set(item.data.sx, item.data.sy);
-      item.displayObject.angle = item.data.angle;
       item.displayObject.position.set(item.data.x, item.data.y);
+
+      this._onItemTransform?.(item);
     }
 
-    // Redraw transform box around new bounds
     this.update(this._items);
+
+    // Snap guides during resize
+    if (this._snapGuides && this._viewport) {
+      const snap = this._snapGuides.computeSnap(this._bounds, this._viewport);
+      if (snap.dx !== 0 || snap.dy !== 0) {
+        // Apply snap correction to all items
+        for (const item of this._items) {
+          item.data.x += snap.dx;
+          item.data.y += snap.dy;
+          item.displayObject.position.set(item.data.x, item.data.y);
+          this._onItemTransform?.(item);
+        }
+        this.update(this._items);
+      }
+      this._snapGuides.drawGuides(snap.guides, this._viewport);
+    }
+
+    // Show dimension label
+    const bounds = this._bounds;
+    const zoom = this._viewport?.scale.x ?? 1;
+    const w = Math.round(bounds.w);
+    const h = Math.round(bounds.h);
+    this._dimLabel.text = `${w} \u00d7 ${h}`;
+    this._dimLabel.scale.set(1 / zoom); // Stay fixed screen size
+
+    // Position below bottom-right corner with offset
+    const labelX = bounds.x + bounds.w;
+    const labelY = bounds.y + bounds.h + 12 / zoom;
+    this._dimLabel.anchor.set(1, 0); // right-aligned
+    this._dimLabel.position.set(labelX, labelY);
+
+    // Background pill
+    const pad = 4 / zoom;
+    const textW = this._dimLabel.width;
+    const textH = this._dimLabel.height;
+    this._dimLabelBg.clear();
+    this._dimLabelBg.roundRect(
+      labelX - textW - pad,
+      labelY - pad / 2,
+      textW + pad * 2,
+      textH + pad,
+      3 / zoom,
+    );
+    this._dimLabelBg.fill({ color: 0x1a1a1a, alpha: 0.9 });
+
+    this._dimLabel.visible = true;
+    this._dimLabelBg.visible = true;
   }
 
   private _onHandleUp(): void {
     this._drag = null;
+    this._dimLabel.visible = false;
+    this._dimLabelBg.visible = false;
+    this._snapGuides?.endSession();
   }
 }

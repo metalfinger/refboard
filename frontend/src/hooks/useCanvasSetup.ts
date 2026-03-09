@@ -6,6 +6,8 @@ import { setupSync, SyncHandle } from '../canvas/sync';
 import { setupDragDrop, setupPaste } from '../canvas/image-drop';
 import { UndoManager } from '../canvas/history';
 import { InboxZone } from '../canvas/InboxZone';
+import { LaserPointer } from '../canvas/LaserPointer';
+// PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 
 interface OnlineUser {
@@ -57,6 +59,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
   const dropCleanupRef = useRef<(() => void) | null>(null);
   const pasteCleanupRef = useRef<(() => void) | null>(null);
+  const laserCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
@@ -69,6 +72,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       // Create SelectionManager
       const selection = new SelectionManager(viewport, scene);
       selectionRef.current = selection;
+
+      // Wire snap guides to transform box
+      selection.transformBox.setSnapGuides(selection.snapGuides);
 
       // Wire selection change to update layer panel state
       selection.onSelectionChange = (ids: string[]) => {
@@ -176,6 +182,65 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           cursorTimer = setTimeout(() => { cursorTimer = null; }, 33);
         };
         viewport.on('pointermove', onPointerMove);
+
+        // ---- Laser pointer (hold L key) ----
+        const laserColorHex = userColor(user?.id || '');
+        const laserColorNum = parseInt(laserColorHex.replace('#', ''), 16);
+        const laser = new LaserPointer(viewport, laserColorNum);
+
+        let laserTimer: ReturnType<typeof setTimeout> | null = null;
+        const onLaserMove = (e: any) => {
+          if (!laser.isActive) return;
+          const world = viewport.toWorld(e.global.x, e.global.y);
+          laser.addPoint(world.x, world.y);
+          // Throttle broadcast to ~50ms
+          if (laserTimer) return;
+          socket.volatile.emit('laser:move', {
+            boardId: resolvedBoardId,
+            points: [{ x: world.x, y: world.y }],
+          });
+          laserTimer = setTimeout(() => { laserTimer = null; }, 50);
+        };
+        viewport.on('pointermove', onLaserMove);
+
+        const onKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'l' || e.key === 'L') {
+            if (laser.isActive) return;
+            laser.start();
+          }
+        };
+        const onKeyUp = (e: KeyboardEvent) => {
+          if (e.key === 'l' || e.key === 'L') {
+            laser.stop();
+            socket.emit('laser:stop', { boardId: resolvedBoardId });
+          }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+
+        laserCleanupRef.current = () => {
+          window.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('keyup', onKeyUp);
+          laser.destroy();
+        };
+
+        // Listen for remote laser events
+        socket.on('laser:move', (data: any) => {
+          if (data.boardId !== resolvedBoardId) return;
+          const uid = data.userId;
+          if (!uid) return;
+          const color = parseInt(userColor(uid).replace('#', ''), 16);
+          laser.addRemotePoints(uid, data.points, color);
+        });
+        socket.on('laser:stop', (_data: any) => {
+          // Remote user stopped — points will fade naturally
+        });
+        socket.on('user:left', (data: any) => {
+          const uid = data.userId || data.id;
+          if (uid) {
+            laser.removeRemote(uid);
+          }
+        });
       }
 
       // Setup drag/drop and paste
@@ -208,6 +273,8 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         inboxZoneRef.current = null;
       }
       syncRef.current?.cleanup();
+      laserCleanupRef.current?.();
+      laserCleanupRef.current = null;
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
       disconnectSocket();

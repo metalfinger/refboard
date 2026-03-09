@@ -4,7 +4,7 @@
 
 export interface SceneObject {
   id: string;
-  type: 'image' | 'video' | 'text' | 'group';
+  type: 'image' | 'video' | 'text' | 'group' | 'drawing';
   x: number;
   y: number;
   w: number;
@@ -42,12 +42,22 @@ export interface TextObject extends SceneObject {
   fontFamily: string;
 }
 
+export interface DrawingObject extends SceneObject {
+  type: 'drawing';
+  points: number[];   // flat array: [x0, y0, x1, y1, ...]
+  color: string;
+  strokeWidth: number;
+}
+
 export interface GroupObject extends SceneObject {
   type: 'group';
   children: string[];
+  bgColor?: string;   // frame background color (e.g. '#2a2a3a'), empty/undefined = transparent
+  label?: string;      // frame title label
+  padding?: number;    // inner padding around children (default 12)
 }
 
-export type AnySceneObject = ImageObject | VideoObject | TextObject | GroupObject;
+export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject;
 
 export interface SceneData {
   v: 2;

@@ -350,6 +350,94 @@ export function toggleLocked(objects: SceneItem[]) {
   });
 }
 
+// ─── Nudge ───
+
+export function nudge(objects: SceneItem[], dx: number, dy: number) {
+  objects.forEach((item) => {
+    item.data.x += dx;
+    item.data.y += dy;
+    syncPosition(item);
+  });
+}
+
+// ─── Scale (relative) ───
+
+export function scaleBy(objects: SceneItem[], factor: number) {
+  objects.forEach((item) => {
+    const cx = item.data.x + scaledW(item) / 2;
+    const cy = item.data.y + scaledH(item) / 2;
+    item.data.sx *= factor;
+    item.data.sy *= factor;
+    // Keep center in place
+    item.data.x = cx - scaledW(item) / 2;
+    item.data.y = cy - scaledH(item) / 2;
+    syncTransform(item);
+  });
+}
+
+// ─── Rotate (quick 90° snap) ───
+
+export function rotate90(objects: SceneItem[], clockwise: boolean) {
+  objects.forEach((item) => {
+    item.data.angle = ((item.data.angle + (clockwise ? 90 : -90)) % 360 + 360) % 360;
+    item.displayObject.angle = item.data.angle;
+  });
+}
+
+// ─── Set Opacity ───
+
+export function setOpacity(objects: SceneItem[], opacity: number) {
+  const clamped = Math.max(0, Math.min(1, opacity));
+  objects.forEach((item) => {
+    item.data.opacity = clamped;
+    item.displayObject.alpha = clamped;
+  });
+}
+
+// ─── Align Center ───
+
+export function alignCenterH(objects: SceneItem[]) {
+  if (objects.length < 2) return;
+  const avgCX = objects.reduce((s, item) => s + item.data.x + scaledW(item) / 2, 0) / objects.length;
+  objects.forEach((item) => {
+    item.data.x = avgCX - scaledW(item) / 2;
+    syncPosition(item);
+  });
+}
+
+export function alignCenterV(objects: SceneItem[]) {
+  if (objects.length < 2) return;
+  const avgCY = objects.reduce((s, item) => s + item.data.y + scaledH(item) / 2, 0) / objects.length;
+  objects.forEach((item) => {
+    item.data.y = avgCY - scaledH(item) / 2;
+    syncPosition(item);
+  });
+}
+
+// ─── Equal Spacing ───
+
+export function equalSpacingH(objects: SceneItem[], gap = 20) {
+  if (objects.length < 2) return;
+  const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
+  let x = sorted[0].data.x + scaledW(sorted[0]) + gap;
+  for (let i = 1; i < sorted.length; i++) {
+    sorted[i].data.x = x;
+    syncPosition(sorted[i]);
+    x += scaledW(sorted[i]) + gap;
+  }
+}
+
+export function equalSpacingV(objects: SceneItem[], gap = 20) {
+  if (objects.length < 2) return;
+  const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
+  let y = sorted[0].data.y + scaledH(sorted[0]) + gap;
+  for (let i = 1; i < sorted.length; i++) {
+    sorted[i].data.y = y;
+    syncPosition(sorted[i]);
+    y += scaledH(sorted[i]) + gap;
+  }
+}
+
 // ─── Overlay / Compare ───
 
 export function overlayCompare(objects: SceneItem[]) {

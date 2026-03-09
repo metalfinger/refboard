@@ -26,6 +26,8 @@ interface ToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onlineUsers: OnlineUser[];
+  onUserClick?: (userId: string, displayName: string) => void;
+  followingUserId?: string | null;
   onShareClick?: () => void;
   onToggleLayers?: () => void;
   showLayers?: boolean;
@@ -139,6 +141,8 @@ export default function Toolbar({
   onUndo,
   onRedo,
   onlineUsers,
+  onUserClick,
+  followingUserId,
   onShareClick,
   onToggleLayers,
   showLayers,
@@ -306,11 +310,16 @@ export default function Toolbar({
               background: `linear-gradient(135deg, ${u.color}, ${u.color}dd)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '10px', fontWeight: 700, color: '#fff',
-              border: '2px solid #1a1a1a',
+              border: followingUserId === u.userId ? '2px solid #4a9eff' : '2px solid #1a1a1a',
               marginLeft: i > 0 ? '-6px' : '0',
               zIndex: 5 - i,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            }}>
+              boxShadow: followingUserId === u.userId ? '0 0 6px rgba(74,144,217,0.6)' : '0 1px 3px rgba(0,0,0,0.3)',
+              cursor: 'pointer',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+            }}
+            onClick={() => onUserClick?.(u.userId, u.displayName)}
+            title={`${u.displayName}${followingUserId === u.userId ? ' (following)' : ' — click to follow'}`}
+            >
               {(u.displayName || '?')[0].toUpperCase()}
             </div>
           ))}

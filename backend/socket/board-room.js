@@ -79,6 +79,26 @@ function setupBoardRoom(io, socket) {
     });
   });
 
+  // ---- Incremental element sync (Excalidraw-style) ----
+
+  socket.on('element:update', (data) => {
+    if (!socket.currentBoardId) return;
+    const roomName = getRoomName(socket.currentBoardId);
+    socket.to(roomName).emit('element:update', {
+      ...data,
+      userId: socket.userId,
+    });
+  });
+
+  socket.on('element:remove', (data) => {
+    if (!socket.currentBoardId) return;
+    const roomName = getRoomName(socket.currentBoardId);
+    socket.to(roomName).emit('element:remove', {
+      ...data,
+      userId: socket.userId,
+    });
+  });
+
   // ---- Lightweight transform (during drag/resize/rotate) ----
 
   socket.on('object:transform', (data) => {
@@ -100,6 +120,32 @@ function setupBoardRoom(io, socket) {
       userId: socket.userId,
       displayName: socket.userDisplayName,
     });
+  });
+
+  // ---- Selection presence (broadcast what items a user has selected) ----
+
+  socket.on('selection:update', (data) => {
+    if (!socket.currentBoardId) return;
+    const roomName = getRoomName(socket.currentBoardId);
+    socket.volatile.to(roomName).emit('selection:update', {
+      ...data,
+      userId: socket.userId,
+      displayName: socket.userDisplayName,
+    });
+  });
+
+  // ---- Laser pointer ----
+
+  socket.on('laser:move', (data) => {
+    if (!socket.currentBoardId) return;
+    const roomName = getRoomName(socket.currentBoardId);
+    socket.volatile.to(roomName).emit('laser:move', { ...data, userId: socket.userId });
+  });
+
+  socket.on('laser:stop', (data) => {
+    if (!socket.currentBoardId) return;
+    const roomName = getRoomName(socket.currentBoardId);
+    socket.to(roomName).emit('laser:stop', { ...data, userId: socket.userId });
   });
 
   // ---- Disconnect cleanup ----

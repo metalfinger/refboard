@@ -7,8 +7,9 @@
 
 import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
-import { SceneManager, SceneItem, getItemWorldBounds, isGroupChild } from './SceneManager';
+import { SceneManager, SceneItem, getItemWorldBounds } from './SceneManager';
 import { TransformBox } from './TransformBox';
+import { SnapGuides } from './SnapGuides';
 import { ImageSprite } from './sprites/ImageSprite';
 import { VideoSprite } from './sprites/VideoSprite';
 
@@ -31,6 +32,7 @@ const DRAG_THRESHOLD = 5;        // px in screen space before object drag activa
 export class SelectionManager {
   readonly selectedIds: Set<string> = new Set();
   readonly transformBox: TransformBox;
+  private _snapGuides: SnapGuides;
 
   private _viewport: Viewport;
   private _scene: SceneManager;
@@ -62,6 +64,8 @@ export class SelectionManager {
 
   private _enabled = true;
 
+  get snapGuides(): SnapGuides { return this._snapGuides; }
+
   constructor(viewport: Viewport, scene: SceneManager) {
     this._viewport = viewport;
     this._scene = scene;
@@ -80,6 +84,9 @@ export class SelectionManager {
     this.transformBox = new TransformBox();
     this.transformBox.setViewport(viewport);
     this._overlay.addChild(this.transformBox);
+
+    // Snap guides
+    this._snapGuides = new SnapGuides(scene, this._overlay);
 
     // Bind events on viewport
     viewport.on('pointerdown', this._onPointerDown, this);
@@ -229,17 +236,31 @@ export class SelectionManager {
 
         // Lift shadow + spring scale on all selected image sprites
         this._applyLift();
+
+        // Begin snap guide session
+        this._snapGuides.beginSession(this.selectedIds);
       }
 
       if (this._objectDragging) {
         const currentWorld = this._viewport.toWorld(e.global.x, e.global.y);
-        const ddx = currentWorld.x - this._lastDragWorldX;
-        const ddy = currentWorld.y - this._lastDragWorldY;
+        let ddx = currentWorld.x - this._lastDragWorldX;
+        let ddy = currentWorld.y - this._lastDragWorldY;
         this._lastDragWorldX = currentWorld.x;
         this._lastDragWorldY = currentWorld.y;
 
-        // Move all selected items by delta and broadcast transforms
+        // Compute combined bounds of selected items after applying delta
         const selected = this.getSelectedItems();
+        const prospective = this._getSelectionBounds(selected);
+        prospective.x += ddx;
+        prospective.y += ddy;
+
+        // Snap to alignment guides
+        const snap = this._snapGuides.computeSnap(prospective, this._viewport);
+        ddx += snap.dx;
+        ddy += snap.dy;
+        this._snapGuides.drawGuides(snap.guides, this._viewport);
+
+        // Move all selected items by corrected delta and broadcast transforms
         for (const item of selected) {
           item.displayObject.x += ddx;
           item.displayObject.y += ddy;
@@ -274,6 +295,7 @@ export class SelectionManager {
     if (this._objectDragging) {
       // End object drag — drop shadow + spring scale back
       this._applyDrop();
+      this._snapGuides.endSession();
       this._objectDragging = false;
 
       // Resume viewport drag
@@ -388,6 +410,26 @@ export class SelectionManager {
     }
 
     this._emitChange();
+  }
+
+  // -- Selection Bounds Helper -----------------------------------------------
+
+  /** Compute the combined world bounding rect of the given items. */
+  private _getSelectionBounds(items: SceneItem[]): { x: number; y: number; w: number; h: number } {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const item of items) {
+      const { x, y, w, h } = getItemWorldBounds(item);
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    }
+
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
 
   // -- Change Notification --------------------------------------------------

@@ -43,7 +43,10 @@ export interface ShortcutContext {
   handleUngroup: () => void;
   toggleGrid: () => void;
   toggleShowHelp: () => void;
+  toggleFocusMode: () => void;
+  fitSelection: () => void;
   writeCanvasToClipboard: (items?: SceneItem[]) => Promise<void>;
+  pasteFromSystemClipboard: () => Promise<string>;
 }
 
 /**

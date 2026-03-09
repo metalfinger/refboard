@@ -116,6 +116,8 @@ function getImageUrl(minioPath) {
   return `/api/images/${minioPath}`;
 }
 
+const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE_MB || '200', 10) * 1024 * 1024;
+
 module.exports = {
   minioClient,
   initBucket,
@@ -126,4 +128,5 @@ module.exports = {
   getImageUrl,
   MINIO_BUCKET,
   MIME_TO_EXT,
+  MAX_FILE_SIZE,
 };

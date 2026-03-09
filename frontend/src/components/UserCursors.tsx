@@ -91,10 +91,11 @@ export default function UserCursors({ socket, boardId, canvasTransform }: UserCu
             key={cursor.userId}
             style={{
               position: 'absolute',
-              left: screenX,
-              top: screenY,
-              transform: 'translate(-2px, -2px)',
-              transition: 'left 0.1s, top 0.1s',
+              left: 0,
+              top: 0,
+              transform: `translate(${screenX - 2}px, ${screenY - 2}px)`,
+              transition: 'transform 50ms linear',
+              willChange: 'transform',
             }}
           >
             <svg width="16" height="20" viewBox="0 0 16 20" fill="none">

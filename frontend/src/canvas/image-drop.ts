@@ -1,7 +1,6 @@
 import { Graphics } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
-import { VideoSprite } from './sprites/VideoSprite';
 import { uploadImage, uploadImageFromUrl } from '../api';
 
 type OnChange = () => void;
@@ -55,10 +54,7 @@ function handleUploadResult(
   }
 
   if (mediaType === 'video' && assetKey) {
-    const url = imgData.public_url;
-    const video = new VideoSprite(assetKey, finalW, finalH, url);
-    video.position.set(x, y);
-    viewport.addChild(video);
+    sceneManager.addVideoFromUpload(assetKey, finalW, finalH, x, y);
   } else if (assetKey) {
     sceneManager.addImageFromUpload(assetKey, finalW, finalH, x, y);
   } else {
@@ -122,18 +118,23 @@ export function setupDragDrop(
       return;
     }
 
+    let dropIndex = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
 
       const rect = container.getBoundingClientRect();
       const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
-      const placeholder = createPlaceholder(viewport, world.x, world.y);
+      // Offset each subsequent file so they don't overlap
+      const offsetX = dropIndex * 30;
+      const offsetY = dropIndex * 30;
+      const placeholder = createPlaceholder(viewport, world.x + offsetX, world.y + offsetY);
+      dropIndex++;
 
       try {
         const res = await uploadImage(boardId, file);
         removePlaceholder(viewport, placeholder);
-        handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
+        handleUploadResult(res, viewport, sceneManager, world.x + offsetX, world.y + offsetY, onChange);
       } catch (err) {
         console.error('Image upload failed:', err);
         removePlaceholder(viewport, placeholder);
@@ -141,10 +142,22 @@ export function setupDragDrop(
     }
   }
 
+  // Prevent browser default (opening file in new tab) on the whole document
+  function onDocDragOver(e: DragEvent) {
+    e.preventDefault();
+  }
+  function onDocDrop(e: DragEvent) {
+    e.preventDefault();
+  }
+
+  document.addEventListener('dragover', onDocDragOver);
+  document.addEventListener('drop', onDocDrop);
   container.addEventListener('dragover', onDragOver);
   container.addEventListener('drop', onDrop);
 
   return () => {
+    document.removeEventListener('dragover', onDocDragOver);
+    document.removeEventListener('drop', onDocDrop);
     container.removeEventListener('dragover', onDragOver);
     container.removeEventListener('drop', onDrop);
   };

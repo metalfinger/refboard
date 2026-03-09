@@ -22,6 +22,7 @@ import SelectionToolbar from '../components/SelectionToolbar';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
+import Minimap from '../components/Minimap';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
@@ -33,6 +34,7 @@ import { useSaveManager } from '../hooks/useSaveManager';
 import { useCanvasSetup } from '../hooks/useCanvasSetup';
 import { useShortcutHandler } from '../hooks/useShortcutHandler';
 import { useLayerPanel } from '../hooks/useLayerPanel';
+import { useFollowMode } from '../hooks/useFollowMode';
 
 interface EditorProps {
   isPublicView?: boolean;
@@ -73,7 +75,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
   const [showLayers, setShowLayers] = useState(false);
-  const [showGrid, setShowGrid] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const [showMmImport, setShowMmImport] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -81,6 +83,10 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
+    items: [], viewportBounds: { x: 0, y: 0, w: 1, h: 1 }, contentBounds: { x: 0, y: 0, w: 1, h: 1 },
+  });
 
   // Derived
   const { boardData, loading, error } = useBoardLoader(boardId);
@@ -111,6 +117,14 @@ export default function Editor({ isPublicView }: EditorProps) {
     const vp = canvasRef.current?.getViewport();
     if (vp) setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
   }, [scheduleSave]);
+
+  // Follow mode
+  const getViewport = useCallback(() => canvasRef.current?.getViewport() ?? null, []);
+  const { followingUserId, followingDisplayName, startFollowing, stopFollowing } = useFollowMode({
+    socket: getSocket(),
+    boardId: resolvedBoardId,
+    getViewport,
+  });
 
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox)
   useCanvasSetup({
@@ -156,11 +170,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   }, [refreshLayerData]);
 
   useEffect(() => {
-    if (!showLayers) return;
-    refreshLayers();
-    const interval = setInterval(refreshLayers, 500);
-    return () => clearInterval(interval);
-  }, [showLayers, refreshLayers]);
+    if (showLayers) refreshLayers();
+  }, [showLayers, refreshLayers, selectedLayerIds]);
 
   // Grouping
   const handleGroup = useCallback(() => {
@@ -240,38 +251,36 @@ export default function Editor({ isPublicView }: EditorProps) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [resolvedBoardId]);
 
-  // Zoom poll + selection toolbar position tracking
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setZoom(canvasRef.current?.getZoom() ?? 1);
+  // Update UI overlays (selection toolbar, video controls, minimap) on demand
+  const updateOverlays = useCallback(() => {
+    const selection = selectionRef.current;
+    const vp = canvasRef.current?.getViewport();
+    if (!selection || !vp) { setSelToolbar(null); setVideoCtrl(null); return; }
+    const items = selection.getSelectedItems();
 
-      // Update selection toolbar position
-      const selection = selectionRef.current;
-      const vp = canvasRef.current?.getViewport();
-      if (!selection || !vp) { setSelToolbar(null); setVideoCtrl(null); return; }
-      const items = selection.getSelectedItems();
+    setZoom(canvasRef.current?.getZoom() ?? 1);
+    setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
 
-      // Video controls: show when exactly 1 video is selected
-      if (items.length === 1 && items[0].type === 'video' && items[0].displayObject instanceof VideoSprite) {
-        const vs = items[0].displayObject as VideoSprite;
-        const b = getItemWorldBounds(items[0]);
-        const screenTL = vp.toScreen(b.x, b.y);
-        const screenBR = vp.toScreen(b.x + b.w, b.y + b.h);
-        setVideoCtrl({
-          videoSprite: vs,
-          screenRect: {
-            x: screenTL.x,
-            y: screenTL.y,
-            w: screenBR.x - screenTL.x,
-            h: screenBR.y - screenTL.y,
-          },
-        });
-      } else {
-        setVideoCtrl(null);
-      }
+    // Video controls: show when exactly 1 video is selected
+    if (items.length === 1 && items[0].type === 'video' && items[0].displayObject instanceof VideoSprite) {
+      const vs = items[0].displayObject as VideoSprite;
+      const b = getItemWorldBounds(items[0]);
+      const screenTL = vp.toScreen(b.x, b.y);
+      const screenBR = vp.toScreen(b.x + b.w, b.y + b.h);
+      setVideoCtrl({
+        videoSprite: vs,
+        screenRect: {
+          x: screenTL.x,
+          y: screenTL.y,
+          w: screenBR.x - screenTL.x,
+          h: screenBR.y - screenTL.y,
+        },
+      });
+    } else {
+      setVideoCtrl(null);
+    }
 
-      if (items.length < 2) { setSelToolbar(null); return; }
-
+    if (items.length < 2) { setSelToolbar(null); } else {
       // Compute world bounding box of selection
       let minX = Infinity, minY = Infinity, maxX = -Infinity;
       for (const item of items) {
@@ -280,16 +289,64 @@ export default function Editor({ isPublicView }: EditorProps) {
         if (b.y < minY) minY = b.y;
         if (b.x + b.w > maxX) maxX = b.x + b.w;
       }
-
-      // Convert to screen
       const screenTL = vp.toScreen(minX, minY);
       const screenTR = vp.toScreen(maxX, minY);
-      const sx = (screenTL.x + screenTR.x) / 2;
-      const sy = screenTL.y;
-      setSelToolbar({ x: sx, y: sy, count: items.length });
-    }, 100);
-    return () => clearInterval(interval);
+      setSelToolbar({ x: (screenTL.x + screenTR.x) / 2, y: screenTL.y, count: items.length });
+    }
+
+    // Minimap data
+    const scene = canvasRef.current?.getScene();
+    if (scene) {
+      const allItems = scene.getTopLevelItems();
+      const mapItems = allItems.map((it) => {
+        const b = getItemWorldBounds(it);
+        return { x: b.x, y: b.y, w: b.w, h: b.h, type: it.type, id: it.id };
+      });
+      const topLeft = vp.toWorld(0, 0);
+      const botRight = vp.toWorld(vp.screenWidth, vp.screenHeight);
+      const vpBounds = { x: topLeft.x, y: topLeft.y, w: botRight.x - topLeft.x, h: botRight.y - topLeft.y };
+      let cMinX = Infinity, cMinY = Infinity, cMaxX = -Infinity, cMaxY = -Infinity;
+      for (const it of mapItems) {
+        if (it.x < cMinX) cMinX = it.x;
+        if (it.y < cMinY) cMinY = it.y;
+        if (it.x + it.w > cMaxX) cMaxX = it.x + it.w;
+        if (it.y + it.h > cMaxY) cMaxY = it.y + it.h;
+      }
+      if (mapItems.length === 0) { cMinX = 0; cMinY = 0; cMaxX = 1; cMaxY = 1; }
+      setMinimapData({
+        items: mapItems,
+        viewportBounds: vpBounds,
+        contentBounds: { x: cMinX, y: cMinY, w: cMaxX - cMinX, h: cMaxY - cMinY },
+      });
+    }
   }, []);
+
+  // Listen to viewport moved event for overlay updates (throttled)
+  // Depends on objectCount so it re-runs after canvas init (viewport becomes available)
+  useEffect(() => {
+    const vp = canvasRef.current?.getViewport();
+    if (!vp) return;
+    let rafId: number | null = null;
+    const onMoved = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => { rafId = null; updateOverlays(); });
+    };
+    vp.on('moved', onMoved);
+    // Also listen to wheel events directly for immediate zoom feedback
+    const onWheel = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => { rafId = null; updateOverlays(); });
+    };
+    vp.on('wheel-scroll', onWheel);
+    return () => { vp.off('moved', onMoved); vp.off('wheel-scroll', onWheel); if (rafId) cancelAnimationFrame(rafId); };
+  }, [updateOverlays, objectCount]);
+
+  // Also update overlays when selection or scene changes
+  useEffect(() => {
+    updateOverlays();
+  }, [selectedLayerIds, updateOverlays]);
+
+  // (PresenceOverlay removed — selection broadcast no longer needed)
 
   // -- Render --
 
@@ -399,6 +456,8 @@ export default function Editor({ isPublicView }: EditorProps) {
           setZoom(z);
         }}
         onlineUsers={onlineUsers}
+        onUserClick={startFollowing}
+        followingUserId={followingUserId}
         onToggleLayers={() => setShowLayers((v) => !v)}
         showLayers={showLayers}
         onToggleHelp={() => setShowHelp((v) => !v)}
@@ -421,23 +480,32 @@ export default function Editor({ isPublicView }: EditorProps) {
           canvasTransform={canvasTransform}
         />
 
-        {/* Grid overlay */}
-        {showGrid && (
-          <svg
-            style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}
-            width="100%" height="100%"
-          >
-            <defs>
-              <pattern id="grid50" width={50 * (canvasTransform[0] || 1)} height={50 * (canvasTransform[3] || 1)} patternUnits="userSpaceOnUse"
-                x={(canvasTransform[4] || 0) % (50 * (canvasTransform[0] || 1))}
-                y={(canvasTransform[5] || 0) % (50 * (canvasTransform[3] || 1))}>
-                <line x1="0" y1="0" x2={50 * (canvasTransform[0] || 1)} y2="0" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-                <line x1="0" y1="0" x2="0" y2={50 * (canvasTransform[3] || 1)} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid50)" />
-          </svg>
-        )}
+        {/* Dot grid overlay — adapts spacing at zoom levels like Figma */}
+        {showGrid && (() => {
+          const scale = canvasTransform[0] || 1;
+          const tx = canvasTransform[4] || 0;
+          const ty = canvasTransform[5] || 0;
+          // Adaptive spacing: base 20px, doubles when dots get too dense, halves when too sparse
+          let spacing = 20;
+          while (spacing * scale < 12) spacing *= 2;
+          while (spacing * scale > 50) spacing /= 2;
+          const screenSpacing = spacing * scale;
+          const dotR = Math.max(0.5, Math.min(1.2, scale * 0.6));
+          const ox = tx % screenSpacing;
+          const oy = ty % screenSpacing;
+          // Subtle dot: brighter at high zoom, dimmer at low zoom
+          const alpha = Math.max(0.08, Math.min(0.25, scale * 0.12));
+          return (
+            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }} width="100%" height="100%">
+              <defs>
+                <pattern id="dotgrid" width={screenSpacing} height={screenSpacing} patternUnits="userSpaceOnUse" x={ox} y={oy}>
+                  <circle cx={dotR} cy={dotR} r={dotR} fill={`rgba(255,255,255,${alpha})`} />
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#dotgrid)" />
+            </svg>
+          );
+        })()}
 
         {/* Empty canvas guide */}
         {objectCount === 0 && (
@@ -459,23 +527,23 @@ export default function Editor({ isPublicView }: EditorProps) {
             x={selToolbar.x}
             y={selToolbar.y}
             count={selToolbar.count}
-            onAlignLeft={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignLeft(s); onCanvasChange(); } }}
-            onAlignCenterH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterH(s); onCanvasChange(); } }}
-            onAlignRight={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignRight(s); onCanvasChange(); } }}
-            onAlignTop={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignTop(s); onCanvasChange(); } }}
-            onAlignCenterV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterV(s); onCanvasChange(); } }}
-            onAlignBottom={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignBottom(s); onCanvasChange(); } }}
-            onDistributeH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeHorizontal(s); onCanvasChange(); } }}
-            onDistributeV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeVertical(s); onCanvasChange(); } }}
-            onPack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeOptimal(s); onCanvasChange(); } }}
-            onGrid={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeGrid(s); onCanvasChange(); } }}
-            onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); onCanvasChange(); } }}
-            onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); onCanvasChange(); } }}
-            onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); onCanvasChange(); } }}
-            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); onCanvasChange(); } }}
-            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); onCanvasChange(); } }}
+            onAlignLeft={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignLeft(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignCenterH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterH(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignRight={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignRight(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignTop={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignTop(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignCenterV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterV(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignBottom={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignBottom(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onDistributeH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onDistributeV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onPack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeOptimal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onGrid={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeGrid(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
             onGroup={handleGroup}
-            onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); onCanvasChange(); } }}
+            onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
           />
         )}
 
@@ -485,6 +553,31 @@ export default function Editor({ isPublicView }: EditorProps) {
             videoSprite={videoCtrl.videoSprite}
             screenRect={videoCtrl.screenRect}
           />
+        )}
+
+        {/* Minimap */}
+        {showMinimap && !focusMode && objectCount > 0 && (
+          <Minimap
+            items={minimapData.items}
+            viewportBounds={minimapData.viewportBounds}
+            contentBounds={minimapData.contentBounds}
+            onNavigate={(wx, wy) => {
+              const vp = canvasRef.current?.getViewport();
+              if (vp) vp.animate({ time: 200, position: { x: wx, y: wy }, ease: 'easeOutQuad' });
+            }}
+          />
+        )}
+
+        {/* Follow mode banner */}
+        {followingDisplayName && (
+          <div style={{
+            position: 'absolute', top: '8px', left: '50%', transform: 'translateX(-50%)',
+            padding: '4px 14px', background: 'rgba(74, 144, 217, 0.9)', borderRadius: '8px',
+            color: '#fff', fontSize: '12px', fontWeight: 500, zIndex: 200,
+            cursor: 'pointer', pointerEvents: 'auto',
+          }} onClick={stopFollowing}>
+            Following {followingDisplayName} — click to stop
+          </div>
         )}
 
         {/* Context menu */}

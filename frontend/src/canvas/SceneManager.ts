@@ -5,16 +5,22 @@
  * and spring-animated add/remove operations.
  */
 
-import { Container, Sprite, Texture, Graphics, Text, TextStyle } from 'pixi.js';
+import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
-import { TextureManager, LODTier } from './TextureManager';
+import { TextureManager } from './TextureManager';
+import { ImageSprite } from './sprites/ImageSprite';
+import { VideoSprite } from './sprites/VideoSprite';
+import { DrawingSprite } from './sprites/DrawingSprite';
+import { FrameSprite } from './sprites/FrameSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
+import { reparentGroupChildren } from './grouping';
 import type {
   SceneData,
   AnySceneObject,
   ImageObject,
   VideoObject,
   TextObject,
+  DrawingObject,
   GroupObject,
   SceneObject,
 } from './scene-format';
@@ -25,9 +31,104 @@ import type {
 
 export interface SceneItem {
   id: string;
-  type: 'image' | 'video' | 'text' | 'group';
+  type: 'image' | 'video' | 'text' | 'drawing' | 'group';
   displayObject: Container;
   data: AnySceneObject;
+}
+
+/** Set of child IDs that belong to a group — rebuilt when groups change. */
+let _groupChildIds: Set<string> | null = null;
+
+/** Rebuild the set of all group-child IDs. Call after group add/remove/load. */
+export function rebuildGroupChildSet(scene: SceneManager): void {
+  _groupChildIds = new Set<string>();
+  for (const item of scene.items.values()) {
+    if (item.data.type !== 'group') continue;
+    const gd = item.data as GroupObject;
+    for (const cid of gd.children) _groupChildIds.add(cid);
+  }
+}
+
+/** Returns true if the item is a child of a group (not independently selectable). */
+export function isGroupChild(id: string): boolean {
+  return _groupChildIds?.has(id) ?? false;
+}
+
+/** Single source of truth for an item's world-space bounding rect.
+ *  Uses data.sx/sy (not obj.scale which may be mid-animation).
+ *  For groups: computes the union of children bounds (w/h on group data may be 0).
+ *  For group children: converts local coords to world using parent group transforms. */
+export function getItemWorldBounds(item: SceneItem): { x: number; y: number; w: number; h: number } {
+  if (item.data.type === 'group') {
+    return _getGroupWorldBounds(item);
+  }
+
+  // If this item is a child of a group, convert local → world
+  const parent = item.displayObject.parent;
+  if (parent && parent.label && _groupChildIds?.has(item.id)) {
+    const px = parent.position.x;
+    const py = parent.position.y;
+    const psx = parent.scale.x;
+    const psy = parent.scale.y;
+    return {
+      x: px + item.data.x * psx,
+      y: py + item.data.y * psy,
+      w: item.data.w * Math.abs(item.data.sx * psx),
+      h: item.data.h * Math.abs(item.data.sy * psy),
+    };
+  }
+
+  return {
+    x: item.data.x,
+    y: item.data.y,
+    w: item.data.w * Math.abs(item.data.sx),
+    h: item.data.h * Math.abs(item.data.sy),
+  };
+}
+
+/**
+ * Compute group bounds from its data.w/h (set during grouping) or fall back
+ * to stored children data. Children store LOCAL x/y relative to group.
+ */
+function _getGroupWorldBounds(item: SceneItem): { x: number; y: number; w: number; h: number } {
+  const groupX = item.data.x;
+  const groupY = item.data.y;
+  const groupW = item.data.w;
+  const groupH = item.data.h;
+
+  // If group has valid w/h (set during creation), apply scale just like regular items
+  if (groupW > 0 && groupH > 0) {
+    return {
+      x: groupX,
+      y: groupY,
+      w: groupW * Math.abs(item.data.sx),
+      h: groupH * Math.abs(item.data.sy),
+    };
+  }
+
+  // Fallback: shouldn't happen, but compute from children display objects
+  const container = item.displayObject;
+  if (container.children.length === 0) {
+    return { x: groupX, y: groupY, w: 0, h: 0 };
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const child of container.children) {
+    const cx = child.x;
+    const cy = child.y;
+    // Approximate child size from its local bounds
+    const lb = child.getLocalBounds();
+    const cw = lb.width;
+    const ch = lb.height;
+    minX = Math.min(minX, cx);
+    minY = Math.min(minY, cy);
+    maxX = Math.max(maxX, cx + cw);
+    maxY = Math.max(maxY, cy + ch);
+  }
+
+  if (!isFinite(minX)) return { x: groupX, y: groupY, w: 0, h: 0 };
+  // Children positions are local to group, so offset by group world position
+  return { x: groupX + minX, y: groupY + minY, w: maxX - minX, h: maxY - minY };
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +142,7 @@ export class SceneManager {
   readonly springs: SpringManager;
 
   private _onChange: (() => void) | null = null;
+  private _onItemDimensionsChanged: ((itemId: string) => void) | null = null;
   private _zCounter: number = 0;
 
   constructor(viewport: Viewport, textures: TextureManager, springs: SpringManager) {
@@ -53,6 +155,10 @@ export class SceneManager {
 
   set onChange(fn: (() => void) | null) {
     this._onChange = fn;
+  }
+
+  set onItemDimensionsChanged(fn: ((itemId: string) => void) | null) {
+    this._onItemDimensionsChanged = fn;
   }
 
   get onChange(): (() => void) | null {
@@ -98,6 +204,21 @@ export class SceneManager {
     }
     for (const id of toRemove) {
       const item = this.items.get(id)!;
+
+      // If removing a group, reparent its PixiJS children to viewport first
+      // so they survive the container destruction (they may still be in the
+      // incoming set as ungrouped top-level items).
+      if (item.data.type === 'group') {
+        const container = item.displayObject;
+        // Reparent actual scene children (skip internal frame bg/label)
+        const toReparent = container.children.filter(
+          (c) => !c.label?.startsWith('__frame_'),
+        );
+        for (const child of toReparent) {
+          this.viewport.addChild(child);
+        }
+      }
+
       item.displayObject.destroy({ children: true });
       this.items.delete(id);
     }
@@ -121,7 +242,11 @@ export class SceneManager {
 
     await Promise.all(loadPromises);
 
-    // 4. Apply z-ordering
+    // 4. Reparent group children into their group containers
+    reparentGroupChildren(this);
+    rebuildGroupChildSet(this);
+
+    // 5. Apply z-ordering
     this._applyZOrder();
 
     this._onChange?.();
@@ -136,31 +261,18 @@ export class SceneManager {
     switch (data.type) {
       case 'image': {
         const imgData = data as ImageObject;
-        const sprite = new Sprite(Texture.EMPTY);
-        sprite.width = imgData.w;
-        sprite.height = imgData.h;
-
-        // Load texture asynchronously at appropriate LOD
-        const zoom = this.viewport.scale.x;
-        const tier = this.textures.tierForZoom(zoom);
-        this.textures.load(imgData.asset, tier).then((tex) => {
-          if (!sprite.destroyed) {
-            sprite.texture = tex;
-            sprite.width = imgData.w;
-            sprite.height = imgData.h;
-          }
-        });
-
-        displayObject = sprite;
+        displayObject = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);
         break;
       }
 
       case 'video': {
         const vidData = data as VideoObject;
-        const gfx = new Graphics();
-        gfx.rect(0, 0, vidData.w, vidData.h);
-        gfx.fill(0x333333);
-        displayObject = gfx;
+        const videoUrl = this.textures.urlForAsset(vidData.asset);
+        const videoSprite = new VideoSprite(vidData.asset, vidData.w, vidData.h, videoUrl);
+        // Auto-correct dimensions when video metadata loads
+        // NOTE: callback must update item.data (the stored copy), not the original `data` param.
+        // We wire this after the item is created below (see post-creation video wiring).
+        displayObject = videoSprite;
         break;
       }
 
@@ -175,8 +287,15 @@ export class SceneManager {
         break;
       }
 
+      case 'drawing': {
+        const drawData = data as DrawingObject;
+        displayObject = new DrawingSprite(drawData.points, drawData.color, drawData.strokeWidth);
+        break;
+      }
+
       case 'group': {
-        displayObject = new Container();
+        const gd = data as GroupObject;
+        displayObject = new FrameSprite(gd.w, gd.h, gd.bgColor, gd.label, gd.padding);
         break;
       }
 
@@ -206,23 +325,52 @@ export class SceneManager {
 
     this.items.set(data.id, item);
 
-    // Animate entrance: spring scale from 0 → 1.05 → 1.0 with fade-in
+    // Wire video dimension auto-correction to the STORED item.data (not the original param)
+    if (data.type === 'video' && displayObject instanceof VideoSprite) {
+      displayObject.onDimensionsKnown = (realW, realH) => {
+        item.data.w = realW;
+        item.data.h = realH;
+        this._onChange?.();
+        this._onItemDimensionsChanged?.(item.id);
+      };
+    }
+
+    // Animate entrance: spring scale from center 0 → 1.05 → 1.0 with fade-in
     if (animate) {
       displayObject.scale.set(0, 0);
       displayObject.alpha = 0;
+
+      // Scale from center by adjusting position to keep center point fixed
+      const halfW = data.w * data.sx / 2;
+      const halfH = data.h * data.sy / 2;
+      const finalX = data.x;
+      const finalY = data.y;
 
       const scaleSpring = new Spring(0, 1.05, PRESETS.bounce);
       scaleSpring.onUpdate = (v) => {
         if (!displayObject.destroyed) {
           displayObject.scale.set(v * data.sx, v * data.sy);
+          displayObject.position.set(
+            finalX + halfW * (1 - v),
+            finalY + halfH * (1 - v),
+          );
         }
       };
       scaleSpring.onComplete = () => {
-        // Second spring: 1.05 → 1.0
         const settleSpring = new Spring(1.05, 1.0, PRESETS.snappy);
         settleSpring.onUpdate = (v) => {
           if (!displayObject.destroyed) {
             displayObject.scale.set(v * data.sx, v * data.sy);
+            displayObject.position.set(
+              finalX + halfW * (1 - v),
+              finalY + halfH * (1 - v),
+            );
+          }
+        };
+        settleSpring.onComplete = () => {
+          if (!displayObject.destroyed) {
+            displayObject.position.set(finalX, finalY);
+            displayObject.scale.set(data.sx, data.sy);
           }
         };
         this.springs.add(settleSpring);
@@ -252,6 +400,21 @@ export class SceneManager {
     obj.visible = data.visible;
     obj.eventMode = data.locked ? 'none' : 'static';
 
+    // Type-specific updates
+    if (data.type === 'drawing' && obj instanceof DrawingSprite) {
+      const drawData = data as DrawingObject;
+      obj.setPoints(drawData.points);
+    }
+    if (data.type === 'text' && obj instanceof Text) {
+      const txtData = data as TextObject;
+      obj.text = txtData.text;
+      obj.style.fontSize = txtData.fontSize;
+      obj.style.fill = txtData.fill;
+    }
+    if (data.type === 'group' && obj instanceof FrameSprite) {
+      obj.updateFromData(data as GroupObject);
+    }
+
     // Update stored data
     item.data = { ...data };
     item.type = data.type;
@@ -259,16 +422,47 @@ export class SceneManager {
 
   // -- Z-Ordering ----------------------------------------------------------
 
-  /** Sort items by z and reorder children in the viewport. */
+  /** Sort items by z and reorder children in both viewport and group containers. */
   _applyZOrder(): void {
     const sorted = Array.from(this.items.values()).sort(
       (a, b) => a.data.z - b.data.z,
     );
 
-    for (let i = 0; i < sorted.length; i++) {
-      const child = sorted[i].displayObject;
+    // Reorder top-level items in the viewport
+    let vpIndex = 0;
+    for (const item of sorted) {
+      const child = item.displayObject;
       if (child.parent === this.viewport) {
-        this.viewport.setChildIndex(child, i);
+        // Clamp index to valid range (selection overlay etc. may also be viewport children)
+        const maxIdx = this.viewport.children.length - 1;
+        const targetIdx = Math.min(vpIndex, maxIdx);
+        if (this.viewport.getChildIndex(child) !== targetIdx) {
+          this.viewport.setChildIndex(child, targetIdx);
+        }
+        vpIndex++;
+      }
+    }
+
+    // Reorder children within each group container
+    for (const item of sorted) {
+      if (item.data.type !== 'group') continue;
+      const groupData = item.data as GroupObject;
+      const container = item.displayObject;
+      // Sort children by their z value within the group
+      const childItems = groupData.children
+        .map((id) => this.items.get(id))
+        .filter((c): c is SceneItem => !!c)
+        .sort((a, b) => a.data.z - b.data.z);
+
+      for (let i = 0; i < childItems.length; i++) {
+        const child = childItems[i].displayObject;
+        if (child.parent === container) {
+          const maxIdx = container.children.length - 1;
+          const targetIdx = Math.min(i, maxIdx);
+          if (container.getChildIndex(child) !== targetIdx) {
+            container.setChildIndex(child, targetIdx);
+          }
+        }
       }
     }
   }
@@ -283,12 +477,26 @@ export class SceneManager {
     return Array.from(this.items.values());
   }
 
+  /** Get only top-level items (excludes group children). Used for selection/hit testing. */
+  getTopLevelItems(): SceneItem[] {
+    return Array.from(this.items.values()).filter((item) => !isGroupChild(item.id));
+  }
+
   // -- Remove Item ---------------------------------------------------------
 
-  /** Remove an item, optionally animating scale→0.8 + fade out before destroy. */
+  /** Remove an item, optionally animating scale→0.8 + fade out before destroy.
+   *  If item is a group, recursively removes all children from the items map. */
   removeItem(id: string, animate = true): void {
     const item = this.items.get(id);
     if (!item) return;
+
+    // If this is a group, remove children from the items map first
+    if (item.data.type === 'group') {
+      const groupData = item.data as import('./scene-format').GroupObject;
+      for (const childId of groupData.children) {
+        this.items.delete(childId);
+      }
+    }
 
     if (!animate) {
       item.displayObject.destroy({ children: true });
@@ -302,10 +510,20 @@ export class SceneManager {
     // Remove from map immediately to prevent double-remove
     this.items.delete(id);
 
+    // Scale toward center on removal
+    const halfW = item.data.w * item.data.sx / 2;
+    const halfH = item.data.h * item.data.sy / 2;
+    const startX = item.data.x;
+    const startY = item.data.y;
+
     const scaleSpring = new Spring(1.0, 0.8, PRESETS.snappy);
     scaleSpring.onUpdate = (v) => {
       if (!obj.destroyed) {
-        obj.scale.set(v * (item.data.sx), v * (item.data.sy));
+        obj.scale.set(v * item.data.sx, v * item.data.sy);
+        obj.position.set(
+          startX + halfW * (1 - v),
+          startY + halfH * (1 - v),
+        );
       }
     };
     this.springs.add(scaleSpring);
@@ -365,6 +583,41 @@ export class SceneManager {
     // Fire-and-forget the async creation (animation handles visual feedback)
     this._createItem(data, true);
 
+    this._applyZOrder();
+    this._onChange?.();
+
+    return this.items.get(data.id)!;
+  }
+
+  /** Create a VideoObject from an upload and add it to the scene with animation. */
+  addVideoFromUpload(
+    assetKey: string,
+    w: number,
+    h: number,
+    x: number,
+    y: number,
+  ): SceneItem {
+    const data: VideoObject = {
+      id: crypto.randomUUID(),
+      type: 'video',
+      x,
+      y,
+      w,
+      h,
+      sx: 1,
+      sy: 1,
+      angle: 0,
+      z: this.nextZ(),
+      opacity: 1,
+      locked: false,
+      name: '',
+      visible: true,
+      asset: assetKey,
+      muted: true,
+      loop: true,
+    };
+
+    this._createItem(data, true);
     this._applyZOrder();
     this._onChange?.();
 

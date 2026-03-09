@@ -7,7 +7,6 @@ const {
   createImage, getImageByMmFileId,
 } = require('../db');
 const { putBuffer, getImageUrl, MIME_TO_EXT } = require('../minio');
-const { generateLOD } = require('../services/lod-generator');
 const sharp = require('sharp');
 
 const router = Router();
@@ -94,44 +93,23 @@ function classifyMedia(mimeType) {
 }
 
 /**
- * Upload image buffer with LOD tiers to MinIO.
+ * Upload a media file (image or video) to MinIO as a single file.
+ * GPU handles all scaling natively — no LOD tiers needed.
  */
-async function uploadImageWithLOD(boardId, imageId, buffer, mimetype) {
-  const assetKey = `boards/${boardId}/${imageId}`;
-  const originalExt = MIME_TO_EXT[mimetype] || '.bin';
+async function uploadMedia(boardId, imageId, buffer, mimetype) {
+  const ext = MIME_TO_EXT[mimetype] || '.bin';
+  const minioPath = `boards/${boardId}/${imageId}${ext}`;
+  await putBuffer(minioPath, buffer, mimetype);
 
-  if (mimetype === 'image/svg+xml' || mimetype === 'image/gif') {
-    const fullPath = `${assetKey}/full${originalExt}`;
-    await putBuffer(fullPath, buffer, mimetype);
-    let width = null, height = null;
+  let width = null, height = null;
+  if (mimetype !== 'image/svg+xml' && !mimetype.startsWith('video/')) {
     try {
       const metadata = await sharp(buffer).metadata();
       width = metadata.width || null;
       height = metadata.height || null;
     } catch {}
-    return { assetKey, minioPath: fullPath, width, height };
   }
-
-  const lod = await generateLOD(buffer, originalExt);
-  await Promise.all([
-    putBuffer(`${assetKey}/thumb${lod.thumb.ext}`, lod.thumb.buffer, lod.thumb.ext === '.webp' ? 'image/webp' : mimetype),
-    putBuffer(`${assetKey}/medium${lod.medium.ext}`, lod.medium.buffer, lod.medium.ext === '.webp' ? 'image/webp' : mimetype),
-    putBuffer(`${assetKey}/full${lod.full.ext}`, lod.full.buffer, mimetype),
-  ]);
-
-  const minioPath = `${assetKey}/full${lod.full.ext}`;
-  return { assetKey, minioPath, width: lod.full.width, height: lod.full.height };
-}
-
-/**
- * Upload video buffer to MinIO (no LOD).
- */
-async function uploadVideo(boardId, imageId, buffer, mimetype) {
-  const assetKey = `boards/${boardId}/${imageId}`;
-  const ext = MIME_TO_EXT[mimetype] || '.bin';
-  const fullPath = `${assetKey}/full${ext}`;
-  await putBuffer(fullPath, buffer, mimetype);
-  return { assetKey, minioPath: fullPath, width: null, height: null };
+  return { assetKey: minioPath, minioPath, width, height };
 }
 
 // ---------------------
@@ -287,13 +265,7 @@ router.post('/:boardId/mm-pull', async (req, res) => {
         const imageId = uuidv4();
         const mediaType = classifyMedia(mimeType);
 
-        let assetKey, minioPath, width, height;
-
-        if (mediaType === 'video') {
-          ({ assetKey, minioPath, width, height } = await uploadVideo(board.id, imageId, buffer, mimeType));
-        } else {
-          ({ assetKey, minioPath, width, height } = await uploadImageWithLOD(board.id, imageId, buffer, mimeType));
-        }
+        const { assetKey, minioPath, width, height } = await uploadMedia(board.id, imageId, buffer, mimeType);
 
         const publicUrl = getImageUrl(minioPath);
 

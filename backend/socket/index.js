@@ -2,6 +2,7 @@ const { Server } = require('socket.io');
 const { verifyToken } = require('../auth');
 const { getUserById } = require('../db');
 const { setupBoardRoom } = require('./board-room');
+const { setupViewportSync } = require('./viewport-sync');
 
 /**
  * Set up Socket.IO on the given HTTP server.
@@ -49,6 +50,7 @@ function setupSocket(httpServer) {
 
     // Set up board room handlers
     setupBoardRoom(io, socket);
+    setupViewportSync(io, socket);
 
     socket.on('disconnect', (reason) => {
       console.log(`[socket] User disconnected: ${socket.userDisplayName} (${reason})`);

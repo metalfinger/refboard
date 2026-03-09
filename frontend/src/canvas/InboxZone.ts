@@ -141,8 +141,8 @@ export class InboxZone extends Container {
       sprite.width = sw;
       sprite.height = sh;
 
-      // Load thumbnail texture
-      this.textures.load(assetKey, 'thumb').then((tex) => {
+      // Load texture (GPU handles scaling)
+      this.textures.load(assetKey).then((tex) => {
         if (!sprite.destroyed) {
           sprite.texture = tex;
           sprite.width = sw;

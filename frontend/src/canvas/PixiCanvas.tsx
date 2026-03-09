@@ -12,10 +12,11 @@ import {
   useImperativeHandle,
   useRef,
   useCallback,
+  useState,
 } from 'react';
 import { Application } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
-import { SceneManager } from './SceneManager';
+import { SceneManager, getItemWorldBounds } from './SceneManager';
 import { TextureManager } from './TextureManager';
 import { SpringManager } from './spring';
 import { convertFabricToV2 } from './scene-format';
@@ -28,13 +29,14 @@ import type { SceneData } from './scene-format';
 export interface PixiCanvasHandle {
   getViewport: () => Viewport | null;
   getScene: () => SceneManager | null;
+  getApp: () => Application | null;
   fitAll: () => void;
   getZoom: () => number;
   setZoom: (zoom: number) => void;
 }
 
 export interface PixiCanvasProps {
-  canvasState?: string | null;
+  canvasState?: string | object | null;
   currentTool: string;
   boardId?: string;
   onChange?: () => void;
@@ -99,6 +101,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
     const initialLoadDone = useRef(false);
     const spaceHeld = useRef(false);
     const onChangeRef = useRef(onChange);
+    const [pixiReady, setPixiReady] = useState(false);
 
     // Keep onChange ref current without re-running effects
     onChangeRef.current = onChange;
@@ -121,6 +124,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           antialias: true,
           autoDensity: true,
           resolution: window.devicePixelRatio,
+          preserveDrawingBuffer: true,
         });
 
         if (destroyed) {
@@ -160,7 +164,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           springs.tick(ticker.deltaMS / 1000);
         });
 
-        // -- Culling + LOD ticker (runs every 200ms, not every frame) ------
+        // -- Visibility culling ticker (runs every 200ms, not every frame) --
 
         let lastCullCheck = 0;
         app.ticker.add((ticker) => {
@@ -168,29 +172,18 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           if (lastCullCheck < 200) return;
           lastCullCheck = 0;
 
-          const zoom = viewport.scale.x;
           const bounds = viewport.getVisibleBounds();
           const margin = 200;
 
           for (const item of scene.getAllItems()) {
-            const d = item.displayObject;
-            const ib = d.getBounds();
-            const inView =
-              ib.x + ib.width > bounds.x - margin &&
-              ib.x < bounds.x + bounds.width + margin &&
-              ib.y + ib.height > bounds.y - margin &&
-              ib.y < bounds.y + bounds.height + margin;
-
-            if (item.type === 'image' && 'updateLOD' in d) {
-              if (inView) {
-                (d as any).updateLOD(zoom);
-                d.visible = true;
-              } else {
-                d.visible = false;
-              }
-            }
-            if (item.type === 'video' && 'onVisibilityChange' in d) {
-              (d as any).onVisibilityChange(inView);
+            if (item.type === 'video' && 'onVisibilityChange' in item.displayObject) {
+              const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
+              const inView =
+                ix + iw > bounds.x - margin &&
+                ix < bounds.x + bounds.width + margin &&
+                iy + ih > bounds.y - margin &&
+                iy < bounds.y + bounds.height + margin;
+              (item.displayObject as any).onVisibilityChange(inView);
             }
           }
         });
@@ -230,6 +223,18 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
 
         // Store observer for cleanup
         (container as any).__pixiRO = ro;
+
+        // Signal that PixiJS is ready for scene loading
+        setPixiReady(true);
+
+        // -- Prevent Ctrl+wheel browser zoom on canvas -----------------------
+        const preventBrowserZoom = (e: WheelEvent) => {
+          if (e.ctrlKey) {
+            e.preventDefault();
+          }
+        };
+        container.addEventListener('wheel', preventBrowserZoom, { passive: false });
+        (container as any).__pixiWheelHandler = preventBrowserZoom;
       })();
 
       // -- Cleanup ---------------------------------------------------------
@@ -241,6 +246,12 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         if (ro) {
           ro.disconnect();
           delete (container as any).__pixiRO;
+        }
+
+        const wheelHandler = (container as any).__pixiWheelHandler;
+        if (wheelHandler) {
+          container.removeEventListener('wheel', wheelHandler);
+          delete (container as any).__pixiWheelHandler;
         }
 
         textures.clear();
@@ -263,11 +274,16 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
       if (initialLoadDone.current) return;
       if (!canvasState || !sceneRef.current) return;
 
+      // canvasState may be a JSON string or already-parsed object
       let parsed: any;
-      try {
-        parsed = JSON.parse(canvasState);
-      } catch {
-        return;
+      if (typeof canvasState === 'string') {
+        try {
+          parsed = JSON.parse(canvasState);
+        } catch {
+          return;
+        }
+      } else {
+        parsed = canvasState;
       }
 
       let sceneData: SceneData;
@@ -279,7 +295,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
 
       initialLoadDone.current = true;
       sceneRef.current.loadScene(sceneData, false);
-    }, [canvasState]);
+    }, [canvasState, pixiReady]);
 
     // ── Space key for pan mode ────────────────────────────────────────
 
@@ -337,12 +353,11 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
       let maxY = -Infinity;
 
       for (const item of items) {
-        const obj = item.displayObject;
-        const bounds = obj.getBounds();
-        if (bounds.x < minX) minX = bounds.x;
-        if (bounds.y < minY) minY = bounds.y;
-        if (bounds.x + bounds.width > maxX) maxX = bounds.x + bounds.width;
-        if (bounds.y + bounds.height > maxY) maxY = bounds.y + bounds.height;
+        const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
+        if (ix < minX) minX = ix;
+        if (iy < minY) minY = iy;
+        if (ix + iw > maxX) maxX = ix + iw;
+        if (iy + ih > maxY) maxY = iy + ih;
       }
 
       const padding = 40;
@@ -368,6 +383,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
       () => ({
         getViewport: () => viewportRef.current,
         getScene: () => sceneRef.current,
+        getApp: () => appRef.current,
         fitAll,
         getZoom: () => viewportRef.current?.scale.x ?? 1,
         setZoom: (zoom: number) => {

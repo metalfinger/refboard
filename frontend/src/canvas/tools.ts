@@ -11,6 +11,8 @@ import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
 import { Text, TextStyle } from 'pixi.js';
+import { DrawingSprite } from './sprites/DrawingSprite';
+import type { DrawingObject } from './scene-format';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -40,6 +42,8 @@ export interface ToolContext {
   selection: SelectionManager;
   container: HTMLElement;
   onChange: () => void;
+  /** Broadcast only specific changed elements (lightweight, for live drawing). */
+  broadcastElements?: (ids: string[]) => void;
 }
 
 export function activateTool(
@@ -52,6 +56,9 @@ export function activateTool(
 
   // Reset cursor
   container.style.cursor = '';
+
+  // Enable/disable SelectionManager based on tool
+  selection.setEnabled(tool === ToolType.SELECT);
 
   switch (tool) {
     case ToolType.SELECT: {
@@ -96,6 +103,7 @@ export function activateTool(
 
         scene._createItem(textData, true);
         scene._applyZOrder();
+        ctx.broadcastElements?.([textData.id]);
         ctx.onChange();
 
         // Remove handler after placing text
@@ -110,12 +118,17 @@ export function activateTool(
 
     case ToolType.ERASER: {
       container.style.cursor = 'crosshair';
+      // Clear any existing selection/transform box when switching to eraser
+      selection.clear();
+      selection.transformBox.update([]);
 
       const onClick = (e: PointerEvent) => {
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
         const hit = selection._hitTest(world.x, world.y);
         if (hit) {
+          selection.selectedIds.delete(hit.id);
+          selection.transformBox.update([]);
           scene.removeItem(hit.id, true);
           ctx.onChange();
         }
@@ -129,8 +142,131 @@ export function activateTool(
 
     case ToolType.PEN: {
       container.style.cursor = 'crosshair';
-      // Drawing mode stub — will be implemented later
-      return null;
+
+      let drawing = false;
+      let currentSprite: DrawingSprite | null = null;
+      let originX = 0;
+      let originY = 0;
+      let itemId = '';
+      let syncTimer: ReturnType<typeof setTimeout> | null = null;
+      const SYNC_INTERVAL = 100; // ~10fps — lightweight element-only sync
+
+      const scheduleLiveSync = () => {
+        if (syncTimer) return;
+        syncTimer = setTimeout(() => {
+          syncTimer = null;
+          if (!drawing) return;
+          // Copy current points into item.data for serialization
+          const item = scene.getById(itemId);
+          if (item && currentSprite) {
+            (item.data as DrawingObject).points = [...currentSprite.points];
+          }
+          // Send only the drawing element, not the entire scene
+          ctx.broadcastElements?.([itemId]);
+        }, SYNC_INTERVAL);
+      };
+
+      const onDown = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        drawing = true;
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        originX = world.x;
+        originY = world.y;
+
+        itemId = crypto.randomUUID();
+        const drawData: DrawingObject = {
+          id: itemId,
+          type: 'drawing',
+          x: originX,
+          y: originY,
+          w: 1,
+          h: 1,
+          sx: 1,
+          sy: 1,
+          angle: 0,
+          z: scene.nextZ(),
+          opacity: 1,
+          locked: false,
+          name: '',
+          visible: true,
+          points: [0, 0],
+          color: opts.color!,
+          strokeWidth: opts.strokeWidth!,
+        };
+
+        scene._createItem(drawData, false);
+        const item = scene.getById(itemId);
+        if (item && item.displayObject instanceof DrawingSprite) {
+          currentSprite = item.displayObject as DrawingSprite;
+        }
+        container.setPointerCapture(e.pointerId);
+      };
+
+      const onMove = (e: PointerEvent) => {
+        if (!drawing || !currentSprite) return;
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        currentSprite.addPoint(world.x - originX, world.y - originY);
+        scheduleLiveSync();
+      };
+
+      const onUp = () => {
+        if (!drawing) return;
+        drawing = false;
+        if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+
+        // Compute bounding box and normalize points so origin = top-left of stroke
+        const item = scene.getById(itemId);
+        if (item && currentSprite) {
+          const pts = currentSprite.points;
+          if (pts.length < 4) {
+            scene.removeItem(itemId, false);
+          } else {
+            // Find bounds of all points
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (let i = 0; i < pts.length; i += 2) {
+              minX = Math.min(minX, pts[i]);
+              minY = Math.min(minY, pts[i + 1]);
+              maxX = Math.max(maxX, pts[i]);
+              maxY = Math.max(maxY, pts[i + 1]);
+            }
+
+            const sw = opts.strokeWidth!;
+            // Shift all points so min = strokeWidth/2 (padding for stroke)
+            const normalized: number[] = [];
+            for (let i = 0; i < pts.length; i += 2) {
+              normalized.push(pts[i] - minX + sw / 2);
+              normalized.push(pts[i + 1] - minY + sw / 2);
+            }
+
+            // Update origin to account for the shift
+            item.data.x = originX + minX - sw / 2;
+            item.data.y = originY + minY - sw / 2;
+            item.data.w = Math.max(maxX - minX + sw, 1);
+            item.data.h = Math.max(maxY - minY + sw, 1);
+            (item.data as DrawingObject).points = normalized;
+
+            // Redraw with normalized points and reposition
+            currentSprite.setPoints(normalized);
+            item.displayObject.position.set(item.data.x, item.data.y);
+          }
+        }
+
+        currentSprite = null;
+        scene._applyZOrder();
+        ctx.onChange();
+      };
+
+      container.addEventListener('pointerdown', onDown);
+      container.addEventListener('pointermove', onMove);
+      container.addEventListener('pointerup', onUp);
+      return () => {
+        if (syncTimer) clearTimeout(syncTimer);
+        container.removeEventListener('pointerdown', onDown);
+        container.removeEventListener('pointermove', onMove);
+        container.removeEventListener('pointerup', onUp);
+      };
     }
 
     default:
