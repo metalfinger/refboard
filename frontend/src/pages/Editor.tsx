@@ -70,7 +70,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showLayers, setShowLayers] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
-  const clipboardRef = useRef<any[]>([]);
+  const clipboardRef = useRef<FabricObject[]>([]);
 
   const resolvedBoardId = boardId || boardData?.board?.id;
 
@@ -218,28 +218,15 @@ export default function Editor({ isPublicView }: EditorProps) {
     toolCleanupRef.current = activateTool(canvas, activeTool, { color, strokeWidth, fontSize });
   }, [activeTool, color, strokeWidth, fontSize]);
 
-  // Clone a fabric object properly (handles images by reloading from URL)
-  const cloneObject = useCallback(async (data: any, offsetX = 0, offsetY = 0): Promise<any> => {
-    const newId = crypto.randomUUID();
-    if (data.type === 'image' && data.src) {
-      const imgObj = await FabricImage.fromURL(data.src, { crossOrigin: 'anonymous' });
-      imgObj.set({
-        left: (data.left || 0) + offsetX,
-        top: (data.top || 0) + offsetY,
-        scaleX: data.scaleX || 1,
-        scaleY: data.scaleY || 1,
-        angle: data.angle || 0,
-        flipX: data.flipX || false,
-        flipY: data.flipY || false,
-        opacity: data.opacity ?? 1,
-      } as any);
-      (imgObj as any).id = newId;
-      return imgObj;
-    }
-    const obj = await (FabricObject as any).fromObject({ ...data, id: newId });
-    obj.set({ left: (obj.left || 0) + offsetX, top: (obj.top || 0) + offsetY });
-    obj.id = newId;
-    return obj;
+  // Clone a fabric object using Fabric's native clone() method
+  const cloneFabricObject = useCallback(async (obj: any, offsetX = 0, offsetY = 0): Promise<any> => {
+    const cloned = await obj.clone();
+    cloned.set({
+      left: (cloned.left || 0) + offsetX,
+      top: (cloned.top || 0) + offsetY,
+    });
+    (cloned as any).id = crypto.randomUUID();
+    return cloned;
   }, []);
 
   // Copy selection as cropped image to system clipboard (for pasting in Paint etc.)
@@ -248,17 +235,18 @@ export default function Editor({ isPublicView }: EditorProps) {
     if (!canvas) return;
 
     const active = canvas.getActiveObjects();
-    if (active.length === 0) {
-      showToast('Nothing selected to copy');
-      return;
-    }
+    if (active.length === 0) return;
 
     try {
-      // Deselect temporarily so selection borders don't render
+      // Temporarily hide selection handles by deselecting
+      const activeObj = canvas.getActiveObject();
       canvas.discardActiveObject();
       canvas.requestRenderAll();
 
-      // Get bounding rect of all selected objects (in canvas coords)
+      // Use Fabric's toCanvasElement to render the canvas without selection handles
+      const fullCanvas = (canvas as any).toCanvasElement(1);
+
+      // Get bounding rect of selected objects on the rendered canvas
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       active.forEach((obj) => {
         const bound = obj.getBoundingRect();
@@ -268,14 +256,19 @@ export default function Editor({ isPublicView }: EditorProps) {
         maxY = Math.max(maxY, bound.top + bound.height);
       });
 
+      // Re-select immediately
+      if (activeObj) {
+        canvas.setActiveObject(activeObj);
+      }
+      canvas.requestRenderAll();
+
       const padding = 8;
       const cropX = Math.max(0, Math.floor(minX - padding));
       const cropY = Math.max(0, Math.floor(minY - padding));
-      const cropW = Math.ceil(maxX - minX + padding * 2);
-      const cropH = Math.ceil(maxY - minY + padding * 2);
+      const cropW = Math.min(Math.ceil(maxX - minX + padding * 2), fullCanvas.width - cropX);
+      const cropH = Math.min(Math.ceil(maxY - minY + padding * 2), fullCanvas.height - cropY);
 
-      // Render full canvas to an offscreen element
-      const fullCanvas = (canvas as any).toCanvasElement(1);
+      if (cropW <= 0 || cropH <= 0) return;
 
       // Crop to selection bounds
       const offscreen = document.createElement('canvas');
@@ -286,18 +279,6 @@ export default function Editor({ isPublicView }: EditorProps) {
       ctx.fillRect(0, 0, cropW, cropH);
       ctx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-      // Re-select objects
-      if (active.length === 1) {
-        canvas.setActiveObject(active[0]);
-      } else {
-        const fabricNs = (window as any).fabric;
-        if (fabricNs?.ActiveSelection) {
-          const sel = new fabricNs.ActiveSelection(active, { canvas });
-          canvas.setActiveObject(sel);
-        }
-      }
-      canvas.requestRenderAll();
-
       // Write to system clipboard
       offscreen.toBlob(async (blob: Blob | null) => {
         if (!blob) return;
@@ -305,16 +286,14 @@ export default function Editor({ isPublicView }: EditorProps) {
           await navigator.clipboard.write([
             new ClipboardItem({ 'image/png': blob }),
           ]);
-          showToast('Copied to clipboard');
         } catch {
-          showToast('Copy failed — browser may not support clipboard write');
+          // Clipboard API not available (needs HTTPS)
         }
       }, 'image/png');
     } catch (err) {
       console.error('Copy to clipboard failed:', err);
-      showToast('Copy failed');
     }
-  }, [showToast]);
+  }, []);
 
   // Refresh layer list from canvas
   const refreshLayers = useCallback(() => {
@@ -454,16 +433,16 @@ export default function Editor({ isPublicView }: EditorProps) {
         if (!canvas) return;
         const active = canvas.getActiveObjects();
         if (active.length > 0) {
-          clipboardRef.current = active.map((obj) => (obj as any).toJSON(['id', 'src']));
+          clipboardRef.current = [...active];
           copySelectionToClipboard();
         }
       }, disabled: !hasSelection },
       { label: 'Paste', shortcut: 'Ctrl+V', onClick: async () => {
         if (!canvas || clipboardRef.current.length === 0) return;
-        for (const data of clipboardRef.current) {
+        for (const original of clipboardRef.current) {
           try {
-            const obj = await cloneObject(data, 20, 20);
-            (canvas as any).add(obj);
+            const obj = await cloneFabricObject(original, 20, 20);
+            canvas.add(obj);
           } catch {}
         }
         canvas.requestRenderAll();
@@ -473,10 +452,9 @@ export default function Editor({ isPublicView }: EditorProps) {
         if (!canvas) return;
         const active = canvas.getActiveObjects();
         for (const original of active) {
-          const data = (original as any).toJSON(['id', 'src']);
           try {
-            const obj = await cloneObject(data, 20, 20);
-            (canvas as any).add(obj);
+            const obj = await cloneFabricObject(original, 20, 20);
+            canvas.add(obj);
           } catch {}
         }
         canvas.discardActiveObject();
@@ -530,7 +508,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         onCanvasChange();
       }, disabled: !hasSelection, danger: true },
     ];
-  }, [copySelectionToClipboard, onCanvasChange, handleGroup, handleUngroup, arrangeObjects, cloneObject]);
+  }, [copySelectionToClipboard, onCanvasChange, handleGroup, handleUngroup, arrangeObjects, cloneFabricObject]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -573,16 +551,17 @@ export default function Editor({ isPublicView }: EditorProps) {
         return;
       }
 
-      // Copy selected objects (internal + system clipboard)
+      // Copy selected objects (internal clipboard + system clipboard image)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
         const canvas = canvasRef.current?.getCanvas();
         if (!canvas) return;
         const active = canvas.getActiveObjects();
         if (active.length > 0) {
-          // Internal clipboard for within-app paste
-          clipboardRef.current = active.map((obj) => (obj as any).toJSON(['id', 'src']));
-          // Also write as image to system clipboard for external paste
+          // Store actual object refs for cloning later
+          clipboardRef.current = [...active];
+          // Write image to system clipboard (async, doesn't block)
           copySelectionToClipboard();
+          showToast('Copied');
         }
         return;
       }
@@ -594,18 +573,18 @@ export default function Editor({ isPublicView }: EditorProps) {
         const canvas = canvasRef.current?.getCanvas();
         if (!canvas) return;
         e.preventDefault();
-        const pasteOffset = 20;
-        for (const data of clipboardRef.current) {
+        const newObjs: FabricObject[] = [];
+        for (const original of clipboardRef.current) {
           try {
-            const obj = await cloneObject(data, pasteOffset, pasteOffset);
-            (canvas as any).add(obj);
+            const obj = await cloneFabricObject(original, 20, 20);
+            canvas.add(obj);
+            newObjs.push(obj);
           } catch (err) {
             console.error('Paste object failed:', err);
           }
         }
-        clipboardRef.current = clipboardRef.current.map((d) => ({
-          ...d, left: (d.left || 0) + pasteOffset, top: (d.top || 0) + pasteOffset,
-        }));
+        // Update clipboard to cloned positions for subsequent pastes
+        clipboardRef.current = newObjs;
         canvas.requestRenderAll();
         onCanvasChange();
         return;
@@ -626,10 +605,9 @@ export default function Editor({ isPublicView }: EditorProps) {
         const active = canvas.getActiveObjects();
         if (active.length === 0) return;
         for (const original of active) {
-          const data = (original as any).toJSON(['id', 'src']);
           try {
-            const obj = await cloneObject(data, 20, 20);
-            (canvas as any).add(obj);
+            const obj = await cloneFabricObject(original, 20, 20);
+            canvas.add(obj);
           } catch (err) {
             console.error('Duplicate failed:', err);
           }
