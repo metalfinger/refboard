@@ -9,6 +9,8 @@ import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import { SceneManager, SceneItem } from './SceneManager';
 import { TransformBox } from './TransformBox';
+import { ImageSprite } from './sprites/ImageSprite';
+import { Spring, PRESETS } from './spring';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,6 +22,8 @@ const BAND_STROKE = 0x4a90d9;
 const BAND_STROKE_ALPHA = 0.6;
 const BAND_STROKE_WIDTH = 1;
 const RUBBER_BAND_THRESHOLD = 5; // px in screen space before rubber band activates
+const DRAG_THRESHOLD = 5;        // px in screen space before object drag activates
+const DRAG_LIFT_SCALE = 1.03;    // scale during drag
 
 // ---------------------------------------------------------------------------
 // SelectionManager
@@ -43,6 +47,11 @@ export class SelectionManager {
   private _downWorldY = 0;
   private _rubberBanding = false;
   private _hitItemOnDown: SceneItem | null = null;
+
+  // Object drag state
+  private _objectDragging = false;
+  private _lastDragWorldX = 0;
+  private _lastDragWorldY = 0;
 
   constructor(viewport: Viewport, scene: SceneManager) {
     this._viewport = viewport;
@@ -177,12 +186,45 @@ export class SelectionManager {
   private _onPointerMove(e: FederatedPointerEvent): void {
     if (!this._pointerDown) return;
 
-    // If we clicked on an object, don't start rubber banding
-    if (this._hitItemOnDown) return;
-
     const dx = e.global.x - this._downScreenX;
     const dy = e.global.y - this._downScreenY;
     const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Object drag: clicked on a selected item
+    if (this._hitItemOnDown && this.selectedIds.has(this._hitItemOnDown.id)) {
+      if (!this._objectDragging && dist >= DRAG_THRESHOLD) {
+        this._objectDragging = true;
+        this._lastDragWorldX = this._downWorldX;
+        this._lastDragWorldY = this._downWorldY;
+
+        // Pause viewport drag so object drag works
+        this._viewport.plugins.pause('drag');
+
+        // Lift shadow + spring scale on all selected image sprites
+        this._applyLift();
+      }
+
+      if (this._objectDragging) {
+        const currentWorld = this._viewport.toWorld(e.global.x, e.global.y);
+        const ddx = currentWorld.x - this._lastDragWorldX;
+        const ddy = currentWorld.y - this._lastDragWorldY;
+        this._lastDragWorldX = currentWorld.x;
+        this._lastDragWorldY = currentWorld.y;
+
+        // Move all selected items by delta
+        for (const item of this.getSelectedItems()) {
+          item.displayObject.x += ddx;
+          item.displayObject.y += ddy;
+          item.data.x = item.displayObject.x;
+          item.data.y = item.displayObject.y;
+        }
+        this.transformBox.update(this.getSelectedItems());
+      }
+      return;
+    }
+
+    // Rubber band: clicked on empty space
+    if (this._hitItemOnDown) return;
 
     if (!this._rubberBanding && dist >= RUBBER_BAND_THRESHOLD) {
       this._rubberBanding = true;
@@ -200,7 +242,17 @@ export class SelectionManager {
     if (!this._pointerDown) return;
     this._pointerDown = false;
 
-    if (this._rubberBanding) {
+    if (this._objectDragging) {
+      // End object drag — drop shadow + spring scale back
+      this._applyDrop();
+      this._objectDragging = false;
+
+      // Resume viewport drag
+      this._viewport.plugins.resume('drag');
+
+      // Notify change (positions updated)
+      this._emitChange();
+    } else if (this._rubberBanding) {
       // Finish rubber band selection
       const currentWorld = this._viewport.toWorld(e.global.x, e.global.y);
       this._finishRubberBand(this._downWorldX, this._downWorldY, currentWorld.x, currentWorld.y, e.shiftKey);
@@ -218,6 +270,48 @@ export class SelectionManager {
     }
 
     this._hitItemOnDown = null;
+  }
+
+  // -- Drag Shadow Lift / Drop ----------------------------------------------
+
+  /** Lift shadows and spring-scale selected items up for drag. */
+  private _applyLift(): void {
+    const items = this.getSelectedItems();
+    for (const item of items) {
+      const dobj = item.displayObject;
+
+      // Lift shadow on ImageSprites
+      if (dobj instanceof ImageSprite) {
+        dobj.liftShadow();
+      }
+
+      // Spring scale 1.0 → 1.03
+      const spring = new Spring(1.0, DRAG_LIFT_SCALE, PRESETS.snappy);
+      spring.onUpdate = (v) => {
+        dobj.scale.set(v, v);
+      };
+      this._scene.springs.add(spring);
+    }
+  }
+
+  /** Drop shadows and spring-scale selected items back to rest. */
+  private _applyDrop(): void {
+    const items = this.getSelectedItems();
+    for (const item of items) {
+      const dobj = item.displayObject;
+
+      // Drop shadow on ImageSprites
+      if (dobj instanceof ImageSprite) {
+        dobj.dropShadow();
+      }
+
+      // Spring scale 1.03 → 1.0
+      const spring = new Spring(DRAG_LIFT_SCALE, 1.0, PRESETS.snappy);
+      spring.onUpdate = (v) => {
+        dobj.scale.set(v, v);
+      };
+      this._scene.springs.add(spring);
+    }
   }
 
   // -- Rubber Band ----------------------------------------------------------
