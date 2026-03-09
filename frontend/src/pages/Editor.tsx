@@ -467,6 +467,30 @@ export default function Editor({ isPublicView }: EditorProps) {
 
       {/* Canvas */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onContextMenu={handleContextMenu}>
+        {/* Dot grid — behind everything */}
+        {showGrid && (() => {
+          const scale = canvasTransform[0] || 1;
+          const tx = canvasTransform[4] || 0;
+          const ty = canvasTransform[5] || 0;
+          let spacing = 20;
+          while (spacing * scale < 12) spacing *= 2;
+          while (spacing * scale > 50) spacing /= 2;
+          const screenSpacing = spacing * scale;
+          const dotR = Math.max(0.5, Math.min(1.2, scale * 0.6));
+          const ox = tx % screenSpacing;
+          const oy = ty % screenSpacing;
+          const alpha = Math.max(0.08, Math.min(0.25, scale * 0.12));
+          return (
+            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }} width="100%" height="100%">
+              <defs>
+                <pattern id="dotgrid" width={screenSpacing} height={screenSpacing} patternUnits="userSpaceOnUse" x={ox} y={oy}>
+                  <circle cx={dotR} cy={dotR} r={dotR} fill={`rgba(255,255,255,${alpha})`} />
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#dotgrid)" />
+            </svg>
+          );
+        })()}
         <PixiCanvas
           ref={canvasRef}
           canvasState={canvasState}
@@ -479,33 +503,6 @@ export default function Editor({ isPublicView }: EditorProps) {
           boardId={resolvedBoardId || ''}
           canvasTransform={canvasTransform}
         />
-
-        {/* Dot grid overlay — adapts spacing at zoom levels like Figma */}
-        {showGrid && (() => {
-          const scale = canvasTransform[0] || 1;
-          const tx = canvasTransform[4] || 0;
-          const ty = canvasTransform[5] || 0;
-          // Adaptive spacing: base 20px, doubles when dots get too dense, halves when too sparse
-          let spacing = 20;
-          while (spacing * scale < 12) spacing *= 2;
-          while (spacing * scale > 50) spacing /= 2;
-          const screenSpacing = spacing * scale;
-          const dotR = Math.max(0.5, Math.min(1.2, scale * 0.6));
-          const ox = tx % screenSpacing;
-          const oy = ty % screenSpacing;
-          // Subtle dot: brighter at high zoom, dimmer at low zoom
-          const alpha = Math.max(0.08, Math.min(0.25, scale * 0.12));
-          return (
-            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }} width="100%" height="100%">
-              <defs>
-                <pattern id="dotgrid" width={screenSpacing} height={screenSpacing} patternUnits="userSpaceOnUse" x={ox} y={oy}>
-                  <circle cx={dotR} cy={dotR} r={dotR} fill={`rgba(255,255,255,${alpha})`} />
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill="url(#dotgrid)" />
-            </svg>
-          );
-        })()}
 
         {/* Empty canvas guide */}
         {objectCount === 0 && (
