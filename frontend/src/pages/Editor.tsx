@@ -467,7 +467,15 @@ export default function Editor({ isPublicView }: EditorProps) {
 
       {/* Canvas */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onContextMenu={handleContextMenu}>
-        {/* Dot grid — behind everything */}
+        <PixiCanvas
+          ref={canvasRef}
+          canvasState={canvasState}
+          currentTool={activeTool}
+          boardId={resolvedBoardId}
+          onChange={onCanvasChange}
+        />
+
+        {/* Dot grid — above canvas, below UI, no pointer events */}
         {showGrid && (() => {
           const scale = canvasTransform[0] || 1;
           const tx = canvasTransform[4] || 0;
@@ -476,12 +484,12 @@ export default function Editor({ isPublicView }: EditorProps) {
           while (spacing * scale < 12) spacing *= 2;
           while (spacing * scale > 50) spacing /= 2;
           const screenSpacing = spacing * scale;
-          const dotR = Math.max(0.5, Math.min(1.2, scale * 0.6));
+          const dotR = Math.max(0.5, Math.min(1.5, scale * 0.8));
           const ox = tx % screenSpacing;
           const oy = ty % screenSpacing;
-          const alpha = Math.max(0.08, Math.min(0.25, scale * 0.12));
+          const alpha = Math.max(0.12, Math.min(0.35, scale * 0.18));
           return (
-            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }} width="100%" height="100%">
+            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }} width="100%" height="100%">
               <defs>
                 <pattern id="dotgrid" width={screenSpacing} height={screenSpacing} patternUnits="userSpaceOnUse" x={ox} y={oy}>
                   <circle cx={dotR} cy={dotR} r={dotR} fill={`rgba(255,255,255,${alpha})`} />
@@ -491,13 +499,7 @@ export default function Editor({ isPublicView }: EditorProps) {
             </svg>
           );
         })()}
-        <PixiCanvas
-          ref={canvasRef}
-          canvasState={canvasState}
-          currentTool={activeTool}
-          boardId={resolvedBoardId}
-          onChange={onCanvasChange}
-        />
+
         <UserCursors
           socket={getSocket()}
           boardId={resolvedBoardId || ''}
