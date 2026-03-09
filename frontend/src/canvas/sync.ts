@@ -57,7 +57,7 @@ export function setupSync(
       if (_suppress) return;
       // Ensure all objects have IDs before serializing
       canvas.getObjects().forEach(ensureId);
-      const scene = (canvas as any).toJSON(['id']);
+      const scene = (canvas as any).toJSON(['id', 'crossOrigin']);
       socket.emit('scene:update', { boardId, scene });
     }, SCENE_THROTTLE);
   }
@@ -89,6 +89,18 @@ export function setupSync(
 
   function doApplyScene(scene: any) {
     _suppress = true;
+    // Ensure all images have crossOrigin set before Fabric loads them,
+    // otherwise the canvas becomes tainted and clipboard copy breaks.
+    if (scene?.objects) {
+      for (const obj of scene.objects) {
+        if (obj.type === 'image') obj.crossOrigin = 'anonymous';
+        if (obj.type === 'group' && obj.objects) {
+          for (const child of obj.objects) {
+            if (child.type === 'image') child.crossOrigin = 'anonymous';
+          }
+        }
+      }
+    }
     canvas.loadFromJSON(scene)
       .then(() => {
         canvas.requestRenderAll();

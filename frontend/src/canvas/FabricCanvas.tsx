@@ -89,17 +89,27 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
         }
       });
 
-      // Ctrl+Scroll zoom
+      // Scroll zoom — zooms toward cursor (like Figma/PureRef)
+      // Normalizes deltaY across mice, trackpads, and browsers for consistent feel
       canvas.on('mouse:wheel', (opt: any) => {
         const e = opt.e as WheelEvent;
         e.preventDefault();
         e.stopPropagation();
 
-        const delta = e.deltaY;
+        // Normalize delta: mice send large values (~100), trackpads send small (~1-5)
+        // Clamp to ±1 and apply a fixed zoom factor per "step" for predictable UX
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) delta *= 40;    // DOM_DELTA_LINE → px
+        if (e.deltaMode === 2) delta *= 800;   // DOM_DELTA_PAGE → px
+
+        // Use sign + magnitude clamping for consistent zoom speed
+        const direction = Math.sign(delta);
+        const ZOOM_STEP = 0.08; // 8% per step — smooth but responsive
         let zoom = canvas.getZoom();
-        zoom *= 0.999 ** delta;
+        zoom *= 1 - direction * ZOOM_STEP;
         zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 
+        // Zoom toward cursor position (industry standard)
         const point = canvas.getScenePoint(e);
         canvas.zoomToPoint(point, zoom);
         canvas.requestRenderAll();
@@ -163,19 +173,29 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
 
       if (!parsed || (!parsed.objects && !parsed.version)) return;
 
+      // Ensure all images in the JSON have crossOrigin set BEFORE Fabric loads them.
+      // Without this, the underlying <img> elements load without CORS headers,
+      // tainting the canvas and breaking toCanvasElement/toDataURL/toBlob.
+      if (parsed.objects) {
+        (parsed.objects as any[]).forEach((obj: any) => {
+          if (obj.type === 'image') {
+            obj.crossOrigin = 'anonymous';
+          }
+          // Handle images inside groups
+          if (obj.type === 'group' && obj.objects) {
+            (obj.objects as any[]).forEach((child: any) => {
+              if (child.type === 'image') {
+                child.crossOrigin = 'anonymous';
+              }
+            });
+          }
+        });
+      }
+
       // Suppress socket broadcasts during initial load — prevents flooding
       // other clients with object:add events for objects they already have
       suppressBroadcasts();
       canvas.loadFromJSON(parsed).then(() => {
-        canvas.getObjects().forEach((obj: FabricObject) => {
-          if (obj.type === 'image') {
-            const imgObj = obj as FabricImage;
-            const src = (imgObj as any).src || imgObj.getSrc?.();
-            if (src) {
-              (imgObj as any).crossOrigin = 'anonymous';
-            }
-          }
-        });
         canvas.requestRenderAll();
         // Small delay to ensure all deferred events have fired before resuming
         setTimeout(() => resumeBroadcasts(), 100);

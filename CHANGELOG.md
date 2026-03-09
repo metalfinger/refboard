@@ -4,6 +4,34 @@ Collaborative reference image board for game dev teams (PureRef-style, web-based
 
 ---
 
+## v0.5.0 — PureRef-Style Shortcuts & Operations (2026-03-09)
+
+### Added
+- **Full PureRef keyboard shortcut parity** — 40+ shortcuts organized via registry system
+- **Alignment** — Ctrl+Arrow to align left/right/top/bottom; Ctrl+Alt+Shift+Arrow to distribute H/V
+- **Normalize** — Ctrl+Alt+Arrow to normalize size/scale/width/height across selected objects
+- **Arrangement** — Ctrl+P optimal pack, Ctrl+Alt+N arrange by name, Ctrl+Alt+O by z-order, Ctrl+Alt+R randomly, Ctrl+Alt+S stack
+- **Arrange Grid/Row/Column** — available in context menu for quick layout
+- **Image manipulation** — Alt+Shift+H/V flip horizontal/vertical, Ctrl+Shift+T reset transform, Alt+G toggle grayscale, Alt+L toggle locked
+- **Overlay compare** — Ctrl+Y: stack selected at 50% opacity for visual comparison (toggle)
+- **Navigation** — Arrow Left/Right cycle through objects, Arrow Up/Down bring forward/send backward, Esc clear selection
+- **Cut** — Ctrl+X cuts selected objects to clipboard
+- **Grid overlay** — G key toggles a grid overlay on the canvas
+- **Shortcuts help overlay** — Press ? or F1, or click the ? button in toolbar to see all shortcuts
+- **Shortcut registry architecture** — all shortcuts defined declaratively in `shortcut-definitions.ts`, auto-sorted by modifier specificity
+
+### Changed
+- **Context menu expanded** — now includes alignment, distribute, normalize, flip, reset transform, stack, pack, and arrange options
+- **Layer ordering keys** — changed from `]`/`[` to Arrow Up/Down (matching PureRef)
+- **Keyboard handler refactored** — replaced 200-line if/else chain with registry-based matcher
+
+### Fixed
+- **Canvas tainting on clipboard copy** — images loaded via `loadFromJSON` (initial load, sync, undo/redo) now have `crossOrigin: 'anonymous'` patched into JSON before deserialization, preventing canvas taint
+- **Silent clipboard failures** — errors now shown as toast notifications instead of swallowed
+- **Blob timing** — clipboard write uses proper async/await pattern instead of callback
+
+---
+
 ## v0.4.0 — Layers, Groups & UI Overhaul (2026-03-09)
 
 ### Added

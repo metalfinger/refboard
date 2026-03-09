@@ -20,7 +20,7 @@ export class UndoManager {
   saveState(): void {
     if (this.locked) return;
 
-    const json = JSON.stringify((this.canvas as any).toJSON(['id']));
+    const json = JSON.stringify((this.canvas as any).toJSON(['id', 'crossOrigin']));
 
     // If we're not at the end, discard forward history
     if (this.pointer < this.stack.length - 1) {
@@ -69,7 +69,19 @@ export class UndoManager {
     if (!state) return;
 
     this.locked = true;
-    this.canvas.loadFromJSON(JSON.parse(state)).then(() => {
+    const parsed = JSON.parse(state);
+    // Ensure images have crossOrigin to prevent canvas tainting
+    if (parsed?.objects) {
+      for (const obj of parsed.objects) {
+        if (obj.type === 'image') obj.crossOrigin = 'anonymous';
+        if (obj.type === 'group' && obj.objects) {
+          for (const child of obj.objects) {
+            if (child.type === 'image') child.crossOrigin = 'anonymous';
+          }
+        }
+      }
+    }
+    this.canvas.loadFromJSON(parsed).then(() => {
       this.canvas.requestRenderAll();
       this.locked = false;
     });

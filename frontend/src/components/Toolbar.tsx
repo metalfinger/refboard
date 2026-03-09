@@ -29,6 +29,7 @@ interface ToolbarProps {
   onShareClick?: () => void;
   onToggleLayers?: () => void;
   showLayers?: boolean;
+  onToggleHelp?: () => void;
   boardName?: string;
 }
 
@@ -140,6 +141,7 @@ export default function Toolbar({
   onShareClick,
   onToggleLayers,
   showLayers,
+  onToggleHelp,
 }: ToolbarProps) {
   const showStroke = activeTool === ToolType.PEN;
   const showFontSize = activeTool === ToolType.TEXT;
@@ -265,6 +267,17 @@ export default function Toolbar({
         <ActionBtn onClick={onToggleLayers} title="Layers panel"
           active={showLayers}>
           <IconLayers />
+        </ActionBtn>
+      )}
+
+      {/* Help / shortcuts */}
+      {onToggleHelp && (
+        <ActionBtn onClick={onToggleHelp} title="Keyboard shortcuts (?)">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="7" cy="7" r="6" />
+            <path d="M5.5 5.5a1.5 1.5 0 013 0c0 1-1.5 1-1.5 2" strokeLinecap="round" />
+            <circle cx="7" cy="10" r="0.5" fill="currentColor" stroke="none" />
+          </svg>
         </ActionBtn>
       )}
 

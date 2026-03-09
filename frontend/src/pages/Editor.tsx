@@ -6,6 +6,9 @@ import { ToolType, activateTool, toolShortcuts } from '../canvas/tools';
 import { setupSync, isRemoteUpdate } from '../canvas/sync';
 import { setupDragDrop, setupPaste } from '../canvas/image-drop';
 import { UndoManager } from '../canvas/history';
+import { ShortcutContext, matchesShortcut, sortBySpecificity } from '../canvas/shortcuts';
+import { shortcuts as shortcutDefs } from '../canvas/shortcut-definitions';
+import * as ops from '../canvas/operations';
 import { connectSocket, disconnectSocket, getSocket } from '../socket';
 import { getBoard, saveCanvas } from '../api';
 import { useAuth } from '../auth';
@@ -14,6 +17,10 @@ import StatusBar, { SaveStatus } from '../components/StatusBar';
 import UserCursors from '../components/UserCursors';
 import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
+import ShortcutsHelp from '../components/ShortcutsHelp';
+
+// Pre-sort shortcuts by specificity (most modifiers first) for correct matching
+const sortedShortcuts = sortBySpecificity(shortcutDefs);
 
 interface EditorProps {
   isPublicView?: boolean;
@@ -68,6 +75,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
   const [showLayers, setShowLayers] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const clipboardRef = useRef<FabricObject[]>([]);
@@ -110,7 +119,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       if (!canvas) return;
       setSaveStatus('saving');
       try {
-        const state = JSON.stringify((canvas as any).toJSON(['id']));
+        const state = JSON.stringify((canvas as any).toJSON(['id', 'crossOrigin']));
         await saveCanvas(resolvedBoardId, state);
         setSaveStatus('saved');
       } catch {
@@ -229,71 +238,90 @@ export default function Editor({ isPublicView }: EditorProps) {
     return cloned;
   }, []);
 
-  // Copy selection as cropped image to system clipboard (for pasting in Paint etc.)
-  const copySelectionToClipboard = useCallback(async () => {
+  // Write canvas content to system clipboard as PNG.
+  // If objects are provided, crop to their bounds. Otherwise copy entire canvas.
+  const writeCanvasToClipboard = useCallback(async (objects?: FabricObject[]) => {
     const canvas = canvasRef.current?.getCanvas();
     if (!canvas) return;
 
-    const active = canvas.getActiveObjects();
-    if (active.length === 0) return;
-
     try {
-      // Temporarily hide selection handles by deselecting
+      // Save & clear selection so handles don't appear in screenshot
       const activeObj = canvas.getActiveObject();
       canvas.discardActiveObject();
-      canvas.requestRenderAll();
+      // renderAll is SYNCHRONOUS — ensures handles are gone before capture
+      canvas.renderAll();
 
-      // Use Fabric's toCanvasElement to render the canvas without selection handles
-      const fullCanvas = (canvas as any).toCanvasElement(1);
+      // Capture full canvas — may throw if canvas is tainted (images without crossOrigin)
+      let fullCanvas: HTMLCanvasElement;
+      try {
+        fullCanvas = (canvas as any).toCanvasElement(1);
+      } catch (taintErr) {
+        // Canvas is tainted — fall back to re-rendering without tainted images
+        console.warn('Canvas tainted, attempting fallback:', taintErr);
+        if (activeObj) {
+          canvas.setActiveObject(activeObj);
+          canvas.renderAll();
+        }
+        showToast('Copy failed — try re-opening the board');
+        return;
+      }
 
-      // Get bounding rect of selected objects on the rendered canvas
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      active.forEach((obj) => {
-        const bound = obj.getBoundingRect();
-        minX = Math.min(minX, bound.left);
-        minY = Math.min(minY, bound.top);
-        maxX = Math.max(maxX, bound.left + bound.width);
-        maxY = Math.max(maxY, bound.top + bound.height);
-      });
-
-      // Re-select immediately
+      // Restore selection immediately
       if (activeObj) {
         canvas.setActiveObject(activeObj);
+        canvas.renderAll();
       }
-      canvas.requestRenderAll();
 
-      const padding = 8;
-      const cropX = Math.max(0, Math.floor(minX - padding));
-      const cropY = Math.max(0, Math.floor(minY - padding));
-      const cropW = Math.min(Math.ceil(maxX - minX + padding * 2), fullCanvas.width - cropX);
-      const cropH = Math.min(Math.ceil(maxY - minY + padding * 2), fullCanvas.height - cropY);
+      let outputCanvas: HTMLCanvasElement;
 
-      if (cropW <= 0 || cropH <= 0) return;
-
-      // Crop to selection bounds
-      const offscreen = document.createElement('canvas');
-      offscreen.width = cropW;
-      offscreen.height = cropH;
-      const ctx = offscreen.getContext('2d')!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, cropW, cropH);
-      ctx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-      // Write to system clipboard
-      offscreen.toBlob(async (blob: Blob | null) => {
-        if (!blob) return;
-        try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blob }),
-          ]);
-        } catch {
-          // Clipboard API not available (needs HTTPS)
+      if (objects && objects.length > 0) {
+        // Compute bounding rect of the specified objects.
+        // getBoundingRect returns screen-space coords (includes viewport transform).
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of objects) {
+          const br = obj.getBoundingRect();
+          minX = Math.min(minX, br.left);
+          minY = Math.min(minY, br.top);
+          maxX = Math.max(maxX, br.left + br.width);
+          maxY = Math.max(maxY, br.top + br.height);
         }
-      }, 'image/png');
-    } catch (err) {
-      console.error('Copy to clipboard failed:', err);
+
+        const pad = 10;
+        const cx = Math.max(0, Math.floor(minX - pad));
+        const cy = Math.max(0, Math.floor(minY - pad));
+        const cw = Math.min(Math.ceil(maxX - minX + pad * 2), fullCanvas.width - cx);
+        const ch = Math.min(Math.ceil(maxY - minY + pad * 2), fullCanvas.height - cy);
+        if (cw <= 0 || ch <= 0) return;
+
+        outputCanvas = document.createElement('canvas');
+        outputCanvas.width = cw;
+        outputCanvas.height = ch;
+        const ctx = outputCanvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.drawImage(fullCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
+      } else {
+        // No specific objects → copy entire canvas as-is
+        outputCanvas = fullCanvas;
+      }
+
+      // Convert to blob using promise wrapper (keeps user activation alive)
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        outputCanvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error('toBlob returned null'));
+        }, 'image/png');
+      });
+
+      // Write to system clipboard — requires HTTPS or localhost
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ]);
+    } catch (err: any) {
+      console.error('writeCanvasToClipboard failed:', err);
+      showToast('Copy failed: ' + (err.message || 'clipboard not available'));
     }
-  }, []);
+  }, [showToast]);
 
   // Refresh layer list from canvas
   // Auto-name counters
@@ -388,56 +416,6 @@ export default function Editor({ isPublicView }: EditorProps) {
     refreshLayers();
   }, [onCanvasChange, refreshLayers]);
 
-  // Arrange selected objects
-  const arrangeObjects = useCallback((mode: 'grid' | 'row' | 'column') => {
-    const canvas = canvasRef.current?.getCanvas();
-    if (!canvas) return;
-    const active = canvas.getActiveObjects();
-    if (active.length < 2) return;
-
-    const gap = 20;
-    const sorted = [...active].sort((a, b) => (a.left || 0) - (b.left || 0));
-    const startX = sorted[0].left || 0;
-    const startY = sorted[0].top || 0;
-
-    if (mode === 'row') {
-      let x = startX;
-      sorted.forEach((obj) => {
-        obj.set({ left: x } as any);
-        obj.setCoords();
-        x += (obj.width || 100) * (obj.scaleX || 1) + gap;
-      });
-    } else if (mode === 'column') {
-      let y = startY;
-      sorted.forEach((obj) => {
-        obj.set({ left: startX, top: y } as any);
-        obj.setCoords();
-        y += (obj.height || 100) * (obj.scaleY || 1) + gap;
-      });
-    } else {
-      // Grid
-      const cols = Math.ceil(Math.sqrt(active.length));
-      let maxH = 0;
-      sorted.forEach((obj, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const w = (obj.width || 100) * (obj.scaleX || 1);
-        const h = (obj.height || 100) * (obj.scaleY || 1);
-        if (col === 0 && i > 0) maxH = 0;
-        obj.set({
-          left: startX + col * (200 + gap),
-          top: startY + row * (200 + gap),
-        } as any);
-        obj.setCoords();
-        maxH = Math.max(maxH, h);
-      });
-    }
-
-    canvas.discardActiveObject();
-    canvas.requestRenderAll();
-    onCanvasChange();
-  }, [onCanvasChange]);
-
   // Right-click context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -446,65 +424,84 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   const contextMenuItems = useCallback(() => {
     const canvas = canvasRef.current?.getCanvas();
-    const hasSelection = canvas ? canvas.getActiveObjects().length > 0 : false;
+    const active = canvas ? canvas.getActiveObjects() : [];
+    const hasSel = active.length > 0;
+    const multiSel = active.length >= 2;
+    const run = (fn: (objs: FabricObject[]) => void) => {
+      if (!canvas) return;
+      const { objects, restore } = ops.breakSelection(canvas);
+      fn(objects);
+      restore();
+      canvas.requestRenderAll(); onCanvasChange();
+    };
     return [
       { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => {
         if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        if (active.length > 0) {
-          clipboardRef.current = [...active];
-          copySelectionToClipboard();
-        }
-      }, disabled: !hasSelection },
+        if (hasSel) { clipboardRef.current = [...active]; writeCanvasToClipboard(active); }
+        else writeCanvasToClipboard();
+      } },
+      { label: 'Cut', shortcut: 'Ctrl+X', onClick: () => {
+        if (!canvas || !hasSel) return;
+        clipboardRef.current = [...active];
+        active.forEach((o) => canvas.remove(o));
+        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+      }, disabled: !hasSel },
       { label: 'Paste', shortcut: 'Ctrl+V', onClick: async () => {
         if (!canvas || clipboardRef.current.length === 0) return;
-        for (const original of clipboardRef.current) {
-          try {
-            const obj = await cloneFabricObject(original, 20, 20);
-            canvas.add(obj);
-          } catch {}
+        for (const o of clipboardRef.current) {
+          try { const c = await cloneFabricObject(o, 20, 20); canvas.add(c); } catch {}
         }
-        canvas.requestRenderAll();
-        onCanvasChange();
+        canvas.requestRenderAll(); onCanvasChange();
       }, disabled: clipboardRef.current.length === 0 },
       { label: 'Duplicate', shortcut: 'Ctrl+D', onClick: async () => {
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        for (const original of active) {
-          try {
-            const obj = await cloneFabricObject(original, 20, 20);
-            canvas.add(obj);
-          } catch {}
+        if (!canvas || !hasSel) return;
+        for (const o of active) {
+          try { const c = await cloneFabricObject(o, 20, 20); canvas.add(c); } catch {}
         }
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-        onCanvasChange();
-      }, disabled: !hasSelection },
+        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+      }, disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
+      // — Alignment —
+      { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => run((o) => ops.alignLeft(o)), disabled: !multiSel },
+      { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => run((o) => ops.alignRight(o)), disabled: !multiSel },
+      { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => run((o) => ops.alignTop(o)), disabled: !multiSel },
+      { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => run((o) => ops.alignBottom(o)), disabled: !multiSel },
+      { label: 'Distribute H', shortcut: '', onClick: () => run((o) => ops.distributeHorizontal(o)), disabled: active.length < 3 },
+      { label: 'Distribute V', shortcut: '', onClick: () => run((o) => ops.distributeVertical(o)), disabled: active.length < 3 },
+      { label: '', shortcut: '', onClick: () => {}, divider: true },
+      // — Layer ordering —
       { label: 'Bring Forward', shortcut: ']', onClick: () => {
         if (!canvas) return;
-        canvas.getActiveObjects().forEach((obj) => canvas.bringObjectForward(obj));
-        canvas.requestRenderAll();
-        onCanvasChange();
-      }, disabled: !hasSelection },
+        active.forEach((o) => (canvas as any).bringObjectForward(o));
+        canvas.requestRenderAll(); onCanvasChange();
+      }, disabled: !hasSel },
       { label: 'Send Backward', shortcut: '[', onClick: () => {
         if (!canvas) return;
-        canvas.getActiveObjects().forEach((obj) => canvas.sendObjectBackwards(obj));
-        canvas.requestRenderAll();
-        onCanvasChange();
-      }, disabled: !hasSelection },
+        active.forEach((o) => (canvas as any).sendObjectBackwards(o));
+        canvas.requestRenderAll(); onCanvasChange();
+      }, disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      { label: 'Group', shortcut: 'Ctrl+G', onClick: handleGroup,
-        disabled: !canvas || canvas.getActiveObjects().length < 2 },
+      // — Group —
+      { label: 'Group', shortcut: 'Ctrl+G', onClick: handleGroup, disabled: !multiSel },
       { label: 'Ungroup', shortcut: 'Ctrl+Shift+G', onClick: handleUngroup,
         disabled: !canvas || canvas.getActiveObject()?.type !== 'group' },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
-      { label: 'Arrange Grid', shortcut: '', onClick: () => arrangeObjects('grid'),
-        disabled: !canvas || canvas.getActiveObjects().length < 2 },
-      { label: 'Arrange Row', shortcut: '', onClick: () => arrangeObjects('row'),
-        disabled: !canvas || canvas.getActiveObjects().length < 2 },
-      { label: 'Arrange Column', shortcut: '', onClick: () => arrangeObjects('column'),
-        disabled: !canvas || canvas.getActiveObjects().length < 2 },
+      // — Arrangement —
+      { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => run((o) => ops.arrangeOptimal(o)), disabled: !multiSel },
+      { label: 'Arrange Grid', shortcut: '', onClick: () => run((o) => ops.arrangeGrid(o)), disabled: !multiSel },
+      { label: 'Arrange Row', shortcut: '', onClick: () => run((o) => ops.arrangeRow(o)), disabled: !multiSel },
+      { label: 'Arrange Column', shortcut: '', onClick: () => run((o) => ops.arrangeColumn(o)), disabled: !multiSel },
+      { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => run((o) => ops.stackObjects(o)), disabled: !multiSel },
+      { label: '', shortcut: '', onClick: () => {}, divider: true },
+      // — Normalize —
+      { label: 'Normalize Size', shortcut: '', onClick: () => run((o) => ops.normalizeSize(o)), disabled: !multiSel },
+      { label: 'Normalize Width', shortcut: '', onClick: () => run((o) => ops.normalizeWidth(o)), disabled: !multiSel },
+      { label: 'Normalize Height', shortcut: '', onClick: () => run((o) => ops.normalizeHeight(o)), disabled: !multiSel },
+      { label: '', shortcut: '', onClick: () => {}, divider: true },
+      // — Image —
+      { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => run((o) => ops.flipHorizontal(o)), disabled: !hasSel },
+      { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => run((o) => ops.flipVertical(o)), disabled: !hasSel },
+      { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => run((o) => ops.resetTransform(o)), disabled: !hasSel },
       { label: '', shortcut: '', onClick: () => {}, divider: true },
       { label: 'Select All', shortcut: 'Ctrl+A', onClick: () => {
         if (!canvas) return;
@@ -520,211 +517,84 @@ export default function Editor({ isPublicView }: EditorProps) {
       { label: '', shortcut: '', onClick: () => {}, divider: true },
       { label: 'Delete', shortcut: 'Del', onClick: () => {
         if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        active.forEach((obj) => canvas.remove(obj));
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-        onCanvasChange();
-      }, disabled: !hasSelection, danger: true },
+        active.forEach((o) => canvas.remove(o));
+        canvas.discardActiveObject(); canvas.requestRenderAll(); onCanvasChange();
+      }, disabled: !hasSel, danger: true },
     ];
-  }, [copySelectionToClipboard, onCanvasChange, handleGroup, handleUngroup, arrangeObjects, cloneFabricObject]);
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, cloneFabricObject]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — registry-based approach
   useEffect(() => {
     async function onKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      const tool = toolShortcuts[e.key.toLowerCase()];
-      if (tool && !e.ctrlKey && !e.metaKey) {
-        setActiveTool(tool);
-        return;
-      }
+      const canvas = canvasRef.current?.getCanvas();
+      if (!canvas) return;
 
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undoRef.current?.undo();
-        setCanUndo(undoRef.current?.canUndo() ?? false);
-        setCanRedo(undoRef.current?.canRedo() ?? false);
-        onCanvasChange();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
-        e.preventDefault();
-        undoRef.current?.redo();
-        setCanUndo(undoRef.current?.canUndo() ?? false);
-        setCanRedo(undoRef.current?.canRedo() ?? false);
-        onCanvasChange();
-        return;
-      }
-
-      // Group (Ctrl+G)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
-        e.preventDefault();
-        handleGroup();
-        return;
-      }
-      // Ungroup (Ctrl+Shift+G)
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G') {
-        e.preventDefault();
-        handleUngroup();
-        return;
-      }
-
-      // Copy selected objects (internal clipboard + system clipboard image)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        if (active.length > 0) {
-          // Store actual object refs for cloning later
-          clipboardRef.current = [...active];
-          // Write image to system clipboard (async, doesn't block)
-          copySelectionToClipboard();
-          showToast('Copied');
+      // Tool shortcuts (bare keys 1-5, v/h/p/t/e — no modifiers)
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tool = toolShortcuts[e.key.toLowerCase()];
+        if (tool) {
+          setActiveTool(tool);
+          return;
         }
-        return;
       }
 
-      // Paste canvas objects (Ctrl+V) — only if we have internal clipboard
-      // Image paste from system clipboard is handled by setupPaste in image-drop.ts
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (clipboardRef.current.length === 0) return; // let setupPaste handle it
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
+      // Special: Ctrl+V paste — if internal clipboard is empty, let browser/setupPaste handle it
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
+        if (clipboardRef.current.length === 0) return;
+      }
+
+      // Build context for shortcut handlers
+      const ctx: ShortcutContext = {
+        canvas,
+        getActiveObjects: () => canvas.getActiveObjects(),
+        getActiveObject: () => canvas.getActiveObject() || null,
+        clipboardRef,
+        cloneFabricObject,
+        writeCanvasToClipboard,
+        onCanvasChange,
+        showToast,
+        fitAll: () => canvasRef.current?.fitAll(),
+        setActiveTool,
+        undoRef,
+        setCanUndo,
+        setCanRedo,
+        refreshLayers,
+        handleGroup,
+        handleUngroup,
+        toggleGrid: () => setShowGrid((v) => !v),
+        toggleShowHelp: () => setShowHelp((v) => !v),
+      };
+
+      // Match against sorted registry (most-specific first)
+      for (const def of sortedShortcuts) {
+        if (!matchesShortcut(e, def)) continue;
+
+        // Check selection requirements
+        const activeCount = canvas.getActiveObjects().length;
+        if (def.needsSelection && activeCount === 0) continue;
+        if (def.minSelection && activeCount < def.minSelection) continue;
+
         e.preventDefault();
-        const newObjs: FabricObject[] = [];
-        for (const original of clipboardRef.current) {
-          try {
-            const obj = await cloneFabricObject(original, 20, 20);
-            canvas.add(obj);
-            newObjs.push(obj);
-          } catch (err) {
-            console.error('Paste object failed:', err);
-          }
-        }
-        // Update clipboard to cloned positions for subsequent pastes
-        clipboardRef.current = newObjs;
-        canvas.requestRenderAll();
-        onCanvasChange();
-        return;
-      }
+        await def.handler(ctx);
 
-      // Copy as image to system clipboard (Ctrl+Shift+C)
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
-        e.preventDefault();
-        copySelectionToClipboard();
-        return;
-      }
-
-      // Duplicate selected (Ctrl+D)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
-        e.preventDefault();
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        if (active.length === 0) return;
-        for (const original of active) {
-          try {
-            const obj = await cloneFabricObject(original, 20, 20);
-            canvas.add(obj);
-          } catch (err) {
-            console.error('Duplicate failed:', err);
-          }
-        }
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-        onCanvasChange();
-        return;
-      }
-
-      // Layer ordering
-      if (e.key === ']') {
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        active.forEach((obj) => (canvas as any).bringObjectForward(obj));
-        canvas.requestRenderAll();
-        onCanvasChange();
-        return;
-      }
-      if (e.key === '[') {
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        active.forEach((obj) => (canvas as any).sendObjectBackwards(obj));
-        canvas.requestRenderAll();
-        onCanvasChange();
-        return;
-      }
-
-      // Zoom in/out with Ctrl+=/Ctrl+-
-      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const z = Math.min(canvas.getZoom() * 1.2, 5);
-        const center = canvas.getCenterPoint();
-        canvas.zoomToPoint(center, z);
-        canvas.requestRenderAll();
-        setZoom(z);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-        e.preventDefault();
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const z = Math.max(canvas.getZoom() / 1.2, 0.1);
-        const center = canvas.getCenterPoint();
-        canvas.zoomToPoint(center, z);
-        canvas.requestRenderAll();
-        setZoom(z);
-        return;
-      }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        const active = canvas.getActiveObjects();
-        if (active.length > 0) {
-          active.forEach((obj) => canvas.remove(obj));
-          canvas.discardActiveObject();
-          canvas.requestRenderAll();
-          onCanvasChange();
-        }
-        return;
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-        e.preventDefault();
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-        canvas.discardActiveObject();
-        const fabricNs = (window as any).fabric;
-        if (fabricNs?.ActiveSelection) {
-          const sel = new fabricNs.ActiveSelection(canvas.getObjects(), { canvas });
-          canvas.setActiveObject(sel);
-        }
-        canvas.requestRenderAll();
-        return;
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-        e.preventDefault();
-        canvasRef.current?.fitAll();
+        // Update zoom display after any action
+        setZoom(canvas.getZoom());
         return;
       }
     }
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCanvasChange, copySelectionToClipboard, handleGroup, handleUngroup]);
+  }, [onCanvasChange, writeCanvasToClipboard, handleGroup, handleUngroup, cloneFabricObject, showToast, refreshLayers]);
 
   // Save on page unload
   useEffect(() => {
     function onBeforeUnload() {
       const canvas = canvasRef.current?.getCanvas();
       if (!canvas || !resolvedBoardId) return;
-      const state = JSON.stringify((canvas as any).toJSON(['id']));
+      const state = JSON.stringify((canvas as any).toJSON(['id', 'crossOrigin']));
       const blob = new Blob([JSON.stringify({ canvas_state: state })], { type: 'application/json' });
       navigator.sendBeacon(`/api/boards/${resolvedBoardId}/save`, blob);
     }
@@ -855,6 +725,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         onlineUsers={onlineUsers}
         onToggleLayers={() => setShowLayers((v) => !v)}
         showLayers={showLayers}
+        onToggleHelp={() => setShowHelp((v) => !v)}
         boardName={board?.name}
       />
 
@@ -871,6 +742,24 @@ export default function Editor({ isPublicView }: EditorProps) {
           boardId={resolvedBoardId || ''}
           canvasTransform={canvasTransform}
         />
+
+        {/* Grid overlay */}
+        {showGrid && (
+          <svg
+            style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}
+            width="100%" height="100%"
+          >
+            <defs>
+              <pattern id="grid50" width={50 * (canvasTransform[0] || 1)} height={50 * (canvasTransform[3] || 1)} patternUnits="userSpaceOnUse"
+                x={(canvasTransform[4] || 0) % (50 * (canvasTransform[0] || 1))}
+                y={(canvasTransform[5] || 0) % (50 * (canvasTransform[3] || 1))}>
+                <line x1="0" y1="0" x2={50 * (canvasTransform[0] || 1)} y2="0" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+                <line x1="0" y1="0" x2="0" y2={50 * (canvasTransform[3] || 1)} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid50)" />
+          </svg>
+        )}
 
         {/* Empty canvas guide */}
         {imageCount === 0 && !canvasState?.objects?.length && (
@@ -997,6 +886,11 @@ export default function Editor({ isPublicView }: EditorProps) {
         imageCount={imageCount}
         saveStatus={saveStatus}
       />
+
+      {/* Shortcuts help overlay */}
+      {showHelp && (
+        <ShortcutsHelp shortcuts={shortcutDefs} onClose={() => setShowHelp(false)} />
+      )}
     </div>
   );
 }
