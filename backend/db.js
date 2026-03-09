@@ -57,6 +57,8 @@ db.exec(`
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     canvas_state TEXT DEFAULT '{}',
+    thumbnail TEXT DEFAULT NULL,
+    object_count INTEGER NOT NULL DEFAULT 0,
     created_by TEXT NOT NULL REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -82,6 +84,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_boards_created_by ON boards(created_by);
   CREATE INDEX IF NOT EXISTS idx_images_board ON images(board_id);
 `);
+
+// Migrations — add columns to existing tables
+try {
+  db.prepare("SELECT thumbnail FROM boards LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE boards ADD COLUMN thumbnail TEXT DEFAULT NULL");
+}
+try {
+  db.prepare("SELECT object_count FROM boards LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE boards ADD COLUMN object_count INTEGER NOT NULL DEFAULT 0");
+}
 
 // ---------------------
 // User helpers
@@ -128,7 +142,10 @@ function getUserCount() {
 function getCollections(userId, search, limit = 50, offset = 0) {
   let query = `
     SELECT DISTINCT c.*, cm.role as member_role,
-           (SELECT COUNT(*) FROM boards WHERE collection_id = c.id) as board_count
+           (SELECT COUNT(*) FROM boards WHERE collection_id = c.id) as board_count,
+           (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) as member_count,
+           (SELECT b.thumbnail FROM boards b WHERE b.collection_id = c.id AND b.thumbnail IS NOT NULL ORDER BY b.updated_at DESC LIMIT 1) as preview_thumbnail,
+           (SELECT GROUP_CONCAT(sub.thumbnail, '|||') FROM (SELECT thumbnail FROM boards WHERE collection_id = c.id AND thumbnail IS NOT NULL ORDER BY updated_at DESC LIMIT 4) sub) as preview_thumbnails
     FROM collections c
     LEFT JOIN collection_members cm ON c.id = cm.collection_id AND cm.user_id = ?
     WHERE (cm.user_id IS NOT NULL OR c.is_public = 1)
@@ -230,8 +247,9 @@ function checkCollectionAccess(collectionId, userId) {
 // ---------------------
 function getCollectionBoards(collectionId, search, limit = 50, offset = 0) {
   let query = `
-    SELECT b.*,
-           (SELECT COUNT(*) FROM images WHERE board_id = b.id) as image_count
+    SELECT b.id, b.collection_id, b.name, b.description, b.thumbnail,
+           b.created_by, b.created_at, b.updated_at,
+           b.object_count as image_count
     FROM boards b
     WHERE b.collection_id = ?
   `;
@@ -281,9 +299,22 @@ function deleteBoard(boardId) {
   db.prepare('DELETE FROM boards WHERE id = ?').run(boardId);
 }
 
-function saveBoardCanvas(boardId, canvasState) {
-  db.prepare("UPDATE boards SET canvas_state = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(typeof canvasState === 'string' ? canvasState : JSON.stringify(canvasState), boardId);
+function saveBoardCanvas(boardId, canvasState, thumbnail) {
+  const stateStr = typeof canvasState === 'string' ? canvasState : JSON.stringify(canvasState);
+  // Count objects from canvas state JSON
+  let objectCount = 0;
+  try {
+    const parsed = typeof canvasState === 'string' ? JSON.parse(canvasState) : canvasState;
+    if (parsed && Array.isArray(parsed.objects)) objectCount = parsed.objects.length;
+  } catch {}
+
+  if (thumbnail) {
+    db.prepare("UPDATE boards SET canvas_state = ?, thumbnail = ?, object_count = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(stateStr, thumbnail, objectCount, boardId);
+  } else {
+    db.prepare("UPDATE boards SET canvas_state = ?, object_count = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(stateStr, objectCount, boardId);
+  }
 }
 
 // ---------------------

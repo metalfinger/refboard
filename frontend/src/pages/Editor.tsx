@@ -67,6 +67,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [fontSize, setFontSize] = useState(24);
   const [zoom, setZoom] = useState(1);
+  const [objectCount, setObjectCount] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -120,7 +121,50 @@ export default function Editor({ isPublicView }: EditorProps) {
       setSaveStatus('saving');
       try {
         const state = JSON.stringify((canvas as any).toJSON(['id', 'crossOrigin']));
-        await saveCanvas(resolvedBoardId, state);
+        // Generate a small thumbnail preview of the canvas content
+        let thumbnail: string | undefined;
+        const objects = canvas.getObjects();
+        if (objects.length > 0) {
+          // Use scene-space coordinates (obj.left/top + scaled dimensions)
+          // NOT getBoundingRect() which returns viewport/screen-space
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          objects.forEach((obj: any) => {
+            const l = obj.left ?? 0;
+            const t = obj.top ?? 0;
+            const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
+            const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
+            minX = Math.min(minX, l);
+            minY = Math.min(minY, t);
+            maxX = Math.max(maxX, l + w);
+            maxY = Math.max(maxY, t + h);
+          });
+          const sceneW = maxX - minX;
+          const sceneH = maxY - minY;
+          if (sceneW > 0 && sceneH > 0) {
+            const origVpt = [...canvas.viewportTransform!];
+            try {
+              const thumbSize = 400;
+              const scale = Math.min(thumbSize / sceneW, thumbSize / sceneH);
+              const pw = Math.ceil(sceneW * scale);
+              const ph = Math.ceil(sceneH * scale);
+              canvas.setViewportTransform([
+                scale, 0, 0, scale,
+                -minX * scale, -minY * scale,
+              ]);
+              const thumbCanvas = canvas.toCanvasElement(1, {
+                left: 0, top: 0, width: pw, height: ph,
+              });
+              thumbnail = thumbCanvas.toDataURL('image/webp', 0.6);
+            } catch (thumbErr) {
+              console.warn('Thumbnail generation failed:', thumbErr);
+            } finally {
+              // ALWAYS restore viewport — even if toCanvasElement/toDataURL throws
+              canvas.setViewportTransform(origVpt as any);
+              canvas.requestRenderAll();
+            }
+          }
+        }
+        await saveCanvas(resolvedBoardId, state, thumbnail);
         setSaveStatus('saved');
       } catch {
         setSaveStatus('unsaved');
@@ -140,8 +184,11 @@ export default function Editor({ isPublicView }: EditorProps) {
     const z = canvasRef.current?.getZoom() ?? 1;
     setZoom(z);
     const canvas = canvasRef.current?.getCanvas();
-    if (canvas?.viewportTransform) {
-      setCanvasTransform([...canvas.viewportTransform]);
+    if (canvas) {
+      if (canvas.viewportTransform) {
+        setCanvasTransform([...canvas.viewportTransform]);
+      }
+      setObjectCount(canvas.getObjects().length);
     }
   }, [scheduleSave]);
 
@@ -633,7 +680,6 @@ export default function Editor({ isPublicView }: EditorProps) {
   const board = boardData?.board;
   const collection = boardData?.collection;
   const canvasState = board?.canvas_state;
-  const imageCount = boardData?.images?.length ?? 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
@@ -763,7 +809,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         )}
 
         {/* Empty canvas guide */}
-        {imageCount === 0 && !canvasState?.objects?.length && (
+        {objectCount === 0 && !canvasState?.objects?.length && (
           <div style={{
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             pointerEvents: 'none', textAlign: 'center', color: '#555', userSelect: 'none',
@@ -884,7 +930,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       {/* Status bar */}
       <StatusBar
         boardName={board?.name || 'Untitled'}
-        imageCount={imageCount}
+        imageCount={objectCount}
         saveStatus={saveStatus}
       />
 

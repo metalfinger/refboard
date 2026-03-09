@@ -169,12 +169,12 @@ router.post('/:boardId/save', (req, res) => {
     const result = resolveBoard(req, res, 'editor');
     if (!result) return;
 
-    const { canvas_state } = req.body;
+    const { canvas_state, thumbnail } = req.body;
     if (canvas_state === undefined) {
       return res.status(400).json({ error: 'canvas_state is required' });
     }
 
-    saveBoardCanvas(result.board.id, canvas_state);
+    saveBoardCanvas(result.board.id, canvas_state, thumbnail || null);
 
     return res.json({ message: 'Canvas saved' });
   } catch (err) {

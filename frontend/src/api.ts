@@ -54,6 +54,10 @@ export function getCollectionDetail(collectionId: string) {
   return api.get(`/api/collections/${collectionId}`);
 }
 
+export function updateCollection(collectionId: string, data: { name?: string; description?: string }) {
+  return api.put(`/api/collections/${collectionId}`, data);
+}
+
 export function deleteCollection(collectionId: string) {
   return api.delete(`/api/collections/${collectionId}`);
 }
@@ -91,12 +95,16 @@ export function getBoard(boardId: string) {
   return api.get(`/api/boards/${boardId}`);
 }
 
+export function updateBoard(boardId: string, data: { name?: string; description?: string }) {
+  return api.put(`/api/boards/${boardId}`, data);
+}
+
 export function deleteBoard(boardId: string) {
   return api.delete(`/api/boards/${boardId}`);
 }
 
-export function saveCanvas(boardId: string, canvasState: string) {
-  return api.post(`/api/boards/${boardId}/save`, { canvas_state: canvasState });
+export function saveCanvas(boardId: string, canvasState: string, thumbnail?: string) {
+  return api.post(`/api/boards/${boardId}/save`, { canvas_state: canvasState, thumbnail });
 }
 
 export function uploadImage(boardId: string, file: File) {

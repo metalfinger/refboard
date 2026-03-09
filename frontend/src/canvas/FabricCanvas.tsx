@@ -138,9 +138,9 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
         zoom *= 1 - direction * ZOOM_STEP;
         zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 
-        // Zoom toward cursor position (industry standard)
-        const point = canvas.getScenePoint(e);
-        canvas.zoomToPoint(point, zoom);
+        // Zoom toward cursor — must use element-relative coords (offsetX/Y),
+        // NOT getScenePoint() which returns scene-space and causes zoom drift
+        canvas.zoomToPoint({ x: e.offsetX, y: e.offsetY } as any, zoom);
         canvas.requestRenderAll();
         persistViewport();
       });

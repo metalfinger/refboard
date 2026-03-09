@@ -56,7 +56,7 @@ export default function StatusBar({ boardName, imageCount, saveStatus }: StatusB
     <div style={styles.bar}>
       <div style={styles.left}>
         <span style={styles.name}>{boardName}</span>
-        <span>{imageCount} image{imageCount !== 1 ? 's' : ''}</span>
+        <span>{imageCount} object{imageCount !== 1 ? 's' : ''}</span>
       </div>
       <div style={styles.right}>
         <span style={{ ...styles.dot, background: status.color }} />
