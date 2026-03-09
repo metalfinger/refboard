@@ -29,6 +29,7 @@ function removePlaceholder(viewport: Viewport, g: Graphics) {
 /*  Handle upload response (image or video)                            */
 /* ------------------------------------------------------------------ */
 
+/** Returns the placed width so callers can offset subsequent items. */
 function handleUploadResult(
   res: any,
   viewport: Viewport,
@@ -36,7 +37,7 @@ function handleUploadResult(
   x: number,
   y: number,
   onChange: OnChange,
-) {
+): number {
   const imgData = res.data.image || res.data;
   const mediaType: string = imgData.media_type || 'image';
   const assetKey: string | undefined = imgData.asset_key;
@@ -64,6 +65,7 @@ function handleUploadResult(
   }
 
   onChange();
+  return finalW;
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,26 +120,26 @@ export function setupDragDrop(
       return;
     }
 
-    let dropIndex = 0;
+    const rect = container.getBoundingClientRect();
+    const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+    const GAP = 20; // px gap between dropped images
+    let cursorX = world.x; // running x position for side-by-side placement
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
 
-      const rect = container.getBoundingClientRect();
-      const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
-      // Offset each subsequent file so they don't overlap
-      const offsetX = dropIndex * 30;
-      const offsetY = dropIndex * 30;
-      const placeholder = createPlaceholder(viewport, world.x + offsetX, world.y + offsetY);
-      dropIndex++;
+      const placeholder = createPlaceholder(viewport, cursorX, world.y);
 
       try {
         const res = await uploadImage(boardId, file);
         removePlaceholder(viewport, placeholder);
-        handleUploadResult(res, viewport, sceneManager, world.x + offsetX, world.y + offsetY, onChange);
+        const placedWidth = handleUploadResult(res, viewport, sceneManager, cursorX, world.y, onChange);
+        cursorX += placedWidth + GAP;
       } catch (err) {
         console.error('Image upload failed:', err);
         removePlaceholder(viewport, placeholder);
+        cursorX += 220; // fallback offset if upload fails
       }
     }
   }
