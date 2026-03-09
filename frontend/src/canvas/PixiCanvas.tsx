@@ -160,6 +160,41 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           springs.tick(ticker.deltaMS / 1000);
         });
 
+        // -- Culling + LOD ticker (runs every 200ms, not every frame) ------
+
+        let lastCullCheck = 0;
+        app.ticker.add((ticker) => {
+          lastCullCheck += ticker.deltaMS;
+          if (lastCullCheck < 200) return;
+          lastCullCheck = 0;
+
+          const zoom = viewport.scale.x;
+          const bounds = viewport.getVisibleBounds();
+          const margin = 200;
+
+          for (const item of scene.getAllItems()) {
+            const d = item.displayObject;
+            const ib = d.getBounds();
+            const inView =
+              ib.x + ib.width > bounds.x - margin &&
+              ib.x < bounds.x + bounds.width + margin &&
+              ib.y + ib.height > bounds.y - margin &&
+              ib.y < bounds.y + bounds.height + margin;
+
+            if (item.type === 'image' && 'updateLOD' in d) {
+              if (inView) {
+                (d as any).updateLOD(zoom);
+                d.visible = true;
+              } else {
+                d.visible = false;
+              }
+            }
+            if (item.type === 'video' && 'onVisibilityChange' in d) {
+              (d as any).onVisibilityChange(inView);
+            }
+          }
+        });
+
         // -- Store refs ------------------------------------------------------
 
         appRef.current = app;
