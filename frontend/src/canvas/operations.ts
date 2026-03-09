@@ -75,36 +75,40 @@ export function alignBottom(objects: SceneItem[]) {
 
 // ─── Distribution ───
 
+/** Distribute horizontally: normalize all to same height, then space evenly in a row. */
 export function distributeHorizontal(objects: SceneItem[]) {
-  if (objects.length < 3) return;
+  if (objects.length < 2) return;
+  // Normalize heights first (uniform row)
+  normalizeHeight(objects);
+  // Then arrange as row with even spacing
+  const gap = 20;
   const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const totalSpan = last.data.x + scaledW(last) - first.data.x;
-  const totalWidth = sorted.reduce((s, item) => s + scaledW(item), 0);
-  const gap = (totalSpan - totalWidth) / (sorted.length - 1);
-  let x = first.data.x + scaledW(first) + gap;
-  for (let i = 1; i < sorted.length - 1; i++) {
-    sorted[i].data.x = x;
-    syncPosition(sorted[i]);
-    x += scaledW(sorted[i]) + gap;
-  }
+  const startY = sorted[0].data.y;
+  let x = sorted[0].data.x;
+  sorted.forEach((item) => {
+    item.data.x = x;
+    item.data.y = startY;
+    syncPosition(item);
+    x += scaledW(item) + gap;
+  });
 }
 
+/** Distribute vertically: normalize all to same width, then space evenly in a column. */
 export function distributeVertical(objects: SceneItem[]) {
-  if (objects.length < 3) return;
+  if (objects.length < 2) return;
+  // Normalize widths first (uniform column)
+  normalizeWidth(objects);
+  // Then arrange as column with even spacing
+  const gap = 20;
   const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const totalSpan = last.data.y + scaledH(last) - first.data.y;
-  const totalHeight = sorted.reduce((s, item) => s + scaledH(item), 0);
-  const gap = (totalSpan - totalHeight) / (sorted.length - 1);
-  let y = first.data.y + scaledH(first) + gap;
-  for (let i = 1; i < sorted.length - 1; i++) {
-    sorted[i].data.y = y;
-    syncPosition(sorted[i]);
-    y += scaledH(sorted[i]) + gap;
-  }
+  const startX = sorted[0].data.x;
+  let y = sorted[0].data.y;
+  sorted.forEach((item) => {
+    item.data.x = startX;
+    item.data.y = y;
+    syncPosition(item);
+    y += scaledH(item) + gap;
+  });
 }
 
 // ─── Normalize ───
