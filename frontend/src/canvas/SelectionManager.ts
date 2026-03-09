@@ -7,10 +7,10 @@
 
 import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
-import { SceneManager, SceneItem } from './SceneManager';
+import { SceneManager, SceneItem, getItemWorldBounds, isGroupChild } from './SceneManager';
 import { TransformBox } from './TransformBox';
 import { ImageSprite } from './sprites/ImageSprite';
-import { Spring, PRESETS } from './spring';
+import { VideoSprite } from './sprites/VideoSprite';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -23,7 +23,6 @@ const BAND_STROKE_ALPHA = 0.6;
 const BAND_STROKE_WIDTH = 1;
 const RUBBER_BAND_THRESHOLD = 5; // px in screen space before rubber band activates
 const DRAG_THRESHOLD = 5;        // px in screen space before object drag activates
-const DRAG_LIFT_SCALE = 1.03;    // scale during drag
 
 // ---------------------------------------------------------------------------
 // SelectionManager
@@ -38,6 +37,7 @@ export class SelectionManager {
   private _overlay: Container;
   private _bandGfx: Graphics;
   private _onSelectionChange: ((ids: string[]) => void) | null = null;
+  private _onItemTransform: ((item: SceneItem) => void) | null = null;
 
   // Pointer state
   private _pointerDown = false;
@@ -52,6 +52,15 @@ export class SelectionManager {
   private _objectDragging = false;
   private _lastDragWorldX = 0;
   private _lastDragWorldY = 0;
+
+  // Double-click detection
+  private _lastClickTime = 0;
+  private _lastClickItemId: string | null = null;
+  private static readonly DOUBLE_CLICK_MS = 400;
+
+  private _onDoubleClickText: ((item: SceneItem) => void) | null = null;
+
+  private _enabled = true;
 
   constructor(viewport: Viewport, scene: SceneManager) {
     this._viewport = viewport;
@@ -79,10 +88,30 @@ export class SelectionManager {
     viewport.on('pointerupoutside', this._onPointerUp, this);
   }
 
+  /** Enable/disable selection interaction (disable during draw/text/eraser tools). */
+  setEnabled(enabled: boolean): void {
+    this._enabled = enabled;
+    if (!enabled) {
+      this._pointerDown = false;
+      this._rubberBanding = false;
+      this._bandGfx.visible = false;
+    }
+  }
+
   // -- Public API -----------------------------------------------------------
 
   set onSelectionChange(fn: (ids: string[]) => void) {
     this._onSelectionChange = fn;
+  }
+
+  /** Called during drag with each moved item for live sync broadcast. */
+  set onItemTransform(fn: (item: SceneItem) => void) {
+    this._onItemTransform = fn;
+  }
+
+  /** Called on double-click of a text item (for inline editing). */
+  set onDoubleClickText(fn: (item: SceneItem) => void) {
+    this._onDoubleClickText = fn;
   }
 
   /** Select only this item, deselecting everything else. */
@@ -105,7 +134,7 @@ export class SelectionManager {
   /** Select all unlocked, visible items. */
   selectAll(): void {
     this.selectedIds.clear();
-    for (const item of this._scene.getAllItems()) {
+    for (const item of this._scene.getTopLevelItems()) {
       if (!item.data.locked && item.data.visible) {
         this.selectedIds.add(item.id);
       }
@@ -134,7 +163,7 @@ export class SelectionManager {
 
   /** Check all scene items in reverse z-order; return first whose world bounds contain (wx, wy). */
   _hitTest(wx: number, wy: number): SceneItem | null {
-    const all = this._scene.getAllItems();
+    const all = this._scene.getTopLevelItems();
     // Sort by z descending (topmost first)
     all.sort((a, b) => b.data.z - a.data.z);
 
@@ -142,11 +171,7 @@ export class SelectionManager {
       if (item.data.locked) continue;
       if (!item.data.visible) continue;
 
-      // Use item.data (world-space) instead of getBounds() (screen-space)
-      const ix = item.data.x;
-      const iy = item.data.y;
-      const iw = item.data.w * Math.abs(item.data.sx);
-      const ih = item.data.h * Math.abs(item.data.sy);
+      const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
 
       if (ix <= wx && wx <= ix + iw && iy <= wy && wy <= iy + ih) {
         return item;
@@ -158,6 +183,7 @@ export class SelectionManager {
   // -- Pointer Handlers -----------------------------------------------------
 
   private _onPointerDown(e: FederatedPointerEvent): void {
+    if (!this._enabled) return;
     // Only handle primary button
     if (e.button !== 0) return;
 
@@ -212,14 +238,16 @@ export class SelectionManager {
         this._lastDragWorldX = currentWorld.x;
         this._lastDragWorldY = currentWorld.y;
 
-        // Move all selected items by delta
-        for (const item of this.getSelectedItems()) {
+        // Move all selected items by delta and broadcast transforms
+        const selected = this.getSelectedItems();
+        for (const item of selected) {
           item.displayObject.x += ddx;
           item.displayObject.y += ddy;
           item.data.x = item.displayObject.x;
           item.data.y = item.displayObject.y;
+          this._onItemTransform?.(item);
         }
-        this.transformBox.update(this.getSelectedItems());
+        this.transformBox.update(selected);
       }
       return;
     }
@@ -268,6 +296,26 @@ export class SelectionManager {
       if (!e.shiftKey) {
         this.clear();
       }
+    } else if (this._hitItemOnDown && !this._objectDragging) {
+      // Click (no drag) on an item — check for double-click
+      const now = Date.now();
+      const item = this._hitItemOnDown;
+      if (
+        this._lastClickItemId === item.id &&
+        now - this._lastClickTime < SelectionManager.DOUBLE_CLICK_MS
+      ) {
+        // Double-click detected
+        if (item.displayObject instanceof VideoSprite) {
+          item.displayObject.togglePlayPause();
+        } else if (item.type === 'text') {
+          this._onDoubleClickText?.(item);
+        }
+        this._lastClickTime = 0;
+        this._lastClickItemId = null;
+      } else {
+        this._lastClickTime = now;
+        this._lastClickItemId = item.id;
+      }
     }
 
     this._hitItemOnDown = null;
@@ -275,43 +323,23 @@ export class SelectionManager {
 
   // -- Drag Shadow Lift / Drop ----------------------------------------------
 
-  /** Lift shadows and spring-scale selected items up for drag. */
+  /** Lift shadows on selected items for drag. */
   private _applyLift(): void {
-    const items = this.getSelectedItems();
-    for (const item of items) {
-      const dobj = item.displayObject;
-
-      // Lift shadow on ImageSprites
-      if (dobj instanceof ImageSprite) {
-        dobj.liftShadow();
+    for (const item of this.getSelectedItems()) {
+      const obj = item.displayObject;
+      if (obj instanceof ImageSprite || obj instanceof VideoSprite) {
+        obj.liftShadow();
       }
-
-      // Spring scale 1.0 → 1.03
-      const spring = new Spring(1.0, DRAG_LIFT_SCALE, PRESETS.snappy);
-      spring.onUpdate = (v) => {
-        dobj.scale.set(v, v);
-      };
-      this._scene.springs.add(spring);
     }
   }
 
-  /** Drop shadows and spring-scale selected items back to rest. */
+  /** Drop shadows on selected items after drag. */
   private _applyDrop(): void {
-    const items = this.getSelectedItems();
-    for (const item of items) {
-      const dobj = item.displayObject;
-
-      // Drop shadow on ImageSprites
-      if (dobj instanceof ImageSprite) {
-        dobj.dropShadow();
+    for (const item of this.getSelectedItems()) {
+      const obj = item.displayObject;
+      if (obj instanceof ImageSprite || obj instanceof VideoSprite) {
+        obj.dropShadow();
       }
-
-      // Spring scale 1.03 → 1.0
-      const spring = new Spring(DRAG_LIFT_SCALE, 1.0, PRESETS.snappy);
-      spring.onUpdate = (v) => {
-        dobj.scale.set(v, v);
-      };
-      this._scene.springs.add(spring);
     }
   }
 
@@ -342,14 +370,10 @@ export class SelectionManager {
       this.selectedIds.clear();
     }
 
-    for (const item of this._scene.getAllItems()) {
+    for (const item of this._scene.getTopLevelItems()) {
       if (item.data.locked || !item.data.visible) continue;
 
-      // Use world-space data instead of screen-space getBounds()
-      const ix = item.data.x;
-      const iy = item.data.y;
-      const iw = item.data.w * Math.abs(item.data.sx);
-      const ih = item.data.h * Math.abs(item.data.sy);
+      const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
 
       // Check intersection between rubber band rect and item world bounds
       const intersects =
