@@ -83,13 +83,23 @@ export async function writeCanvasToClipboard(
       tempContainer.addChild(obj);
     }
 
-    // 3. Generate texture at 1x resolution (native pixel size)
+    // 3. Compute resolution multiplier to approach native texture resolution
+    //    e.g. a 2000px image displayed at 400px → ratio ~5, capped at 4x
+    let maxRatio = 1;
+    for (const item of items) {
+      const tex = (item.displayObject as any)?.texture;
+      if (tex && tex.width > 1 && item.data.w > 1) {
+        maxRatio = Math.max(maxRatio, tex.width / item.data.w);
+      }
+    }
+    const resolution = Math.min(Math.max(maxRatio, window.devicePixelRatio || 1), 4);
+
     let texture;
     let extractedCanvas: HTMLCanvasElement;
     try {
       texture = app.renderer.generateTexture({
         target: tempContainer,
-        resolution: 1,
+        resolution,
         frame: new Rectangle(0, 0, totalW, totalH),
       });
       extractedCanvas = app.renderer.extract.canvas(texture) as HTMLCanvasElement;
@@ -115,7 +125,7 @@ export async function writeCanvasToClipboard(
     ctx2d.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
     ctx2d.drawImage(extractedCanvas, 0, 0);
   } else {
-    // Full viewport screenshot
+    // Full viewport screenshot (at device pixel ratio for crisp output)
     const extractedCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
     outputCanvas = document.createElement('canvas');
     outputCanvas.width = extractedCanvas.width;
