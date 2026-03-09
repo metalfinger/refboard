@@ -71,12 +71,14 @@ const collectionRoutes = require('./routes/collections');
 const boardRoutes = require('./routes/boards');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
+const mmBridgeRoutes = require('./routes/mattermost-bridge');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/boards', mmBridgeRoutes);
 
 // Public shared collection route (no auth required)
 app.get('/api/c/:shareToken', (req, res) => {
@@ -136,6 +138,14 @@ async function start() {
     console.error('[server] Image uploads will not work until MinIO is available');
   }
 
+  // Start Mattermost auto-sync watcher (no-op if env vars missing)
+  try {
+    const { startWatcher } = require('./services/mm-watcher');
+    startWatcher(io);
+  } catch (err) {
+    console.error('[server] MM watcher failed to start:', err.message);
+  }
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] RefBoard backend listening on port ${PORT}`);
   });
@@ -144,6 +154,11 @@ async function start() {
 // ---- Graceful shutdown ----
 function shutdown(signal) {
   console.log(`[server] Received ${signal}, shutting down gracefully...`);
+
+  try {
+    const { stopWatcher } = require('./services/mm-watcher');
+    stopWatcher();
+  } catch {}
 
   io.close(() => {
     console.log('[server] Socket.IO closed');

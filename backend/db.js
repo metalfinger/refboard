@@ -83,6 +83,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_boards_collection ON boards(collection_id);
   CREATE INDEX IF NOT EXISTS idx_boards_created_by ON boards(created_by);
   CREATE INDEX IF NOT EXISTS idx_images_board ON images(board_id);
+
+  CREATE TABLE IF NOT EXISTS board_channel_links (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    channel_name TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(board_id, channel_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_board_channel_links_board ON board_channel_links(board_id);
 `);
 
 // Migrations — add columns to existing tables
@@ -105,6 +117,11 @@ try {
   db.prepare("SELECT media_type FROM images LIMIT 0").get();
 } catch {
   db.exec("ALTER TABLE images ADD COLUMN media_type TEXT DEFAULT 'image'");
+}
+try {
+  db.prepare("SELECT mm_file_id FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN mm_file_id TEXT");
 }
 
 // ---------------------
@@ -330,11 +347,11 @@ function saveBoardCanvas(boardId, canvasState, thumbnail) {
 // ---------------------
 // Images
 // ---------------------
-function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy, assetKey, mediaType }) {
+function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy, assetKey, mediaType, mmFileId }) {
   db.prepare(`
-    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by, asset_key, media_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy, assetKey || null, mediaType || 'image');
+    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by, asset_key, media_type, mm_file_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy, assetKey || null, mediaType || 'image', mmFileId || null);
   return db.prepare('SELECT * FROM images WHERE id = ?').get(id);
 }
 
@@ -358,6 +375,37 @@ function deleteBoardImageRecords(boardId) {
   return images;
 }
 
+// ---------------------
+// Board–Channel Links
+// ---------------------
+function createBoardChannelLink({ id, boardId, channelId, channelName, createdBy }) {
+  db.prepare(`
+    INSERT INTO board_channel_links (id, board_id, channel_id, channel_name, created_by)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, boardId, channelId, channelName || null, createdBy);
+  return db.prepare('SELECT * FROM board_channel_links WHERE id = ?').get(id);
+}
+
+function getBoardChannelLinks(boardId) {
+  return db.prepare('SELECT * FROM board_channel_links WHERE board_id = ? ORDER BY created_at DESC').all(boardId);
+}
+
+function getBoardChannelLink(linkId) {
+  return db.prepare('SELECT * FROM board_channel_links WHERE id = ?').get(linkId);
+}
+
+function deleteBoardChannelLink(linkId) {
+  db.prepare('DELETE FROM board_channel_links WHERE id = ?').run(linkId);
+}
+
+function getAllBoardChannelLinks() {
+  return db.prepare('SELECT * FROM board_channel_links ORDER BY created_at DESC').all();
+}
+
+function getImageByMmFileId(boardId, mmFileId) {
+  return db.prepare('SELECT * FROM images WHERE board_id = ? AND mm_file_id = ?').get(boardId, mmFileId);
+}
+
 module.exports = {
   db,
   // Users
@@ -372,4 +420,7 @@ module.exports = {
   getCollectionBoards, getBoard, createBoard, updateBoard, deleteBoard, saveBoardCanvas,
   // Images
   createImage, getBoardImages, getImage, deleteImage, deleteBoardImageRecords,
+  // Board–Channel Links
+  createBoardChannelLink, getBoardChannelLinks, getBoardChannelLink, deleteBoardChannelLink,
+  getAllBoardChannelLinks, getImageByMmFileId,
 };
