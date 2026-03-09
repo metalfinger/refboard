@@ -7,6 +7,7 @@
  */
 
 import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
+import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ export class TransformBox extends Container {
   private _items: SceneItem[] = [];
   private _bounds = { x: 0, y: 0, w: 0, h: 0 };
   private _drag: DragState | null = null;
+  private _viewport: Viewport | null = null;
 
   constructor() {
     super();
@@ -92,6 +94,11 @@ export class TransformBox extends Container {
 
   // -- Public API -----------------------------------------------------------
 
+  /** Set the viewport reference for zoom-aware drag calculations. */
+  setViewport(viewport: Viewport): void {
+    this._viewport = viewport;
+  }
+
   /** Update the transform box to wrap the given items. Hides if empty. */
   update(items: SceneItem[]): void {
     this._items = items;
@@ -101,18 +108,22 @@ export class TransformBox extends Container {
       return;
     }
 
-    // Compute combined bounding rect in world space
+    // Compute combined bounding rect in WORLD space using item data
+    // (not getBounds() which returns screen-space and causes offset)
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
     for (const item of items) {
-      const b = item.displayObject.getBounds();
-      if (b.x < minX) minX = b.x;
-      if (b.y < minY) minY = b.y;
-      if (b.x + b.width > maxX) maxX = b.x + b.width;
-      if (b.y + b.height > maxY) maxY = b.y + b.height;
+      const ix = item.data.x;
+      const iy = item.data.y;
+      const iw = item.data.w * Math.abs(item.data.sx);
+      const ih = item.data.h * Math.abs(item.data.sy);
+      if (ix < minX) minX = ix;
+      if (iy < minY) minY = iy;
+      if (ix + iw > maxX) maxX = ix + iw;
+      if (iy + ih > maxY) maxY = iy + ih;
     }
 
     this._bounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
@@ -200,9 +211,15 @@ export class TransformBox extends Container {
   private _onHandleMove(e: FederatedPointerEvent): void {
     if (!this._drag) return;
 
-    const dx = e.global.x - this._drag.startX;
-    const dy = e.global.y - this._drag.startY;
+    // Convert screen-space deltas to world-space by dividing by viewport zoom
+    const zoom = this._viewport?.scale.x ?? 1;
+    const dx = (e.global.x - this._drag.startX) / zoom;
+    const dy = (e.global.y - this._drag.startY) / zoom;
     const { handleId, origTransforms } = this._drag;
+
+    // Use bounding box size as reference for scale sensitivity
+    const { w: bw, h: bh } = this._bounds;
+    const refSize = Math.max(bw, bh, 100); // avoid division by tiny numbers
 
     for (const item of this._items) {
       const orig = origTransforms.get(item.id);
@@ -210,66 +227,70 @@ export class TransformBox extends Container {
 
       switch (handleId) {
         case 'br': {
-          // Proportional scale
-          const factor = 1 + (dx + dy) / 500;
-          const clampedFactor = Math.max(0.1, factor);
+          // Proportional scale — drag distance relative to object size
+          const factor = 1 + (dx + dy) / refSize;
+          const clampedFactor = Math.max(0.05, factor);
           item.data.sx = orig.sx * clampedFactor;
           item.data.sy = orig.sy * clampedFactor;
           break;
         }
         case 'mr': {
-          // Horizontal scale only
-          const factor = 1 + dx / 500;
-          item.data.sx = orig.sx * Math.max(0.1, factor);
+          const factor = 1 + dx / (bw || refSize);
+          item.data.sx = orig.sx * Math.max(0.05, factor);
           break;
         }
         case 'bc': {
-          // Vertical scale only
-          const factor = 1 + dy / 500;
-          item.data.sy = orig.sy * Math.max(0.1, factor);
+          const factor = 1 + dy / (bh || refSize);
+          item.data.sy = orig.sy * Math.max(0.05, factor);
           break;
         }
         case 'tl': {
-          // Proportional scale + reposition (opposite corner stays fixed)
-          const factor = 1 - (dx + dy) / 500;
-          const clampedFactor = Math.max(0.1, factor);
+          // Proportional scale + reposition (bottom-right stays fixed)
+          const factor = 1 - (dx + dy) / refSize;
+          const clampedFactor = Math.max(0.05, factor);
           item.data.sx = orig.sx * clampedFactor;
           item.data.sy = orig.sy * clampedFactor;
-          // Shift position so bottom-right stays fixed
-          const dw = (item.data.sx - orig.sx) * (item.data.w ?? 0);
-          const dh = (item.data.sy - orig.sy) * (item.data.h ?? 0);
+          const dw = (item.data.sx - orig.sx) * item.data.w;
+          const dh = (item.data.sy - orig.sy) * item.data.h;
           item.data.x = orig.x - dw;
           item.data.y = orig.y - dh;
           break;
         }
         case 'rot': {
-          // Rotation based on horizontal drag
-          item.data.angle = orig.angle + dx * 0.5;
+          // Rotation: 1 world pixel = ~0.3 degrees
+          item.data.angle = orig.angle + dx * 0.3;
           break;
         }
-        // Other handles: simple proportional for now
         case 'tr': {
-          const factor = 1 + (dx - dy) / 500;
-          item.data.sx = orig.sx * Math.max(0.1, factor);
-          item.data.sy = orig.sy * Math.max(0.1, factor);
+          const factor = 1 + (dx - dy) / refSize;
+          const clampedFactor = Math.max(0.05, factor);
+          item.data.sx = orig.sx * clampedFactor;
+          item.data.sy = orig.sy * clampedFactor;
+          // Top-right: left edge stays fixed
+          item.data.y = orig.y - (item.data.sy - orig.sy) * item.data.h;
           break;
         }
         case 'bl': {
-          const factor = 1 + (-dx + dy) / 500;
-          item.data.sx = orig.sx * Math.max(0.1, factor);
-          item.data.sy = orig.sy * Math.max(0.1, factor);
+          const factor = 1 + (-dx + dy) / refSize;
+          const clampedFactor = Math.max(0.05, factor);
+          item.data.sx = orig.sx * clampedFactor;
+          item.data.sy = orig.sy * clampedFactor;
+          // Bottom-left: right edge stays fixed
+          item.data.x = orig.x - (item.data.sx - orig.sx) * item.data.w;
           break;
         }
         case 'tc': {
-          const factor = 1 - dy / 500;
-          item.data.sy = orig.sy * Math.max(0.1, factor);
-          item.data.y = orig.y + dy;
+          const factor = 1 - dy / (bh || refSize);
+          item.data.sy = orig.sy * Math.max(0.05, factor);
+          // Top-center: bottom edge stays fixed
+          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
           break;
         }
         case 'ml': {
-          const factor = 1 - dx / 500;
-          item.data.sx = orig.sx * Math.max(0.1, factor);
-          item.data.x = orig.x + dx;
+          const factor = 1 - dx / (bw || refSize);
+          item.data.sx = orig.sx * Math.max(0.05, factor);
+          // Middle-left: right edge stays fixed
+          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
           break;
         }
       }

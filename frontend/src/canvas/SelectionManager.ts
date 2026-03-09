@@ -69,6 +69,7 @@ export class SelectionManager {
 
     // Transform box
     this.transformBox = new TransformBox();
+    this.transformBox.setViewport(viewport);
     this._overlay.addChild(this.transformBox);
 
     // Bind events on viewport
@@ -131,7 +132,7 @@ export class SelectionManager {
 
   // -- Hit Testing ----------------------------------------------------------
 
-  /** Check all scene items in reverse z-order; return first whose bounds contain (wx, wy). */
+  /** Check all scene items in reverse z-order; return first whose world bounds contain (wx, wy). */
   _hitTest(wx: number, wy: number): SceneItem | null {
     const all = this._scene.getAllItems();
     // Sort by z descending (topmost first)
@@ -141,13 +142,13 @@ export class SelectionManager {
       if (item.data.locked) continue;
       if (!item.data.visible) continue;
 
-      const bounds = item.displayObject.getBounds();
-      if (
-        bounds.x <= wx &&
-        wx <= bounds.x + bounds.width &&
-        bounds.y <= wy &&
-        wy <= bounds.y + bounds.height
-      ) {
+      // Use item.data (world-space) instead of getBounds() (screen-space)
+      const ix = item.data.x;
+      const iy = item.data.y;
+      const iw = item.data.w * Math.abs(item.data.sx);
+      const ih = item.data.h * Math.abs(item.data.sy);
+
+      if (ix <= wx && wx <= ix + iw && iy <= wy && wy <= iy + ih) {
         return item;
       }
     }
@@ -344,14 +345,18 @@ export class SelectionManager {
     for (const item of this._scene.getAllItems()) {
       if (item.data.locked || !item.data.visible) continue;
 
-      const bounds = item.displayObject.getBounds();
+      // Use world-space data instead of screen-space getBounds()
+      const ix = item.data.x;
+      const iy = item.data.y;
+      const iw = item.data.w * Math.abs(item.data.sx);
+      const ih = item.data.h * Math.abs(item.data.sy);
 
-      // Check intersection (not containment) between rubber band rect and item bounds
+      // Check intersection between rubber band rect and item world bounds
       const intersects =
-        rx < bounds.x + bounds.width &&
-        rx + rw > bounds.x &&
-        ry < bounds.y + bounds.height &&
-        ry + rh > bounds.y;
+        rx < ix + iw &&
+        rx + rw > ix &&
+        ry < iy + ih &&
+        ry + rh > iy;
 
       if (intersects) {
         this.selectedIds.add(item.id);

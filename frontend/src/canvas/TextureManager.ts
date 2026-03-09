@@ -21,18 +21,39 @@ export class TextureManager {
     return "medium";
   }
 
+  /**
+   * Detect whether an asset key is a new LOD-format key (no extension)
+   * or an old pre-migration path (has file extension).
+   */
+  private _isLegacyAsset(assetKey: string): boolean {
+    // New LOD keys look like: boards/{boardId}/{imageId} (no extension)
+    // Old keys look like: boards/{boardId}/{imageId}.png or full URLs
+    return /\.\w{2,5}$/.test(assetKey) || assetKey.startsWith('http') || assetKey.startsWith('/api/');
+  }
+
   /** Build the URL for a given asset + tier. */
   urlForAsset(assetKey: string, tier: LODTier): string {
+    if (this._isLegacyAsset(assetKey)) {
+      // Legacy: load original file directly (GPU handles scaling)
+      if (assetKey.startsWith('http') || assetKey.startsWith('/api/')) {
+        return assetKey;
+      }
+      return `/api/images/${assetKey}`;
+    }
+    // New LOD format: boards/{boardId}/{imageId}/thumb.webp
     return `/api/images/${assetKey}/${tier}.webp`;
   }
 
   /**
    * Load a texture for the given asset and LOD tier.
-   * Returns a cached texture if available, otherwise fetches it,
-   * estimates GPU memory, and evicts LRU entries if over budget.
+   * For legacy assets (pre-migration), loads the original file directly —
+   * the GPU handles downscaling naturally.
+   * For new assets, loads the appropriate LOD tier with fallback.
    */
   async load(assetKey: string, tier: LODTier): Promise<Texture> {
-    const key = `${assetKey}:${tier}`;
+    // For legacy assets, all tiers resolve to the same URL
+    const effectiveTier = this._isLegacyAsset(assetKey) ? 'full' : tier;
+    const key = `${assetKey}:${effectiveTier}`;
 
     const existing = this.cache.get(key);
     if (existing) {
@@ -40,8 +61,14 @@ export class TextureManager {
       return existing.texture;
     }
 
-    const url = this.urlForAsset(assetKey, tier);
-    const texture: Texture = await Assets.load(url);
+    const url = this.urlForAsset(assetKey, effectiveTier);
+    let texture: Texture;
+    try {
+      texture = await Assets.load(url);
+    } catch {
+      console.warn(`[TextureManager] Failed to load ${url}`);
+      return Texture.EMPTY;
+    }
 
     const w = texture.source.width ?? 256;
     const h = texture.source.height ?? 256;
