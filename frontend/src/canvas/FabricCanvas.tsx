@@ -12,14 +12,31 @@ export interface FabricCanvasHandle {
 interface FabricCanvasProps {
   canvasState?: string | null;
   currentTool: string;
+  boardId?: string;
   onChange?: () => void;
 }
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5.0;
 
+function viewportKey(id: string) { return `refboard:viewport:${id}`; }
+
+function saveViewport(id: string, vpt: number[]) {
+  try { localStorage.setItem(viewportKey(id), JSON.stringify(vpt)); } catch {}
+}
+
+function loadViewport(id: string): number[] | null {
+  try {
+    const raw = localStorage.getItem(viewportKey(id));
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length === 6 && arr.every((v: any) => typeof v === 'number' && isFinite(v))) return arr;
+  } catch {}
+  return null;
+}
+
 const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
-  ({ canvasState, currentTool, onChange }, ref) => {
+  ({ canvasState, currentTool, boardId, onChange }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasElRef = useRef<HTMLCanvasElement>(null);
     const fabricRef = useRef<Canvas | null>(null);
@@ -49,6 +66,17 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
 
       fabricRef.current = canvas;
 
+      // Debounced viewport persistence
+      let vpTimer: ReturnType<typeof setTimeout> | null = null;
+      const persistViewport = () => {
+        if (!boardId) return;
+        if (vpTimer) clearTimeout(vpTimer);
+        vpTimer = setTimeout(() => {
+          const vpt = canvas.viewportTransform;
+          if (vpt) saveViewport(boardId, [...vpt]);
+        }, 300);
+      };
+
       // Handle resize
       const observer = new ResizeObserver(() => {
         const w = container.clientWidth;
@@ -76,6 +104,7 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
         vpt[5] += e.e.clientY - lastPanPoint.current.y;
         lastPanPoint.current = { x: e.e.clientX, y: e.e.clientY };
         canvas.requestRenderAll();
+        persistViewport();
       });
 
       canvas.on('mouse:up', () => {
@@ -113,6 +142,7 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
         const point = canvas.getScenePoint(e);
         canvas.zoomToPoint(point, zoom);
         canvas.requestRenderAll();
+        persistViewport();
       });
 
       // Space key for pan
@@ -146,6 +176,7 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
       changeEvents.forEach((evt) => canvas.on(evt as any, changeHandler));
 
       return () => {
+        if (vpTimer) clearTimeout(vpTimer);
         observer.disconnect();
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
@@ -196,6 +227,13 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
       // other clients with object:add events for objects they already have
       suppressBroadcasts();
       canvas.loadFromJSON(parsed).then(() => {
+        // Restore saved viewport (zoom + pan) if available
+        if (boardId) {
+          const savedVpt = loadViewport(boardId);
+          if (savedVpt) {
+            canvas.setViewportTransform(savedVpt as any);
+          }
+        }
         canvas.requestRenderAll();
         // Small delay to ensure all deferred events have fired before resuming
         setTimeout(() => resumeBroadcasts(), 100);
@@ -240,13 +278,15 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
 
-      canvas.setViewportTransform([
+      const vpt: [number, number, number, number, number, number] = [
         zoom, 0, 0, zoom,
         canvasW / 2 - cx * zoom,
         canvasH / 2 - cy * zoom,
-      ]);
+      ];
+      canvas.setViewportTransform(vpt);
       canvas.requestRenderAll();
-    }, []);
+      if (boardId) saveViewport(boardId, vpt);
+    }, [boardId]);
 
     useImperativeHandle(ref, () => ({
       getCanvas: () => fabricRef.current,
@@ -258,8 +298,12 @@ const FabricCanvas = forwardRef<FabricCanvasHandle, FabricCanvasProps>(
         const center = canvas.getCenterPoint();
         canvas.zoomToPoint(center, Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom)));
         canvas.requestRenderAll();
+        if (boardId) {
+          const vpt = canvas.viewportTransform;
+          if (vpt) saveViewport(boardId, [...vpt]);
+        }
       },
-    }), [fitAll]);
+    }), [fitAll, boardId]);
 
     return (
       <div

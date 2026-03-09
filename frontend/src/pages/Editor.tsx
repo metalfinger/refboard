@@ -735,6 +735,7 @@ export default function Editor({ isPublicView }: EditorProps) {
           ref={canvasRef}
           canvasState={canvasState}
           currentTool={activeTool}
+          boardId={resolvedBoardId}
           onChange={onCanvasChange}
         />
         <UserCursors
