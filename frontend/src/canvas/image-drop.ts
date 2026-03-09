@@ -1,18 +1,86 @@
-import { Canvas, FabricImage, Rect } from 'fabric';
+import { Graphics } from 'pixi.js';
+import type { Viewport } from 'pixi-viewport';
+import type { SceneManager } from './SceneManager';
+import { VideoSprite } from './sprites/VideoSprite';
 import { uploadImage, uploadImageFromUrl } from '../api';
 
-type OnImageAdded = () => void;
+type OnChange = () => void;
+
+/* ------------------------------------------------------------------ */
+/*  Placeholder helper                                                 */
+/* ------------------------------------------------------------------ */
+
+function createPlaceholder(viewport: Viewport, x: number, y: number): Graphics {
+  const g = new Graphics();
+  g.rect(0, 0, 200, 150);
+  g.fill({ color: 0x3d3d3d });
+  g.stroke({ width: 2, color: 0x4a9eff });
+  g.position.set(x, y);
+  g.interactive = false;
+  viewport.addChild(g);
+  return g;
+}
+
+function removePlaceholder(viewport: Viewport, g: Graphics) {
+  viewport.removeChild(g);
+  g.destroy();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Handle upload response (image or video)                            */
+/* ------------------------------------------------------------------ */
+
+function handleUploadResult(
+  res: any,
+  viewport: Viewport,
+  sceneManager: SceneManager,
+  x: number,
+  y: number,
+  onChange: OnChange,
+) {
+  const imgData = res.data.image || res.data;
+  const mediaType: string = imgData.media_type || 'image';
+  const assetKey: string | undefined = imgData.asset_key;
+  const w: number = imgData.width || 400;
+  const h: number = imgData.height || 300;
+
+  // Cap large media to 600px max dimension
+  const maxDim = 600;
+  let finalW = w;
+  let finalH = h;
+  if (w > maxDim || h > maxDim) {
+    const scale = maxDim / Math.max(w, h);
+    finalW = Math.round(w * scale);
+    finalH = Math.round(h * scale);
+  }
+
+  if (mediaType === 'video' && assetKey) {
+    const url = imgData.public_url;
+    const video = new VideoSprite(assetKey, finalW, finalH, url);
+    video.position.set(x, y);
+    viewport.addChild(video);
+  } else if (assetKey) {
+    sceneManager.addImageFromUpload(assetKey, finalW, finalH, x, y);
+  } else {
+    // Fallback: legacy response without asset_key — use addImageFromUpload with public_url as key
+    const fallbackKey = imgData.public_url || imgData.id || 'unknown';
+    sceneManager.addImageFromUpload(fallbackKey, finalW, finalH, x, y);
+  }
+
+  onChange();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Drag & Drop                                                        */
+/* ------------------------------------------------------------------ */
 
 export function setupDragDrop(
-  canvas: Canvas,
+  container: HTMLElement,
+  viewport: Viewport,
+  sceneManager: SceneManager,
   boardId: string,
-  onImageAdded: OnImageAdded
+  onChange: OnChange,
 ): () => void {
-  const canvasEl = canvas.getSelectionElement();
-  const upperCanvas = canvas.upperCanvasEl || canvasEl;
-  const wrapper = upperCanvas?.parentElement || canvasEl.parentElement;
-  if (!wrapper) return () => {};
-
   function onDragOver(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -27,43 +95,28 @@ export function setupDragDrop(
 
     const files = e.dataTransfer?.files;
 
-    // Handle URL drops (dragged image URL from browser)
+    // Handle URL drops (dragged image/video URL from browser)
     if (!files || files.length === 0) {
-      const url = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain') || '';
-      if (url && (url.startsWith('http://') || url.startsWith('https://')) && /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url)) {
-        const rect = wrapper!.getBoundingClientRect();
-        const vpt = canvas.viewportTransform!;
-        const x = (e.clientX - rect.left - vpt[4]) / vpt[0];
-        const y = (e.clientY - rect.top - vpt[5]) / vpt[3];
-
-        const placeholder = new Rect({
-          left: x, top: y, width: 200, height: 150,
-          fill: '#3d3d3d', stroke: '#4a9eff', strokeWidth: 2,
-          strokeDashArray: [8, 4], selectable: false, evented: false,
-        });
-        canvas.add(placeholder);
-        canvas.requestRenderAll();
+      const url =
+        e.dataTransfer?.getData('text/uri-list') ||
+        e.dataTransfer?.getData('text/plain') ||
+        '';
+      if (
+        url &&
+        (url.startsWith('http://') || url.startsWith('https://')) &&
+        /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov)(\?|$)/i.test(url)
+      ) {
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const placeholder = createPlaceholder(viewport, world.x, world.y);
 
         try {
           const res = await uploadImageFromUrl(boardId, url);
-          const imgData = res.data.image || res.data;
-          const imgUrl = imgData.public_url;
-          canvas.remove(placeholder);
-
-          const imgEl = await FabricImage.fromURL(imgUrl, { crossOrigin: 'anonymous' });
-          imgEl.set({ left: x, top: y, id: imgData.id } as any);
-          const maxDim = 600;
-          if (imgEl.width! > maxDim || imgEl.height! > maxDim) {
-            const scale = maxDim / Math.max(imgEl.width!, imgEl.height!);
-            imgEl.scale(scale);
-          }
-          canvas.add(imgEl);
-          canvas.requestRenderAll();
-          onImageAdded();
+          removePlaceholder(viewport, placeholder);
+          handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
         } catch (err) {
           console.error('URL image upload failed:', err);
-          canvas.remove(placeholder);
-          canvas.requestRenderAll();
+          removePlaceholder(viewport, placeholder);
         }
       }
       return;
@@ -71,73 +124,41 @@ export function setupDragDrop(
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (!file.type.startsWith('image/')) continue;
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
 
-      // Calculate drop position in canvas coordinates
-      const rect = wrapper!.getBoundingClientRect();
-      const vpt = canvas.viewportTransform!;
-      const x = (e.clientX - rect.left - vpt[4]) / vpt[0];
-      const y = (e.clientY - rect.top - vpt[5]) / vpt[3];
-
-      // Create placeholder
-      const placeholder = new Rect({
-        left: x,
-        top: y,
-        width: 200,
-        height: 150,
-        fill: '#3d3d3d',
-        stroke: '#4a9eff',
-        strokeWidth: 2,
-        strokeDashArray: [8, 4],
-        selectable: false,
-        evented: false,
-      });
-      canvas.add(placeholder);
-      canvas.requestRenderAll();
+      const rect = container.getBoundingClientRect();
+      const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const placeholder = createPlaceholder(viewport, world.x, world.y);
 
       try {
         const res = await uploadImage(boardId, file);
-        const imgData = res.data.image || res.data;
-        const url = imgData.public_url;
-
-        canvas.remove(placeholder);
-
-        const imgEl = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' });
-        imgEl.set({
-          left: x,
-          top: y,
-          id: imgData.id,
-        } as any);
-        // Scale down large images
-        const maxDim = 600;
-        if (imgEl.width! > maxDim || imgEl.height! > maxDim) {
-          const scale = maxDim / Math.max(imgEl.width!, imgEl.height!);
-          imgEl.scale(scale);
-        }
-        canvas.add(imgEl);
-        canvas.requestRenderAll();
-        onImageAdded();
+        removePlaceholder(viewport, placeholder);
+        handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
       } catch (err) {
         console.error('Image upload failed:', err);
-        canvas.remove(placeholder);
-        canvas.requestRenderAll();
+        removePlaceholder(viewport, placeholder);
       }
     }
   }
 
-  wrapper.addEventListener('dragover', onDragOver);
-  wrapper.addEventListener('drop', onDrop);
+  container.addEventListener('dragover', onDragOver);
+  container.addEventListener('drop', onDrop);
 
   return () => {
-    wrapper.removeEventListener('dragover', onDragOver);
-    wrapper.removeEventListener('drop', onDrop);
+    container.removeEventListener('dragover', onDragOver);
+    container.removeEventListener('drop', onDrop);
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Clipboard Paste                                                    */
+/* ------------------------------------------------------------------ */
+
 export function setupPaste(
-  canvas: Canvas,
+  viewport: Viewport,
+  sceneManager: SceneManager,
   boardId: string,
-  onImageAdded: OnImageAdded
+  onChange: OnChange,
 ): () => void {
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
@@ -145,57 +166,26 @@ export function setupPaste(
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (!item.type.startsWith('image/')) continue;
+      if (!item.type.startsWith('image/') && !item.type.startsWith('video/')) continue;
 
       e.preventDefault();
       const file = item.getAsFile();
       if (!file) continue;
 
-      // Place at canvas center
-      const vpt = canvas.viewportTransform!;
-      const cx = (canvas.width! / 2 - vpt[4]) / vpt[0];
-      const cy = (canvas.height! / 2 - vpt[5]) / vpt[3];
+      // Place at viewport center (world coords)
+      const center = viewport.center;
+      const cx = center.x;
+      const cy = center.y;
 
-      const placeholder = new Rect({
-        left: cx - 100,
-        top: cy - 75,
-        width: 200,
-        height: 150,
-        fill: '#3d3d3d',
-        stroke: '#4a9eff',
-        strokeWidth: 2,
-        strokeDashArray: [8, 4],
-        selectable: false,
-        evented: false,
-      });
-      canvas.add(placeholder);
-      canvas.requestRenderAll();
+      const placeholder = createPlaceholder(viewport, cx - 100, cy - 75);
 
       try {
         const res = await uploadImage(boardId, file);
-        const imgData = res.data.image || res.data;
-        const url = imgData.public_url;
-
-        canvas.remove(placeholder);
-
-        const imgEl = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' });
-        imgEl.set({
-          left: cx - (imgEl.width! * (imgEl.scaleX || 1)) / 2,
-          top: cy - (imgEl.height! * (imgEl.scaleY || 1)) / 2,
-          id: imgData.id,
-        } as any);
-        const maxDim = 600;
-        if (imgEl.width! > maxDim || imgEl.height! > maxDim) {
-          const scale = maxDim / Math.max(imgEl.width!, imgEl.height!);
-          imgEl.scale(scale);
-        }
-        canvas.add(imgEl);
-        canvas.requestRenderAll();
-        onImageAdded();
+        removePlaceholder(viewport, placeholder);
+        handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
       } catch (err) {
         console.error('Image paste upload failed:', err);
-        canvas.remove(placeholder);
-        canvas.requestRenderAll();
+        removePlaceholder(viewport, placeholder);
       }
     }
   }
