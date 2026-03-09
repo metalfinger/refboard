@@ -296,30 +296,49 @@ export default function Editor({ isPublicView }: EditorProps) {
   }, []);
 
   // Refresh layer list from canvas
+  // Auto-name counters
+  const nameCounters = useRef<Record<string, number>>({});
+
+  function autoName(obj: any, i: number): string {
+    if (obj.name) return obj.name;
+    const type = obj.type || 'object';
+    if (type === 'image') {
+      nameCounters.current.image = (nameCounters.current.image || 0) + 1;
+      return `Image ${nameCounters.current.image}`;
+    }
+    if (type === 'i-text') return (obj.text || 'Text').slice(0, 20);
+    if (type === 'path') {
+      nameCounters.current.path = (nameCounters.current.path || 0) + 1;
+      return `Drawing ${nameCounters.current.path}`;
+    }
+    if (type === 'group') return `Group (${obj._objects?.length || 0})`;
+    return `${type} ${i + 1}`;
+  }
+
+  function buildLayerItem(obj: any, i: number): any {
+    const id = obj.id || `layer-${i}`;
+    const isGroup = obj.type === 'group';
+    let children: any[] | undefined;
+    if (isGroup && obj._objects) {
+      children = obj._objects.map((child: any, ci: number) => buildLayerItem(child, ci));
+    }
+    return {
+      id,
+      name: autoName(obj, i),
+      type: obj.type || 'object',
+      visible: obj.visible !== false,
+      locked: !obj.selectable,
+      isGroup,
+      children,
+    };
+  }
+
   const refreshLayers = useCallback(() => {
     const canvas = canvasRef.current?.getCanvas();
     if (!canvas) return;
+    nameCounters.current = {};
     const objects = canvas.getObjects();
-    const layers = objects.map((obj: any, i: number) => {
-      const id = obj.id || `layer-${i}`;
-      const isGroup = obj.type === 'group';
-      let name = obj.name || '';
-      if (!name) {
-        if (obj.type === 'image') name = 'Image';
-        else if (obj.type === 'i-text') name = (obj.text || 'Text').slice(0, 20);
-        else if (obj.type === 'path') name = 'Drawing';
-        else if (isGroup) name = `Group (${obj._objects?.length || 0})`;
-        else name = obj.type || 'Object';
-      }
-      return {
-        id,
-        name: `${name}`,
-        type: obj.type || 'object',
-        visible: obj.visible !== false,
-        locked: !obj.selectable,
-        isGroup,
-      };
-    });
+    const layers = objects.map((obj: any, i: number) => buildLayerItem(obj, i));
     setLayerList(layers);
     const activeIds = canvas.getActiveObjects().map((o: any) => o.id).filter(Boolean);
     setSelectedLayerIds(activeIds);
@@ -935,6 +954,15 @@ export default function Editor({ isPublicView }: EditorProps) {
                 canvas.discardActiveObject();
                 canvas.requestRenderAll();
                 onCanvasChange();
+                refreshLayers();
+              }
+            }}
+            onRename={(id, name) => {
+              const canvas = canvasRef.current?.getCanvas();
+              if (!canvas) return;
+              const obj = canvas.getObjects().find((o: any) => o.id === id);
+              if (obj) {
+                (obj as any).name = name;
                 refreshLayers();
               }
             }}
