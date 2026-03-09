@@ -1,14 +1,14 @@
-import { Canvas } from 'fabric';
+import type { SceneManager } from './SceneManager';
 
 export class UndoManager {
   private stack: string[] = [];
   private pointer: number = -1;
   private maxEntries: number = 50;
   private locked: boolean = false;
-  private canvas: Canvas;
+  private sceneManager: SceneManager;
 
-  constructor(canvas: Canvas) {
-    this.canvas = canvas;
+  constructor(sceneManager: SceneManager) {
+    this.sceneManager = sceneManager;
     // Save initial state
     this.saveState();
   }
@@ -20,7 +20,7 @@ export class UndoManager {
   saveState(): void {
     if (this.locked) return;
 
-    const json = JSON.stringify((this.canvas as any).toJSON(['id', 'crossOrigin']));
+    const json = JSON.stringify(this.sceneManager.serialize());
 
     // If we're not at the end, discard forward history
     if (this.pointer < this.stack.length - 1) {
@@ -70,19 +70,7 @@ export class UndoManager {
 
     this.locked = true;
     const parsed = JSON.parse(state);
-    // Ensure images have crossOrigin to prevent canvas tainting
-    if (parsed?.objects) {
-      for (const obj of parsed.objects) {
-        if (obj.type === 'image') obj.crossOrigin = 'anonymous';
-        if (obj.type === 'group' && obj.objects) {
-          for (const child of obj.objects) {
-            if (child.type === 'image') child.crossOrigin = 'anonymous';
-          }
-        }
-      }
-    }
-    this.canvas.loadFromJSON(parsed).then(() => {
-      this.canvas.requestRenderAll();
+    this.sceneManager.loadScene(parsed, false).then(() => {
       this.locked = false;
     });
   }
