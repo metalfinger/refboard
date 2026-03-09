@@ -16,6 +16,7 @@ import type {
   VideoObject,
   TextObject,
   GroupObject,
+  SceneObject,
 } from './scene-format';
 
 // ---------------------------------------------------------------------------
@@ -368,5 +369,213 @@ export class SceneManager {
     this._onChange?.();
 
     return this.items.get(data.id)!;
+  }
+
+  // -- Group / Ungroup with Spring Animation --------------------------------
+
+  /**
+   * Group 2+ items into a single group item.
+   *
+   * Animates children ~25px toward the combined center, then reparents them
+   * into a Container. Returns the newly created group SceneItem.
+   */
+  groupItems(ids: string[]): SceneItem | null {
+    if (ids.length < 2) return null;
+
+    // Collect valid children
+    const children: SceneItem[] = [];
+    for (const id of ids) {
+      const item = this.items.get(id);
+      if (item) children.push(item);
+    }
+    if (children.length < 2) return null;
+
+    // Calculate combined bounds center
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of children) {
+      const d = child.data;
+      const w = ('w' in d ? (d as SceneObject).w : 0) * d.sx;
+      const h = ('h' in d ? (d as SceneObject).h : 0) * d.sy;
+      minX = Math.min(minX, d.x);
+      minY = Math.min(minY, d.y);
+      maxX = Math.max(maxX, d.x + w);
+      maxY = Math.max(maxY, d.y + h);
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const boundsW = maxX - minX;
+    const boundsH = maxY - minY;
+
+    // Create the group data
+    const groupData: GroupObject = {
+      id: crypto.randomUUID(),
+      type: 'group',
+      x: cx - boundsW / 2,
+      y: cy - boundsH / 2,
+      w: boundsW,
+      h: boundsH,
+      sx: 1,
+      sy: 1,
+      angle: 0,
+      z: this.nextZ(),
+      opacity: 1,
+      locked: false,
+      name: '',
+      visible: true,
+      children: children.map((c) => c.id),
+    };
+
+    // Create a Container for the group
+    const container = new Container();
+    container.position.set(groupData.x, groupData.y);
+    container.label = groupData.id;
+    container.cursor = 'pointer';
+    container.eventMode = 'static';
+    this.viewport.addChild(container);
+
+    const groupItem: SceneItem = {
+      id: groupData.id,
+      type: 'group',
+      displayObject: container,
+      data: groupData,
+    };
+    this.items.set(groupData.id, groupItem);
+
+    // Animate each child ~25px toward center, then reparent into container
+    const CONVERGE_PX = 25;
+
+    for (const child of children) {
+      const obj = child.displayObject;
+      const dx = cx - (child.data.x + ((child.data as SceneObject).w * child.data.sx) / 2);
+      const dy = cy - (child.data.y + ((child.data as SceneObject).h * child.data.sy) / 2);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 1) continue; // already at center
+
+      const ratio = Math.min(CONVERGE_PX / dist, 1);
+      const targetX = child.data.x + dx * ratio;
+      const targetY = child.data.y + dy * ratio;
+
+      const startX = obj.x;
+      const startY = obj.y;
+
+      // Spring animates a normalized 0→1 progress value
+      const spring = new Spring(0, 1, PRESETS.gentle);
+      const capturedChild = child;
+
+      spring.onUpdate = (v) => {
+        if (!obj.destroyed) {
+          obj.x = startX + (targetX - startX) * v;
+          obj.y = startY + (targetY - startY) * v;
+        }
+      };
+
+      spring.onComplete = () => {
+        if (!obj.destroyed && !container.destroyed) {
+          // Reparent: adjust position relative to container
+          obj.x = obj.x - container.x;
+          obj.y = obj.y - container.y;
+          container.addChild(obj);
+          // Update stored data
+          capturedChild.data.x = obj.x + container.x;
+          capturedChild.data.y = obj.y + container.y;
+        }
+      };
+
+      this.springs.add(spring);
+    }
+
+    this._applyZOrder();
+    this._onChange?.();
+    return groupItem;
+  }
+
+  /**
+   * Ungroup a group item, releasing children back to the viewport.
+   *
+   * Animates children ~25px outward from the group center, then removes
+   * the group from the items map. Returns the freed children.
+   */
+  ungroupItems(groupId: string): SceneItem[] {
+    const groupItem = this.items.get(groupId);
+    if (!groupItem || groupItem.type !== 'group') return [];
+
+    const groupData = groupItem.data as GroupObject;
+    const container = groupItem.displayObject;
+    const freed: SceneItem[] = [];
+
+    // Group center in world coords
+    const gcx = groupData.x + groupData.w / 2;
+    const gcy = groupData.y + groupData.h / 2;
+
+    const SPREAD_PX = 25;
+
+    for (const childId of groupData.children) {
+      const child = this.items.get(childId);
+      if (!child) continue;
+
+      const obj = child.displayObject;
+
+      // Reparent back to viewport — convert position to world coords
+      const worldX = obj.x + container.x;
+      const worldY = obj.y + container.y;
+      this.viewport.addChild(obj);
+      obj.x = worldX;
+      obj.y = worldY;
+
+      // Update stored data to world coords
+      child.data.x = worldX;
+      child.data.y = worldY;
+
+      freed.push(child);
+
+      // Animate outward from group center
+      const childCX = worldX + ((child.data as SceneObject).w * child.data.sx) / 2;
+      const childCY = worldY + ((child.data as SceneObject).h * child.data.sy) / 2;
+      const dx = childCX - gcx;
+      const dy = childCY - gcy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 1) continue;
+
+      const ratio = SPREAD_PX / dist;
+      const offsetX = dx * ratio;
+      const offsetY = dy * ratio;
+
+      const startX = obj.x;
+      const startY = obj.y;
+      const targetX = startX + offsetX;
+      const targetY = startY + offsetY;
+
+      const spring = new Spring(0, 1, PRESETS.gentle);
+      const capturedChild = child;
+
+      spring.onUpdate = (v) => {
+        if (!obj.destroyed) {
+          obj.x = startX + (targetX - startX) * v;
+          obj.y = startY + (targetY - startY) * v;
+        }
+      };
+
+      spring.onComplete = () => {
+        // Update final position in data
+        if (!obj.destroyed) {
+          capturedChild.data.x = obj.x;
+          capturedChild.data.y = obj.y;
+        }
+      };
+
+      this.springs.add(spring);
+    }
+
+    // Remove group container and item
+    if (!container.destroyed) {
+      container.destroy();
+    }
+    this.items.delete(groupId);
+
+    this._applyZOrder();
+    this._onChange?.();
+    return freed;
   }
 }
