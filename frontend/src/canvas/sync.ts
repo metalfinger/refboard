@@ -1,199 +1,117 @@
-import { Canvas, FabricObject } from 'fabric';
-import { Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import type { SceneManager, SceneItem } from './SceneManager';
+import type { SceneData } from './scene-format';
 
 /**
- * Full-scene sync approach (like Excalidraw):
+ * Full-scene sync (v2 format, PixiJS / SceneManager):
  *
- * 1. On any change → broadcast full canvas JSON (throttled)
- * 2. On receive → loadFromJSON to replace entire canvas
- * 3. During drag → lightweight position events for smooth real-time
- * 4. No per-object tracking, no ID matching race conditions
+ * 1. On any change → broadcast serialized SceneData (throttled 300ms)
+ * 2. On receive → sceneManager.loadScene() (diff-based, no flicker)
+ * 3. During drag → lightweight transform events (throttled 50ms)
  *
- * Images are URLs (stored in MinIO), so canvas JSON stays small.
+ * Diff-based loading doesn't trigger change events for unchanged objects,
+ * so no suppress/resume logic is needed.
  */
 
-let _suppress = false;
-
-export function isRemoteUpdate(): boolean {
-  return _suppress;
-}
-
-export function suppressBroadcasts() {
-  _suppress = true;
-}
-
-export function resumeBroadcasts() {
-  _suppress = false;
-}
-
 export function setupSync(
-  canvas: Canvas,
+  sceneManager: SceneManager,
   socket: Socket,
-  boardId: string
+  boardId: string,
 ): () => void {
   let sceneTimer: ReturnType<typeof setTimeout> | null = null;
   let moveTimer: ReturnType<typeof setTimeout> | null = null;
-  let userInteracting = false;
-  let pendingScene: any = null;
+  let receiving = false; // true while applying a remote scene/transform
   const SCENE_THROTTLE = 300; // ms
   const MOVE_THROTTLE = 50; // ms
 
-  // ---- Ensure objects have IDs ----
+  // ---- BROADCAST: full scene (throttled) --------------------------------
 
-  function ensureId(obj: FabricObject): string {
-    if (!(obj as any).id) {
-      (obj as any).id = crypto.randomUUID();
-    }
-    return (obj as any).id;
-  }
-
-  // ---- BROADCAST: full scene (throttled) ----
-
-  function scheduleBroadcast() {
-    if (_suppress) return;
+  function broadcastScene() {
+    if (receiving) return;
     if (sceneTimer) clearTimeout(sceneTimer);
     sceneTimer = setTimeout(() => {
       sceneTimer = null;
-      if (_suppress) return;
-      // Ensure all objects have IDs before serializing
-      canvas.getObjects().forEach(ensureId);
-      const scene = (canvas as any).toJSON(['id', 'crossOrigin']);
+      if (receiving) return;
+      const scene = sceneManager.serialize();
       socket.emit('scene:update', { boardId, scene });
     }, SCENE_THROTTLE);
   }
 
-  // ---- BROADCAST: lightweight transform during drag ----
+  // ---- BROADCAST: lightweight transform during drag ---------------------
 
-  function emitTransform(obj: FabricObject) {
-    if (_suppress) return;
-    const id = (obj as any).id;
-    if (!id) return;
+  function broadcastTransform(item: SceneItem) {
+    if (receiving) return;
+    if (moveTimer) return; // throttled
+    const { id, data } = item;
     socket.emit('object:transform', {
-      boardId, objectId: id,
-      left: obj.left, top: obj.top,
-      scaleX: obj.scaleX, scaleY: obj.scaleY,
-      angle: obj.angle,
+      boardId,
+      objectId: id,
+      x: data.x,
+      y: data.y,
+      sx: data.sx,
+      sy: data.sy,
+      angle: data.angle,
     });
+    moveTimer = setTimeout(() => {
+      moveTimer = null;
+    }, MOVE_THROTTLE);
   }
 
-  // ---- RECEIVE: full scene ----
+  // ---- RECEIVE: full scene ----------------------------------------------
 
-  function applyRemoteScene(scene: any) {
-    if (userInteracting) {
-      // Defer — apply when user finishes interaction
-      pendingScene = scene;
-      return;
-    }
-    doApplyScene(scene);
-  }
+  function onSceneReceived(payload: any) {
+    if (payload.boardId !== boardId) return;
+    const scene: SceneData = payload.scene;
+    if (!scene || scene.v !== 2) return;
 
-  function doApplyScene(scene: any) {
-    _suppress = true;
-    // Ensure all images have crossOrigin set before Fabric loads them,
-    // otherwise the canvas becomes tainted and clipboard copy breaks.
-    if (scene?.objects) {
-      for (const obj of scene.objects) {
-        if (obj.type === 'image') obj.crossOrigin = 'anonymous';
-        if (obj.type === 'group' && obj.objects) {
-          for (const child of obj.objects) {
-            if (child.type === 'image') child.crossOrigin = 'anonymous';
-          }
-        }
-      }
-    }
-    canvas.loadFromJSON(scene)
+    receiving = true;
+    sceneManager
+      .loadScene(scene)
       .then(() => {
-        canvas.requestRenderAll();
-        // Small delay for any deferred Fabric events
-        setTimeout(() => { _suppress = false; }, 50);
+        receiving = false;
       })
       .catch((err: any) => {
-        console.error('[sync] loadFromJSON failed:', err);
-        _suppress = false;
+        console.error('[sync] loadScene failed:', err);
+        receiving = false;
       });
   }
 
-  // ---- RECEIVE: lightweight transform ----
+  // ---- RECEIVE: lightweight transform -----------------------------------
 
-  function applyRemoteTransform(payload: any) {
+  function onTransformReceived(payload: any) {
     if (payload.boardId !== boardId) return;
-    const obj = canvas.getObjects().find((o) => (o as any).id === payload.objectId);
-    if (!obj) return;
+    const item = sceneManager.getById(payload.objectId);
+    if (!item) return;
 
-    _suppress = true;
-    obj.set({
-      left: payload.left,
-      top: payload.top,
-      scaleX: payload.scaleX,
-      scaleY: payload.scaleY,
-      angle: payload.angle,
-    });
-    obj.setCoords();
-    canvas.requestRenderAll();
-    _suppress = false;
+    // Update data model
+    item.data.x = payload.x;
+    item.data.y = payload.y;
+    item.data.sx = payload.sx;
+    item.data.sy = payload.sy;
+    item.data.angle = payload.angle;
+
+    // Update display object
+    const obj = item.displayObject;
+    obj.position.set(payload.x, payload.y);
+    obj.scale.set(payload.sx, payload.sy);
+    obj.angle = payload.angle;
+    // No onChange — this is a remote update
   }
 
-  // ---- Canvas event handlers ----
+  // ---- Wire up SceneManager onChange → broadcastScene --------------------
 
-  function onObjectAdded() {
-    if (!_suppress) scheduleBroadcast();
-  }
+  const prevOnChange = sceneManager.onChange;
+  sceneManager.onChange = () => {
+    prevOnChange?.();
+    broadcastScene();
+  };
 
-  function onObjectModified() {
-    if (!_suppress) scheduleBroadcast();
-  }
+  // ---- Bind socket events -----------------------------------------------
 
-  function onObjectRemoved() {
-    if (!_suppress) scheduleBroadcast();
-  }
+  socket.on('scene:update', onSceneReceived);
+  socket.on('object:transform', onTransformReceived);
 
-  function onPathCreated() {
-    if (!_suppress) scheduleBroadcast();
-  }
-
-  function onObjectMoving(e: any) {
-    if (_suppress) return;
-    // Throttle transform events
-    if (moveTimer) return;
-    emitTransform(e.target);
-    moveTimer = setTimeout(() => { moveTimer = null; }, MOVE_THROTTLE);
-  }
-
-  function onMouseDown() {
-    userInteracting = true;
-  }
-
-  function onMouseUp() {
-    userInteracting = false;
-    if (pendingScene) {
-      doApplyScene(pendingScene);
-      pendingScene = null;
-    }
-  }
-
-  // ---- Bind canvas events ----
-
-  canvas.on('object:added', onObjectAdded);
-  canvas.on('object:modified', onObjectModified);
-  canvas.on('object:removed', onObjectRemoved);
-  canvas.on('path:created', onPathCreated);
-  canvas.on('object:moving', onObjectMoving);
-  canvas.on('object:scaling', onObjectMoving);
-  canvas.on('object:rotating', onObjectMoving);
-  canvas.on('mouse:down', onMouseDown);
-  canvas.on('mouse:up', onMouseUp);
-
-  // ---- Bind socket events ----
-
-  function onSceneUpdate(payload: any) {
-    if (payload.boardId !== boardId) return;
-    applyRemoteScene(payload.scene);
-  }
-
-  socket.on('scene:update', onSceneUpdate);
-  socket.on('object:transform', applyRemoteTransform);
-
-  // ---- Join room ----
+  // ---- Join room --------------------------------------------------------
 
   socket.emit('board:join', { boardId }, (response: any) => {
     if (response?.users) {
@@ -201,21 +119,14 @@ export function setupSync(
     }
   });
 
-  // ---- Cleanup ----
+  // ---- Cleanup ----------------------------------------------------------
 
   return () => {
-    canvas.off('object:added', onObjectAdded);
-    canvas.off('object:modified', onObjectModified);
-    canvas.off('object:removed', onObjectRemoved);
-    canvas.off('path:created', onPathCreated);
-    canvas.off('object:moving', onObjectMoving);
-    canvas.off('object:scaling', onObjectMoving);
-    canvas.off('object:rotating', onObjectMoving);
-    canvas.off('mouse:down', onMouseDown);
-    canvas.off('mouse:up', onMouseUp);
+    // Restore previous onChange
+    sceneManager.onChange = prevOnChange;
 
-    socket.off('scene:update', onSceneUpdate);
-    socket.off('object:transform', applyRemoteTransform);
+    socket.off('scene:update', onSceneReceived);
+    socket.off('object:transform', onTransformReceived);
 
     socket.emit('board:leave', { boardId });
 
@@ -223,3 +134,6 @@ export function setupSync(
     if (moveTimer) clearTimeout(moveTimer);
   };
 }
+
+// Note: broadcastTransform for drag events will be wired via Editor integration.
+// SelectionManager / TransformBox will call it directly once connected.
