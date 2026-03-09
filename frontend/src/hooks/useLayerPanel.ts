@@ -107,8 +107,9 @@ export function useLayerPanel(deps: LayerPanelDeps) {
     if (item) {
       item.data.locked = !item.data.locked;
       item.displayObject.eventMode = item.data.locked ? 'none' : 'static';
+      onCanvasChange();
     }
-  }, [canvasRef]);
+  }, [canvasRef, onCanvasChange]);
 
   const onReorder = useCallback((from: number, to: number) => {
     const scene = canvasRef.current?.getScene();

@@ -58,12 +58,18 @@ export class TransformBox extends Container {
   private _drag: DragState | null = null;
   private _viewport: Viewport | null = null;
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
+  private _onDragEnd: (() => void) | null = null;
   private _snapGuides: SnapGuides | null = null;
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
 
   set onItemTransform(fn: (item: SceneItem) => void) {
     this._onItemTransform = fn;
+  }
+
+  /** Called when resize/rotate drag ends — use to persist/sync final state. */
+  set onDragEnd(fn: () => void) {
+    this._onDragEnd = fn;
   }
 
   setSnapGuides(sg: SnapGuides): void {
@@ -389,9 +395,13 @@ export class TransformBox extends Container {
   }
 
   private _onHandleUp(): void {
-    this._drag = null;
-    this._dimLabel.visible = false;
-    this._dimLabelBg.visible = false;
-    this._snapGuides?.endSession();
+    if (this._drag) {
+      this._drag = null;
+      this._dimLabel.visible = false;
+      this._dimLabelBg.visible = false;
+      this._snapGuides?.endSession();
+      // Notify that drag ended — persist/sync the final state
+      this._onDragEnd?.();
+    }
   }
 }

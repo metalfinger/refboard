@@ -20,7 +20,7 @@ import type { SceneData, AnySceneObject } from './scene-format';
 
 export interface SyncHandle {
   cleanup: () => void;
-  broadcastTransform: (item: SceneItem) => void;
+  broadcastTransform: (items: SceneItem | SceneItem[]) => void;
   /** Force an immediate full scene broadcast (call after structural changes). */
   broadcastSceneNow: () => void;
   /** Broadcast only specific changed elements (lightweight). */
@@ -120,19 +120,19 @@ export function setupSync(
 
   // ---- BROADCAST: lightweight transform during drag -------------------------
 
-  function broadcastTransform(item: SceneItem) {
+  function broadcastTransform(itemOrItems: SceneItem | SceneItem[]) {
     if (receiving) return;
     if (moveTimer) return;
-    const { id, data } = item;
-    socket.emit('object:transform', {
-      boardId,
+    const items = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
+    const transforms = items.map(({ id, data }) => ({
       objectId: id,
       x: data.x,
       y: data.y,
       sx: data.sx,
       sy: data.sy,
       angle: data.angle,
-    });
+    }));
+    socket.emit('object:transform', { boardId, transforms });
     moveTimer = setTimeout(() => { moveTimer = null; }, MOVE_THROTTLE);
     broadcastSceneDebounced();
   }
@@ -217,23 +217,30 @@ export function setupSync(
 
   // ---- RECEIVE: lightweight transform ---------------------------------------
 
+  function applyTransform(t: any) {
+    const item = sceneManager.getById(t.objectId);
+    if (!item) return;
+    item.data.x = t.x;
+    item.data.y = t.y;
+    item.data.sx = t.sx;
+    item.data.sy = t.sy;
+    item.data.angle = t.angle;
+    const obj = item.displayObject;
+    obj.position.set(t.x, t.y);
+    obj.scale.set(t.sx, t.sy);
+    obj.angle = t.angle;
+    options?.onRemoteTransform?.(item);
+  }
+
   function onTransformReceived(payload: any) {
     if (payload.boardId !== boardId) return;
-    const item = sceneManager.getById(payload.objectId);
-    if (!item) return;
-
-    item.data.x = payload.x;
-    item.data.y = payload.y;
-    item.data.sx = payload.sx;
-    item.data.sy = payload.sy;
-    item.data.angle = payload.angle;
-
-    const obj = item.displayObject;
-    obj.position.set(payload.x, payload.y);
-    obj.scale.set(payload.sx, payload.sy);
-    obj.angle = payload.angle;
-
-    options?.onRemoteTransform?.(item);
+    // Batched format: { transforms: [...] }
+    if (Array.isArray(payload.transforms)) {
+      for (const t of payload.transforms) applyTransform(t);
+    } else if (payload.objectId) {
+      // Legacy single-item format
+      applyTransform(payload);
+    }
   }
 
   // ---- Wire up SceneManager onChange → debounced full sync -------------------

@@ -40,6 +40,7 @@ export class SelectionManager {
   private _bandGfx: Graphics;
   private _onSelectionChange: ((ids: string[]) => void) | null = null;
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
+  private _onItemsTransform: ((items: SceneItem[]) => void) | null = null;
 
   // Pointer state
   private _pointerDown = false;
@@ -114,6 +115,11 @@ export class SelectionManager {
   /** Called during drag with each moved item for live sync broadcast. */
   set onItemTransform(fn: (item: SceneItem) => void) {
     this._onItemTransform = fn;
+  }
+
+  /** Called during drag with ALL moved items for batched sync broadcast. */
+  set onItemsTransform(fn: (items: SceneItem[]) => void) {
+    this._onItemsTransform = fn;
   }
 
   /** Called on double-click of a text item (for inline editing). */
@@ -260,13 +266,17 @@ export class SelectionManager {
         ddy += snap.dy;
         this._snapGuides.drawGuides(snap.guides, this._viewport);
 
-        // Move all selected items by corrected delta and broadcast transforms
+        // Move all selected items by corrected delta and broadcast all together
         for (const item of selected) {
           item.displayObject.x += ddx;
           item.displayObject.y += ddy;
           item.data.x = item.displayObject.x;
           item.data.y = item.displayObject.y;
-          this._onItemTransform?.(item);
+        }
+        if (this._onItemsTransform) {
+          this._onItemsTransform(selected);
+        } else if (this._onItemTransform) {
+          for (const item of selected) this._onItemTransform(item);
         }
         this.transformBox.update(selected);
       }

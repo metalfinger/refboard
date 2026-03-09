@@ -126,12 +126,19 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           },
         });
 
-        // Wire live drag/resize transforms to sync broadcast
+        // Wire live drag/resize transforms to sync broadcast (batched for multi-select)
+        selection.onItemsTransform = (items) => {
+          syncRef.current?.broadcastTransform(items);
+        };
         selection.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
         };
         selection.transformBox.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
+        };
+        selection.transformBox.onDragEnd = () => {
+          syncRef.current?.broadcastSceneNow();
+          onCanvasChange();
         };
 
         socket.on('user:joined', (data: any) => {
