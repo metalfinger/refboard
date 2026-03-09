@@ -3,7 +3,10 @@
  * Actual shortcut definitions live in shortcut-definitions.ts.
  */
 
-import { Canvas, FabricObject } from 'fabric';
+import type { SceneManager, SceneItem } from './SceneManager';
+import type { SelectionManager } from './SelectionManager';
+import type { UndoManager } from './history';
+import type { Viewport } from 'pixi-viewport';
 import { ToolType } from './tools';
 
 export interface ShortcutKeys {
@@ -24,17 +27,15 @@ export interface ShortcutDef {
 }
 
 export interface ShortcutContext {
-  canvas: Canvas;
-  getActiveObjects: () => FabricObject[];
-  getActiveObject: () => FabricObject | null;
-  clipboardRef: React.MutableRefObject<FabricObject[]>;
-  cloneFabricObject: (obj: any, dx: number, dy: number) => Promise<any>;
-  writeCanvasToClipboard: (objects?: FabricObject[]) => Promise<void>;
-  onCanvasChange: () => void;
+  scene: SceneManager;
+  selection: SelectionManager;
+  history: UndoManager;
+  viewport: Viewport;
+  onChange: () => void;
+  clipboardRef: React.MutableRefObject<SceneItem[]>;
   showToast: (msg: string) => void;
   fitAll: () => void;
   setActiveTool: (tool: ToolType) => void;
-  undoRef: React.MutableRefObject<any>;
   setCanUndo: (v: boolean) => void;
   setCanRedo: (v: boolean) => void;
   refreshLayers: () => void;
@@ -42,6 +43,7 @@ export interface ShortcutContext {
   handleUngroup: () => void;
   toggleGrid: () => void;
   toggleShowHelp: () => void;
+  writeCanvasToClipboard: (items?: SceneItem[]) => Promise<void>;
 }
 
 /**
