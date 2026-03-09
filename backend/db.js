@@ -96,6 +96,16 @@ try {
 } catch {
   db.exec("ALTER TABLE boards ADD COLUMN object_count INTEGER NOT NULL DEFAULT 0");
 }
+try {
+  db.prepare("SELECT asset_key FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN asset_key TEXT");
+}
+try {
+  db.prepare("SELECT media_type FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN media_type TEXT DEFAULT 'image'");
+}
 
 // ---------------------
 // User helpers
@@ -320,11 +330,11 @@ function saveBoardCanvas(boardId, canvasState, thumbnail) {
 // ---------------------
 // Images
 // ---------------------
-function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy }) {
+function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy, assetKey, mediaType }) {
   db.prepare(`
-    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy);
+    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by, asset_key, media_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy, assetKey || null, mediaType || 'image');
   return db.prepare('SELECT * FROM images WHERE id = ?').get(id);
 }
 

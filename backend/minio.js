@@ -23,6 +23,9 @@ const MIME_TO_EXT = {
   'image/gif': '.gif',
   'image/webp': '.webp',
   'image/svg+xml': '.svg',
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
 };
 
 /**
@@ -62,6 +65,17 @@ async function uploadImage(boardId, imageId, buffer, mimeType) {
     'Content-Type': mimeType,
   });
 
+  return objectName;
+}
+
+/**
+ * Upload a raw buffer to MinIO at the given object name.
+ * Returns the object name.
+ */
+async function putBuffer(objectName, buffer, contentType) {
+  await minioClient.putObject(MINIO_BUCKET, objectName, buffer, buffer.length, {
+    'Content-Type': contentType,
+  });
   return objectName;
 }
 
@@ -106,8 +120,10 @@ module.exports = {
   minioClient,
   initBucket,
   uploadImage,
+  putBuffer,
   deleteImage,
   deleteBoardImages,
   getImageUrl,
   MINIO_BUCKET,
+  MIME_TO_EXT,
 };

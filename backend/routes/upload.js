@@ -7,17 +7,26 @@ const http = require('http');
 const { URL } = require('url');
 const { authMiddleware } = require('../auth');
 const { getBoard, getCollectionMember, createImage } = require('../db');
-const { uploadImage, getImageUrl } = require('../minio');
+const { putBuffer, getImageUrl, MIME_TO_EXT } = require('../minio');
+const { generateLOD } = require('../services/lod-generator');
 
 const router = Router();
 
-const ALLOWED_MIME_TYPES = [
+const IMAGE_MIME_TYPES = [
   'image/png',
   'image/jpeg',
   'image/gif',
   'image/webp',
   'image/svg+xml',
 ];
+
+const VIDEO_MIME_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+];
+
+const ALLOWED_MIME_TYPES = [...IMAGE_MIME_TYPES, ...VIDEO_MIME_TYPES];
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -73,8 +82,59 @@ async function getImageDimensions(buffer, mimeType) {
 }
 
 /**
+ * Detect whether a MIME type is image or video.
+ */
+function classifyMedia(mimeType) {
+  if (VIDEO_MIME_TYPES.includes(mimeType)) return 'video';
+  return 'image';
+}
+
+/**
+ * Upload LOD tiers for an image to MinIO.
+ * Stores: {assetKey}/thumb.webp, {assetKey}/medium.webp, {assetKey}/full{ext}
+ * Returns the minioPath for the full tier (backward compat) and dimensions.
+ */
+async function uploadImageWithLOD(boardId, imageId, buffer, mimetype) {
+  const assetKey = `boards/${boardId}/${imageId}`;
+  const originalExt = MIME_TO_EXT[mimetype] || '.bin';
+
+  // SVG and GIF skip LOD — store single file
+  if (mimetype === 'image/svg+xml' || mimetype === 'image/gif') {
+    const fullPath = `${assetKey}/full${originalExt}`;
+    await putBuffer(fullPath, buffer, mimetype);
+    const dims = await getImageDimensions(buffer, mimetype);
+    return { assetKey, minioPath: fullPath, ...dims };
+  }
+
+  const lod = await generateLOD(buffer, originalExt);
+
+  // Upload all 3 tiers in parallel
+  await Promise.all([
+    putBuffer(`${assetKey}/thumb${lod.thumb.ext}`, lod.thumb.buffer, lod.thumb.ext === '.webp' ? 'image/webp' : mimetype),
+    putBuffer(`${assetKey}/medium${lod.medium.ext}`, lod.medium.buffer, lod.medium.ext === '.webp' ? 'image/webp' : mimetype),
+    putBuffer(`${assetKey}/full${lod.full.ext}`, lod.full.buffer, mimetype),
+  ]);
+
+  // minioPath points to full tier for backward compat
+  const minioPath = `${assetKey}/full${lod.full.ext}`;
+  return { assetKey, minioPath, width: lod.full.width, height: lod.full.height };
+}
+
+/**
+ * Upload a video file to MinIO (single file, no LOD).
+ * Returns { assetKey, minioPath, width: null, height: null }.
+ */
+async function uploadVideo(boardId, imageId, buffer, mimetype) {
+  const assetKey = `boards/${boardId}/${imageId}`;
+  const ext = MIME_TO_EXT[mimetype] || '.bin';
+  const fullPath = `${assetKey}/full${ext}`;
+  await putBuffer(fullPath, buffer, mimetype);
+  return { assetKey, minioPath: fullPath, width: null, height: null };
+}
+
+/**
  * POST /api/upload/boards/:boardId/images
- * Upload an image file to a board.
+ * Upload an image or video file to a board.
  */
 router.post('/boards/:boardId/images', upload.single('image'), async (req, res) => {
   try {
@@ -87,12 +147,16 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
 
     const imageId = uuidv4();
     const { buffer, originalname, mimetype, size } = req.file;
+    const mediaType = classifyMedia(mimetype);
 
-    // Get dimensions
-    const { width, height } = await getImageDimensions(buffer, mimetype);
+    let assetKey, minioPath, width, height;
 
-    // Upload to MinIO
-    const minioPath = await uploadImage(board.id, imageId, buffer, mimetype);
+    if (mediaType === 'video') {
+      ({ assetKey, minioPath, width, height } = await uploadVideo(board.id, imageId, buffer, mimetype));
+    } else {
+      ({ assetKey, minioPath, width, height } = await uploadImageWithLOD(board.id, imageId, buffer, mimetype));
+    }
+
     const publicUrl = getImageUrl(minioPath);
 
     // Save record
@@ -107,6 +171,8 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       minioPath,
       publicUrl,
       uploadedBy: req.user.id,
+      assetKey,
+      mediaType,
     });
 
     return res.status(201).json({
@@ -117,6 +183,8 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       height: image.height,
       file_size: image.file_size,
       mime_type: image.mime_type,
+      asset_key: image.asset_key,
+      media_type: image.media_type,
     });
   } catch (err) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -191,12 +259,16 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
     const { buffer, mimeType, filename } = await downloadImage(url);
 
     const imageId = uuidv4();
+    const mediaType = classifyMedia(mimeType);
 
-    // Get dimensions
-    const { width, height } = await getImageDimensions(buffer, mimeType);
+    let assetKey, minioPath, width, height;
 
-    // Upload to MinIO
-    const minioPath = await uploadImage(board.id, imageId, buffer, mimeType);
+    if (mediaType === 'video') {
+      ({ assetKey, minioPath, width, height } = await uploadVideo(board.id, imageId, buffer, mimeType));
+    } else {
+      ({ assetKey, minioPath, width, height } = await uploadImageWithLOD(board.id, imageId, buffer, mimeType));
+    }
+
     const publicUrl = getImageUrl(minioPath);
 
     // Save record
@@ -211,6 +283,8 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
       minioPath,
       publicUrl,
       uploadedBy: req.user.id,
+      assetKey,
+      mediaType,
     });
 
     return res.status(201).json({
@@ -221,6 +295,8 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
       height: image.height,
       file_size: image.file_size,
       mime_type: image.mime_type,
+      asset_key: image.asset_key,
+      media_type: image.media_type,
     });
   } catch (err) {
     console.error('[upload] from-url error:', err);
