@@ -21,6 +21,8 @@ import UserCursors from '../components/UserCursors';
 import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
 import ShortcutsHelp from '../components/ShortcutsHelp';
+import MattermostImport from '../components/MattermostImport';
+import { InboxZone } from '../canvas/InboxZone';
 
 // Pre-sort shortcuts by specificity (most modifiers first) for correct matching
 const sortedShortcuts = sortBySpecificity(shortcutDefs);
@@ -82,9 +84,11 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showLayers, setShowLayers] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showMmImport, setShowMmImport] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const clipboardRef = useRef<SceneItem[]>([]);
+  const inboxZoneRef = useRef<InboxZone | null>(null);
 
   const resolvedBoardId = boardId || boardData?.board?.id;
 
@@ -238,6 +242,11 @@ export default function Editor({ isPublicView }: EditorProps) {
       // Create UndoManager
       undoRef.current = new UndoManager(scene);
 
+      // Create InboxZone and add to viewport
+      const inboxZone = new InboxZone(scene.textures, scene.springs);
+      viewport.addChild(inboxZone);
+      inboxZoneRef.current = inboxZone;
+
       if (user) {
         const socket = connectSocket();
 
@@ -267,6 +276,15 @@ export default function Editor({ isPublicView }: EditorProps) {
               displayName: u.displayName || u.display_name || u.username || '',
               color: userColor(u.userId || u.id),
             })));
+          }
+        });
+
+        // Listen for auto-synced media arriving via socket
+        socket.on('board:media-arrived', (data: any) => {
+          const assets = data?.assets;
+          if (Array.isArray(assets) && assets.length > 0 && inboxZoneRef.current) {
+            inboxZoneRef.current.addMedia(assets);
+            showToast(`${assets.length} image${assets.length !== 1 ? 's' : ''} arrived in Inbox`);
           }
         });
 
@@ -317,6 +335,11 @@ export default function Editor({ isPublicView }: EditorProps) {
       clearTimeout(timer);
       selectionRef.current?.destroy();
       selectionRef.current = null;
+      if (inboxZoneRef.current) {
+        inboxZoneRef.current.clear();
+        inboxZoneRef.current.destroy({ children: true });
+        inboxZoneRef.current = null;
+      }
       syncCleanupRef.current?.();
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
@@ -896,6 +919,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         onToggleLayers={() => setShowLayers((v) => !v)}
         showLayers={showLayers}
         onToggleHelp={() => setShowHelp((v) => !v)}
+        onMmImport={() => setShowMmImport(true)}
         boardName={board?.name}
       />
 
@@ -1062,6 +1086,19 @@ export default function Editor({ isPublicView }: EditorProps) {
       {/* Shortcuts help overlay */}
       {showHelp && (
         <ShortcutsHelp shortcuts={shortcutDefs} onClose={() => setShowHelp(false)} />
+      )}
+
+      {/* Mattermost import modal */}
+      {showMmImport && resolvedBoardId && (
+        <MattermostImport
+          boardId={resolvedBoardId}
+          onClose={() => setShowMmImport(false)}
+          onMediaArrived={(assets) => {
+            if (inboxZoneRef.current) {
+              inboxZoneRef.current.addMedia(assets);
+            }
+          }}
+        />
       )}
     </div>
   );

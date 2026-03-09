@@ -30,6 +30,7 @@ interface ToolbarProps {
   onToggleLayers?: () => void;
   showLayers?: boolean;
   onToggleHelp?: () => void;
+  onMmImport?: () => void;
   boardName?: string;
 }
 
@@ -142,6 +143,7 @@ export default function Toolbar({
   onToggleLayers,
   showLayers,
   onToggleHelp,
+  onMmImport,
 }: ToolbarProps) {
   const showStroke = activeTool === ToolType.PEN;
   const showFontSize = activeTool === ToolType.TEXT;
@@ -277,6 +279,16 @@ export default function Toolbar({
             <circle cx="7" cy="7" r="6" />
             <path d="M5.5 5.5a1.5 1.5 0 013 0c0 1-1.5 1-1.5 2" strokeLinecap="round" />
             <circle cx="7" cy="10" r="0.5" fill="currentColor" stroke="none" />
+          </svg>
+        </ActionBtn>
+      )}
+
+      {/* Mattermost import */}
+      {onMmImport && (
+        <ActionBtn onClick={onMmImport} title="Import from Mattermost">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M2 10V4a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
+            <path d="M5 7h4M7 5v4" strokeLinecap="round" />
           </svg>
         </ActionBtn>
       )}
