@@ -105,6 +105,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Canvas change handler
   const onCanvasChange = useCallback(() => {
     scheduleSave();
+    // Broadcast changes to other connected clients immediately
+    syncRef.current?.broadcastSceneNow();
     if (undoRef.current && !undoRef.current.isLocked()) {
       undoRef.current.saveState();
       setCanUndo(undoRef.current.canUndo());
