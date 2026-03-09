@@ -2,30 +2,37 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PixiCanvas, { PixiCanvasHandle } from '../canvas/PixiCanvas';
 import { SelectionManager } from '../canvas/SelectionManager';
-import type { SceneItem } from '../canvas/SceneManager';
-import type { AnySceneObject, GroupObject } from '../canvas/scene-format';
-import { ToolType, activateTool, toolShortcuts } from '../canvas/tools';
+import { type SceneItem } from '../canvas/SceneManager';
+import { ToolType, activateTool } from '../canvas/tools';
 import type { ToolContext } from '../canvas/tools';
-import { setupSync } from '../canvas/sync';
-import { setupDragDrop, setupPaste } from '../canvas/image-drop';
+import { SyncHandle } from '../canvas/sync';
 import { UndoManager } from '../canvas/history';
-import { ShortcutContext, matchesShortcut, sortBySpecificity } from '../canvas/shortcuts';
 import { shortcuts as shortcutDefs } from '../canvas/shortcut-definitions';
-import * as ops from '../canvas/operations';
-import { connectSocket, disconnectSocket, getSocket } from '../socket';
-import { getBoard, saveCanvas } from '../api';
+import { writeCanvasToClipboard as writeClipboard } from '../canvas/clipboard';
+import { buildContextMenuItems } from '../canvas/context-menu-items';
+import { groupItems, ungroupItems } from '../canvas/grouping';
+import { getSocket } from '../socket';
 import { useAuth } from '../auth';
 import Toolbar from '../components/Toolbar';
 import StatusBar, { SaveStatus } from '../components/StatusBar';
 import UserCursors from '../components/UserCursors';
 import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
+import SelectionToolbar from '../components/SelectionToolbar';
+import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
 import { InboxZone } from '../canvas/InboxZone';
+import { getItemWorldBounds } from '../canvas/SceneManager';
+import { VideoSprite } from '../canvas/sprites/VideoSprite';
+import * as ops from '../canvas/operations';
 
-// Pre-sort shortcuts by specificity (most modifiers first) for correct matching
-const sortedShortcuts = sortBySpecificity(shortcutDefs);
+// Hooks
+import { useBoardLoader } from '../hooks/useBoardLoader';
+import { useSaveManager } from '../hooks/useSaveManager';
+import { useCanvasSetup } from '../hooks/useCanvasSetup';
+import { useShortcutHandler } from '../hooks/useShortcutHandler';
+import { useLayerPanel } from '../hooks/useLayerPanel';
 
 interface EditorProps {
   isPublicView?: boolean;
@@ -37,37 +44,21 @@ interface OnlineUser {
   color: string;
 }
 
-const CURSOR_COLORS = [
-  '#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#38d9a9',
-  '#4dabf7', '#7950f2', '#e64980', '#20c997', '#ff922b',
-];
-
-function userColor(userId: string): string {
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) {
-    hash = ((hash << 5) - hash) + userId.charCodeAt(i);
-    hash |= 0;
-  }
-  return CURSOR_COLORS[Math.abs(hash) % CURSOR_COLORS.length];
-}
-
 export default function Editor({ isPublicView }: EditorProps) {
   const { boardId } = useParams<{ boardId?: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  // Refs
   const canvasRef = useRef<PixiCanvasHandle>(null);
   const selectionRef = useRef<SelectionManager | null>(null);
   const undoRef = useRef<UndoManager | null>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncCleanupRef = useRef<(() => void) | null>(null);
-  const dropCleanupRef = useRef<(() => void) | null>(null);
-  const pasteCleanupRef = useRef<(() => void) | null>(null);
+  const syncRef = useRef<SyncHandle | null>(null);
   const toolCleanupRef = useRef<(() => void) | null>(null);
+  const inboxZoneRef = useRef<InboxZone | null>(null);
+  const clipboardRef = useRef<SceneItem[]>([]);
 
-  const [boardData, setBoardData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  // UI state
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.SELECT);
   const [color, setColor] = useState('#ffffff');
   const [strokeWidth, setStrokeWidth] = useState(4);
@@ -85,113 +76,25 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showGrid, setShowGrid] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showMmImport, setShowMmImport] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
-  const clipboardRef = useRef<SceneItem[]>([]);
-  const inboxZoneRef = useRef<InboxZone | null>(null);
+  const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
+  const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
 
+  // Derived
+  const { boardData, loading, error } = useBoardLoader(boardId);
   const resolvedBoardId = boardId || boardData?.board?.id;
 
-  // Load board data
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        if (!boardId) {
-          setError('No board specified');
-          setLoading(false);
-          return;
-        }
-        const res = await getBoard(boardId);
-        if (!cancelled) {
-          setBoardData(res.data);
-          setLoading(false);
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          setError(err.response?.data?.error || 'Failed to load board');
-          setLoading(false);
-        }
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [boardId]);
+  // Toast helper
+  const showToast = useCallback((text: string) => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev.slice(-4), { id, text }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
+  }, []);
 
-  // Debounced save
-  const scheduleSave = useCallback(() => {
-    if (!resolvedBoardId || isPublicView) return;
-    setSaveStatus('unsaved');
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      const scene = canvasRef.current?.getScene();
-      if (!scene) return;
-      setSaveStatus('saving');
-      try {
-        const state = JSON.stringify(scene.serialize());
-
-        // Generate thumbnail from PixiJS renderer
-        let thumbnail: string | undefined;
-        const items = scene.getAllItems();
-        if (items.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const item of items) {
-            const d = item.data;
-            const w = d.w * d.sx;
-            const h = d.h * d.sy;
-            minX = Math.min(minX, d.x);
-            minY = Math.min(minY, d.y);
-            maxX = Math.max(maxX, d.x + w);
-            maxY = Math.max(maxY, d.y + h);
-          }
-          const sceneW = maxX - minX;
-          const sceneH = maxY - minY;
-          if (sceneW > 0 && sceneH > 0) {
-            try {
-              const viewport = canvasRef.current?.getViewport();
-              if (viewport) {
-                // Use PixiJS renderer extract API
-                const app = (viewport as any).parent?.parent;
-                const renderer = app?.__pixiApplication?.renderer || (viewport as any).__renderer;
-                // Simpler approach: extract the viewport as a canvas
-                // We need the Application's renderer. Access it from the PixiCanvas internals.
-                // For now, generate thumbnail from item bounds data
-                const thumbSize = 400;
-                const scale = Math.min(thumbSize / sceneW, thumbSize / sceneH);
-                const pw = Math.ceil(sceneW * scale);
-                const ph = Math.ceil(sceneH * scale);
-                const offscreen = document.createElement('canvas');
-                offscreen.width = pw;
-                offscreen.height = ph;
-                const ctx = offscreen.getContext('2d');
-                if (ctx) {
-                  ctx.fillStyle = '#1e1e1e';
-                  ctx.fillRect(0, 0, pw, ph);
-                  // Draw colored rectangles as placeholder thumbnail
-                  for (const item of items) {
-                    const d = item.data;
-                    const rx = (d.x - minX) * scale;
-                    const ry = (d.y - minY) * scale;
-                    const rw = d.w * d.sx * scale;
-                    const rh = d.h * d.sy * scale;
-                    ctx.fillStyle = d.type === 'text' ? '#555' : '#444';
-                    ctx.fillRect(rx, ry, rw, rh);
-                  }
-                  thumbnail = offscreen.toDataURL('image/webp', 0.6);
-                }
-              }
-            } catch (thumbErr) {
-              console.warn('Thumbnail generation failed:', thumbErr);
-            }
-          }
-        }
-        await saveCanvas(resolvedBoardId, state, thumbnail);
-        setSaveStatus('saved');
-      } catch {
-        setSaveStatus('unsaved');
-      }
-    }, 2000);
-  }, [resolvedBoardId, isPublicView]);
+  // Save manager
+  const { scheduleSave } = useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSaveStatus });
 
   // Canvas change handler
   const onCanvasChange = useCallback(() => {
@@ -204,157 +107,25 @@ export default function Editor({ isPublicView }: EditorProps) {
     const z = canvasRef.current?.getZoom() ?? 1;
     setZoom(z);
     const scene = canvasRef.current?.getScene();
-    if (scene) {
-      setObjectCount(scene.getAllItems().length);
-    }
-    // Update canvas transform for grid overlay
+    if (scene) setObjectCount(scene.getAllItems().length);
     const vp = canvasRef.current?.getViewport();
-    if (vp) {
-      setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
-    }
+    if (vp) setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
   }, [scheduleSave]);
 
-  // Toast helper
-  const showToast = useCallback((text: string) => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev.slice(-4), { id, text }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
-  }, []);
+  // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox)
+  useCanvasSetup({
+    boardData, resolvedBoardId, user, isPublicView,
+    canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef,
+    onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
+  });
 
-  // Setup socket, sync, drag/drop, paste, selection after canvas is ready
-  useEffect(() => {
-    if (!boardData || !resolvedBoardId) return;
-
-    const timer = setTimeout(() => {
-      const scene = canvasRef.current?.getScene();
-      const viewport = canvasRef.current?.getViewport();
-      if (!scene || !viewport) return;
-
-      // Create SelectionManager
-      const selection = new SelectionManager(viewport, scene);
-      selectionRef.current = selection;
-
-      // Wire selection change to update layer panel state
-      selection.onSelectionChange = (ids: string[]) => {
-        setSelectedLayerIds(ids);
-      };
-
-      // Create UndoManager
-      undoRef.current = new UndoManager(scene);
-
-      // Create InboxZone and add to viewport
-      const inboxZone = new InboxZone(scene.textures, scene.springs);
-      viewport.addChild(inboxZone);
-      inboxZoneRef.current = inboxZone;
-
-      if (user) {
-        const socket = connectSocket();
-
-        syncCleanupRef.current = setupSync(scene, socket, resolvedBoardId);
-
-        socket.on('user:joined', (data: any) => {
-          const uid = data.userId || data.id;
-          const name = data.displayName || data.display_name || data.username || '';
-          setOnlineUsers((prev) => {
-            if (prev.find((u) => u.userId === uid)) return prev;
-            return [...prev, { userId: uid, displayName: name, color: userColor(uid) }];
-          });
-          if (name) showToast(`${name} joined`);
-        });
-
-        socket.on('user:left', (data: any) => {
-          const uid = data.userId || data.id;
-          const name = data.displayName || data.display_name || data.username || '';
-          setOnlineUsers((prev) => prev.filter((u) => u.userId !== uid));
-          if (name) showToast(`${name} left`);
-        });
-
-        socket.on('room:users', (data: any) => {
-          if (Array.isArray(data.users)) {
-            setOnlineUsers(data.users.map((u: any) => ({
-              userId: u.userId || u.id,
-              displayName: u.displayName || u.display_name || u.username || '',
-              color: userColor(u.userId || u.id),
-            })));
-          }
-        });
-
-        // Listen for auto-synced media arriving via socket
-        socket.on('board:media-arrived', (data: any) => {
-          const assets = data?.assets;
-          if (Array.isArray(assets) && assets.length > 0 && inboxZoneRef.current) {
-            inboxZoneRef.current.addMedia(assets);
-            showToast(`${assets.length} image${assets.length !== 1 ? 's' : ''} arrived in Inbox`);
-          }
-        });
-
-        // Cursor tracking: listen on viewport for pointermove
-        const onPointerMove = (e: any) => {
-          const world = viewport.toWorld(e.global.x, e.global.y);
-          socket.emit('cursor:move', {
-            boardId: resolvedBoardId,
-            x: world.x,
-            y: world.y,
-          });
-        };
-        viewport.on('pointermove', onPointerMove);
-      }
-
-      // Setup drag/drop and paste (new signatures take container, viewport, scene)
-      const container = viewport.parent?.parent as any;
-      const canvasEl = container?.canvas?.parentElement || document.querySelector('[data-pixi-container]');
-      const containerEl = (viewport as any).__pixiContainer || canvasEl?.parentElement;
-
-      if (!isPublicView || user) {
-        // Get the actual DOM container from the PixiCanvas div
-        const pixiContainer = document.querySelector('[data-pixi-container]') as HTMLElement
-          || (viewport as any)._events?.pointermove?.[0]?.context?.containerRef?.current
-          || document.querySelector('.pixi-canvas-container') as HTMLElement;
-
-        // Find the container div that holds the pixi canvas
-        const canvasElements = document.querySelectorAll('canvas');
-        let domContainer: HTMLElement | null = null;
-        for (const c of canvasElements) {
-          if (c.parentElement && c.width > 100) {
-            domContainer = c.parentElement;
-            break;
-          }
-        }
-
-        if (domContainer) {
-          dropCleanupRef.current = setupDragDrop(domContainer, viewport, scene, resolvedBoardId, onCanvasChange);
-          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
-        } else {
-          // Fallback: just set up paste (works on document level)
-          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
-        }
-      }
-    }, 200);
-
-    return () => {
-      clearTimeout(timer);
-      selectionRef.current?.destroy();
-      selectionRef.current = null;
-      if (inboxZoneRef.current) {
-        inboxZoneRef.current.clear();
-        inboxZoneRef.current.destroy({ children: true });
-        inboxZoneRef.current = null;
-      }
-      syncCleanupRef.current?.();
-      dropCleanupRef.current?.();
-      pasteCleanupRef.current?.();
-      disconnectSocket();
-    };
-  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast]);
-
-  // Apply tool changes
+  // Tool activation
   useEffect(() => {
     const viewport = canvasRef.current?.getViewport();
     const scene = canvasRef.current?.getScene();
     const selection = selectionRef.current;
     if (!viewport || !scene || !selection) return;
 
-    // Find the DOM container for cursor changes
     const canvasElements = document.querySelectorAll('canvas');
     let domContainer: HTMLElement | null = null;
     for (const c of canvasElements) {
@@ -366,137 +137,24 @@ export default function Editor({ isPublicView }: EditorProps) {
     if (!domContainer) return;
 
     toolCleanupRef.current?.();
-    const ctx: ToolContext = { viewport, scene, selection, container: domContainer, onChange: onCanvasChange };
+    const ctx: ToolContext = {
+      viewport, scene, selection, container: domContainer,
+      onChange: onCanvasChange,
+      broadcastElements: (ids) => syncRef.current?.broadcastElements(ids),
+    };
     toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth, fontSize });
   }, [activeTool, color, strokeWidth, fontSize, onCanvasChange]);
 
-  // Write selected items (or full viewport) to system clipboard as PNG
-  const writeCanvasToClipboard = useCallback(async (items?: SceneItem[]) => {
-    const viewport = canvasRef.current?.getViewport();
-    if (!viewport) return;
-
-    try {
-      // Use PixiJS extract API to get the viewport as a canvas
-      const app = (viewport.parent as any)?.__pixiApplication;
-      if (!app?.renderer?.extract) {
-        showToast('Copy failed: renderer not available');
-        return;
-      }
-
-      const fullCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
-
-      let outputCanvas: HTMLCanvasElement;
-
-      if (items && items.length > 0) {
-        // Compute bounding rect of selected items in world space
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const item of items) {
-          const bounds = item.displayObject.getBounds();
-          minX = Math.min(minX, bounds.x);
-          minY = Math.min(minY, bounds.y);
-          maxX = Math.max(maxX, bounds.x + bounds.width);
-          maxY = Math.max(maxY, bounds.y + bounds.height);
-        }
-
-        // Convert world bounds to screen coords
-        const topLeft = viewport.toScreen(minX, minY);
-        const bottomRight = viewport.toScreen(maxX, maxY);
-
-        const pad = 10;
-        const cx = Math.max(0, Math.floor(topLeft.x - pad));
-        const cy = Math.max(0, Math.floor(topLeft.y - pad));
-        const cw = Math.min(Math.ceil(bottomRight.x - topLeft.x + pad * 2), fullCanvas.width - cx);
-        const ch = Math.min(Math.ceil(bottomRight.y - topLeft.y + pad * 2), fullCanvas.height - cy);
-        if (cw <= 0 || ch <= 0) return;
-
-        outputCanvas = document.createElement('canvas');
-        outputCanvas.width = cw;
-        outputCanvas.height = ch;
-        const ctx = outputCanvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, cw, ch);
-        ctx.drawImage(fullCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
-      } else {
-        outputCanvas = fullCanvas;
-      }
-
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        outputCanvas.toBlob((b) => {
-          if (b) resolve(b);
-          else reject(new Error('toBlob returned null'));
-        }, 'image/png');
-      });
-
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob }),
-      ]);
-    } catch (err: any) {
-      console.error('writeCanvasToClipboard failed:', err);
-      showToast('Copy failed: ' + (err.message || 'clipboard not available'));
-    }
-  }, [showToast]);
-
-  // Refresh layer list from scene
-  const nameCounters = useRef<Record<string, number>>({});
-
-  function autoName(item: SceneItem, i: number): string {
-    if (item.data.name) return item.data.name;
-    const type = item.data.type;
-    if (type === 'image') {
-      nameCounters.current.image = (nameCounters.current.image || 0) + 1;
-      return `Image ${nameCounters.current.image}`;
-    }
-    if (type === 'text') {
-      const textData = item.data as any;
-      return (textData.text || 'Text').slice(0, 20);
-    }
-    if (type === 'group') {
-      const groupData = item.data as GroupObject;
-      return `Group (${groupData.children?.length || 0})`;
-    }
-    return `${type} ${i + 1}`;
-  }
-
-  function buildLayerItem(item: SceneItem, i: number): any {
-    const isGroup = item.data.type === 'group';
-    let children: any[] | undefined;
-    if (isGroup) {
-      const groupData = item.data as GroupObject;
-      const scene = canvasRef.current?.getScene();
-      if (scene && groupData.children) {
-        children = groupData.children.map((childId, ci) => {
-          const childItem = scene.getById(childId);
-          if (childItem) return buildLayerItem(childItem, ci);
-          return { id: childId, name: `Missing ${childId.slice(0, 6)}`, type: 'unknown', visible: true, locked: false, isGroup: false };
-        });
-      }
-    }
-    return {
-      id: item.id,
-      name: autoName(item, i),
-      type: item.data.type,
-      visible: item.data.visible,
-      locked: item.data.locked,
-      isGroup,
-      children,
-    };
-  }
+  // Layer panel
+  const { refreshLayers: refreshLayerData, layerHandlers } = useLayerPanel({ canvasRef, selectionRef, onCanvasChange });
 
   const refreshLayers = useCallback(() => {
-    const scene = canvasRef.current?.getScene();
-    if (!scene) return;
-    nameCounters.current = {};
-    const items = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
-    const layers = items.map((item, i) => buildLayerItem(item, i));
+    const layers = refreshLayerData();
     setLayerList(layers);
-
     const selection = selectionRef.current;
-    if (selection) {
-      setSelectedLayerIds(Array.from(selection.selectedIds));
-    }
-  }, []);
+    if (selection) setSelectedLayerIds(Array.from(selection.selectedIds));
+  }, [refreshLayerData]);
 
-  // Update layers whenever canvas changes
   useEffect(() => {
     if (!showLayers) return;
     refreshLayers();
@@ -504,288 +162,70 @@ export default function Editor({ isPublicView }: EditorProps) {
     return () => clearInterval(interval);
   }, [showLayers, refreshLayers]);
 
-  // Group selected objects
+  // Grouping
   const handleGroup = useCallback(() => {
     const scene = canvasRef.current?.getScene();
     const selection = selectionRef.current;
     if (!scene || !selection) return;
-    const selected = selection.getSelectedItems();
-    if (selected.length < 2) return;
-
-    // Create a group item containing the selected items' IDs
-    const groupData: GroupObject = {
-      id: crypto.randomUUID(),
-      type: 'group',
-      x: Math.min(...selected.map((s) => s.data.x)),
-      y: Math.min(...selected.map((s) => s.data.y)),
-      w: 0,
-      h: 0,
-      sx: 1,
-      sy: 1,
-      angle: 0,
-      z: scene.nextZ(),
-      opacity: 1,
-      locked: false,
-      name: '',
-      visible: true,
-      children: selected.map((s) => s.id),
-    };
-
-    // Create the group container and reparent children
-    scene._createItem(groupData, false);
-    const groupItem = scene.getById(groupData.id);
-    if (groupItem) {
-      for (const child of selected) {
-        // Reparent display object into group container
-        child.displayObject.parent?.removeChild(child.displayObject);
-        groupItem.displayObject.addChild(child.displayObject);
-        // Adjust child position relative to group
-        child.displayObject.position.set(
-          child.data.x - groupData.x,
-          child.data.y - groupData.y,
-        );
-      }
-    }
-
-    selection.clear();
-    if (groupItem) selection.selectOnly(groupItem.id);
-    scene._applyZOrder();
-    onCanvasChange();
-    refreshLayers();
+    groupItems(scene, selection, () => {
+      onCanvasChange();
+      refreshLayers();
+      syncRef.current?.broadcastSceneNow();
+    });
   }, [onCanvasChange, refreshLayers]);
 
-  // Ungroup selected group
   const handleUngroup = useCallback(() => {
     const scene = canvasRef.current?.getScene();
     const selection = selectionRef.current;
-    if (!scene || !selection) return;
-    const selected = selection.getSelectedItems();
-    if (selected.length !== 1) return;
-    const groupItem = selected[0];
-    if (groupItem.data.type !== 'group') return;
-
-    const groupData = groupItem.data as GroupObject;
     const viewport = canvasRef.current?.getViewport();
-    if (!viewport) return;
-
-    // Reparent children back to viewport
-    for (const childId of groupData.children) {
-      const childItem = scene.getById(childId);
-      if (childItem) {
-        // Convert position back to world space
-        childItem.data.x += groupData.x;
-        childItem.data.y += groupData.y;
-        childItem.displayObject.parent?.removeChild(childItem.displayObject);
-        viewport.addChild(childItem.displayObject);
-        childItem.displayObject.position.set(childItem.data.x, childItem.data.y);
-      }
-    }
-
-    // Remove the group item
-    scene.removeItem(groupItem.id, false);
-    selection.clear();
-    scene._applyZOrder();
-    onCanvasChange();
-    refreshLayers();
+    if (!scene || !selection || !viewport) return;
+    ungroupItems(scene, selection, viewport, () => {
+      onCanvasChange();
+      refreshLayers();
+      syncRef.current?.broadcastSceneNow();
+    });
   }, [onCanvasChange, refreshLayers]);
 
-  // Right-click context menu
+  // Clipboard write wrapper
+  const writeCanvasToClipboard = useCallback(async (items?: SceneItem[]) => {
+    try {
+      const app = canvasRef.current?.getApp() ?? null;
+      const viewport = canvasRef.current?.getViewport() ?? null;
+      await writeClipboard(app, viewport, items);
+    } catch (err: any) {
+      showToast('Copy failed: ' + (err.message || 'clipboard not available'));
+    }
+  }, [showToast]);
+
+  // Keyboard shortcuts
+  useShortcutHandler({
+    canvasRef, selectionRef, undoRef, clipboardRef, resolvedBoardId,
+    onCanvasChange, showToast, refreshLayers,
+    handleGroup, handleUngroup,
+    setActiveTool, setCanUndo, setCanRedo, setZoom,
+    setShowGrid, setShowHelp, setFocusMode,
+  });
+
+  // Context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
   const contextMenuItems = useCallback(() => {
-    const scene = canvasRef.current?.getScene();
-    const selection = selectionRef.current;
-    const selected = selection ? selection.getSelectedItems() : [];
-    const hasSel = selected.length > 0;
-    const multiSel = selected.length >= 2;
-
-    return [
-      { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => {
-        if (hasSel) { clipboardRef.current = [...selected]; writeCanvasToClipboard(selected); }
-        else writeCanvasToClipboard();
-      } },
-      { label: 'Cut', shortcut: 'Ctrl+X', onClick: () => {
-        if (!scene || !hasSel || !selection) return;
-        clipboardRef.current = [...selected];
-        for (const item of selected) scene.removeItem(item.id, true);
-        selection.clear();
-        onCanvasChange();
-      }, disabled: !hasSel },
-      { label: 'Paste', shortcut: 'Ctrl+V', onClick: async () => {
-        if (!scene || clipboardRef.current.length === 0) return;
-        for (const original of clipboardRef.current) {
-          const newData = {
-            ...original.data,
-            id: crypto.randomUUID(),
-            x: original.data.x + 20,
-            y: original.data.y + 20,
-            z: scene.nextZ(),
-          };
-          await scene._createItem(newData, true);
-        }
-        scene._applyZOrder();
-        onCanvasChange();
-      }, disabled: clipboardRef.current.length === 0 },
-      { label: 'Duplicate', shortcut: 'Ctrl+D', onClick: async () => {
-        if (!scene || !hasSel) return;
-        for (const original of selected) {
-          const newData = {
-            ...original.data,
-            id: crypto.randomUUID(),
-            x: original.data.x + 20,
-            y: original.data.y + 20,
-            z: scene.nextZ(),
-          };
-          await scene._createItem(newData, true);
-        }
-        if (selection) selection.clear();
-        scene._applyZOrder();
-        onCanvasChange();
-      }, disabled: !hasSel },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Alignment --
-      { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => { ops.alignLeft(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => { ops.alignRight(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => { ops.alignTop(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => { ops.alignBottom(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); onCanvasChange(); }, disabled: selected.length < 3 },
-      { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); onCanvasChange(); }, disabled: selected.length < 3 },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Layer ordering --
-      { label: 'Bring Forward', shortcut: ']', onClick: () => {
-        if (!scene) return;
-        const all = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
-        const selectedIds = new Set(selected.map((s) => s.id));
-        for (let i = all.length - 2; i >= 0; i--) {
-          if (selectedIds.has(all[i].id) && !selectedIds.has(all[i + 1].id)) {
-            const tmp = all[i].data.z;
-            all[i].data.z = all[i + 1].data.z;
-            all[i + 1].data.z = tmp;
-          }
-        }
-        scene._applyZOrder();
-        onCanvasChange();
-      }, disabled: !hasSel },
-      { label: 'Send Backward', shortcut: '[', onClick: () => {
-        if (!scene) return;
-        const all = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
-        const selectedIds = new Set(selected.map((s) => s.id));
-        for (let i = 1; i < all.length; i++) {
-          if (selectedIds.has(all[i].id) && !selectedIds.has(all[i - 1].id)) {
-            const tmp = all[i].data.z;
-            all[i].data.z = all[i - 1].data.z;
-            all[i - 1].data.z = tmp;
-          }
-        }
-        scene._applyZOrder();
-        onCanvasChange();
-      }, disabled: !hasSel },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Group --
-      { label: 'Group', shortcut: 'Ctrl+G', onClick: handleGroup, disabled: !multiSel },
-      { label: 'Ungroup', shortcut: 'Ctrl+Shift+G', onClick: handleUngroup,
-        disabled: selected.length !== 1 || selected[0]?.data.type !== 'group' },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Arrangement --
-      { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { ops.arrangeOptimal(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Arrange Grid', shortcut: '', onClick: () => { ops.arrangeGrid(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Arrange Row', shortcut: '', onClick: () => { ops.arrangeRow(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Arrange Column', shortcut: '', onClick: () => { ops.arrangeColumn(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { ops.stackObjects(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Normalize --
-      { label: 'Normalize Size', shortcut: '', onClick: () => { ops.normalizeSize(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Normalize Width', shortcut: '', onClick: () => { ops.normalizeWidth(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: 'Normalize Height', shortcut: '', onClick: () => { ops.normalizeHeight(selected); onCanvasChange(); }, disabled: !multiSel },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      // -- Image --
-      { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); onCanvasChange(); }, disabled: !hasSel },
-      { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); onCanvasChange(); }, disabled: !hasSel },
-      { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); onCanvasChange(); }, disabled: !hasSel },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      { label: 'Select All', shortcut: 'Ctrl+A', onClick: () => {
-        if (selection) selection.selectAll();
-      } },
-      { label: 'Fit All', shortcut: 'Ctrl+0', onClick: () => canvasRef.current?.fitAll() },
-      { label: '', shortcut: '', onClick: () => {}, divider: true },
-      { label: 'Delete', shortcut: 'Del', onClick: () => {
-        if (!scene || !selection) return;
-        for (const item of selected) scene.removeItem(item.id, true);
-        selection.clear();
-        onCanvasChange();
-      }, disabled: !hasSel, danger: true },
-    ];
-  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup]);
-
-  // Keyboard shortcuts -- registry-based approach
-  useEffect(() => {
-    async function onKeyDown(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      const scene = canvasRef.current?.getScene();
-      const selection = selectionRef.current;
-      const viewport = canvasRef.current?.getViewport();
-      if (!scene || !selection || !viewport) return;
-
-      // Tool shortcuts (bare keys 1-5, v/h/p/t/e -- no modifiers)
-      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tool = toolShortcuts[e.key.toLowerCase()];
-        if (tool) {
-          setActiveTool(tool);
-          return;
-        }
-      }
-
-      // Special: Ctrl+V paste -- if internal clipboard is empty, let browser/setupPaste handle it
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
-        if (clipboardRef.current.length === 0) return;
-      }
-
-      // Build context for shortcut handlers
-      const ctx: ShortcutContext = {
-        scene,
-        selection,
-        history: undoRef.current!,
-        viewport,
-        onChange: onCanvasChange,
-        clipboardRef,
-        writeCanvasToClipboard,
-        showToast,
-        fitAll: () => canvasRef.current?.fitAll(),
-        setActiveTool,
-        setCanUndo,
-        setCanRedo,
-        refreshLayers,
-        handleGroup,
-        handleUngroup,
-        toggleGrid: () => setShowGrid((v) => !v),
-        toggleShowHelp: () => setShowHelp((v) => !v),
-      };
-
-      // Match against sorted registry (most-specific first)
-      for (const def of sortedShortcuts) {
-        if (!matchesShortcut(e, def)) continue;
-
-        // Check selection requirements
-        const activeCount = selection.selectedIds.size;
-        if (def.needsSelection && activeCount === 0) continue;
-        if (def.minSelection && activeCount < def.minSelection) continue;
-
-        e.preventDefault();
-        await def.handler(ctx);
-
-        // Update zoom display after any action
-        setZoom(canvasRef.current?.getZoom() ?? 1);
-        return;
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCanvasChange, writeCanvasToClipboard, handleGroup, handleUngroup, showToast, refreshLayers]);
+    return buildContextMenuItems({
+      scene: canvasRef.current?.getScene() ?? null,
+      selection: selectionRef.current,
+      viewport: canvasRef.current?.getViewport() ?? null,
+      clipboardRef,
+      writeCanvasToClipboard,
+      onChange: () => { onCanvasChange(); refreshLayers(); },
+      refreshLayers,
+      handleGroup,
+      handleUngroup,
+      fitAll: () => canvasRef.current?.fitAll(),
+    });
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers]);
 
   // Save on page unload
   useEffect(() => {
@@ -800,14 +240,58 @@ export default function Editor({ isPublicView }: EditorProps) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [resolvedBoardId]);
 
-  // Update zoom from canvas
+  // Zoom poll + selection toolbar position tracking
   useEffect(() => {
     const interval = setInterval(() => {
-      const z = canvasRef.current?.getZoom() ?? 1;
-      setZoom(z);
-    }, 500);
+      setZoom(canvasRef.current?.getZoom() ?? 1);
+
+      // Update selection toolbar position
+      const selection = selectionRef.current;
+      const vp = canvasRef.current?.getViewport();
+      if (!selection || !vp) { setSelToolbar(null); setVideoCtrl(null); return; }
+      const items = selection.getSelectedItems();
+
+      // Video controls: show when exactly 1 video is selected
+      if (items.length === 1 && items[0].type === 'video' && items[0].displayObject instanceof VideoSprite) {
+        const vs = items[0].displayObject as VideoSprite;
+        const b = getItemWorldBounds(items[0]);
+        const screenTL = vp.toScreen(b.x, b.y);
+        const screenBR = vp.toScreen(b.x + b.w, b.y + b.h);
+        setVideoCtrl({
+          videoSprite: vs,
+          screenRect: {
+            x: screenTL.x,
+            y: screenTL.y,
+            w: screenBR.x - screenTL.x,
+            h: screenBR.y - screenTL.y,
+          },
+        });
+      } else {
+        setVideoCtrl(null);
+      }
+
+      if (items.length < 2) { setSelToolbar(null); return; }
+
+      // Compute world bounding box of selection
+      let minX = Infinity, minY = Infinity, maxX = -Infinity;
+      for (const item of items) {
+        const b = getItemWorldBounds(item);
+        if (b.x < minX) minX = b.x;
+        if (b.y < minY) minY = b.y;
+        if (b.x + b.w > maxX) maxX = b.x + b.w;
+      }
+
+      // Convert to screen
+      const screenTL = vp.toScreen(minX, minY);
+      const screenTR = vp.toScreen(maxX, minY);
+      const sx = (screenTL.x + screenTR.x) / 2;
+      const sy = screenTL.y;
+      setSelToolbar({ x: sx, y: sy, count: items.length });
+    }, 100);
     return () => clearInterval(interval);
   }, []);
+
+  // -- Render --
 
   if (loading) {
     return (
@@ -836,7 +320,7 @@ export default function Editor({ isPublicView }: EditorProps) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
       {/* Breadcrumb header */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: focusMode ? 'none' : 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 12px', height: '32px', background: '#1e1e1e',
         borderBottom: '1px solid #2a2a2a', flexShrink: 0,
       }}>
@@ -871,14 +355,13 @@ export default function Editor({ isPublicView }: EditorProps) {
             {board?.name || 'Untitled'}
           </span>
         </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <StatusIndicator status={saveStatus} />
         </div>
       </div>
 
       {/* Toolbar */}
-      <Toolbar
+      {!focusMode && <Toolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
         color={color}
@@ -921,7 +404,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         onToggleHelp={() => setShowHelp((v) => !v)}
         onMmImport={() => setShowMmImport(true)}
         boardName={board?.name}
-      />
+      />}
 
       {/* Canvas */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onContextMenu={handleContextMenu}>
@@ -970,6 +453,40 @@ export default function Editor({ isPublicView }: EditorProps) {
           </div>
         )}
 
+        {/* Selection toolbar (floating, above selection) */}
+        {selToolbar && selToolbar.count >= 2 && activeTool === ToolType.SELECT && !contextMenu && (
+          <SelectionToolbar
+            x={selToolbar.x}
+            y={selToolbar.y}
+            count={selToolbar.count}
+            onAlignLeft={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignLeft(s); onCanvasChange(); } }}
+            onAlignCenterH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterH(s); onCanvasChange(); } }}
+            onAlignRight={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignRight(s); onCanvasChange(); } }}
+            onAlignTop={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignTop(s); onCanvasChange(); } }}
+            onAlignCenterV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterV(s); onCanvasChange(); } }}
+            onAlignBottom={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignBottom(s); onCanvasChange(); } }}
+            onDistributeH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeHorizontal(s); onCanvasChange(); } }}
+            onDistributeV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeVertical(s); onCanvasChange(); } }}
+            onPack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeOptimal(s); onCanvasChange(); } }}
+            onGrid={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeGrid(s); onCanvasChange(); } }}
+            onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); onCanvasChange(); } }}
+            onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); onCanvasChange(); } }}
+            onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); onCanvasChange(); } }}
+            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); onCanvasChange(); } }}
+            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); onCanvasChange(); } }}
+            onGroup={handleGroup}
+            onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); onCanvasChange(); } }}
+          />
+        )}
+
+        {/* Video controls (floating, below selected video) */}
+        {videoCtrl && activeTool === ToolType.SELECT && !contextMenu && (
+          <VideoControls
+            videoSprite={videoCtrl.videoSprite}
+            screenRect={videoCtrl.screenRect}
+          />
+        )}
+
         {/* Context menu */}
         {contextMenu && (
           <ContextMenu
@@ -985,64 +502,12 @@ export default function Editor({ isPublicView }: EditorProps) {
           <LayerPanel
             layers={layerList}
             selectedIds={selectedLayerIds}
-            onSelect={(id) => {
-              const selection = selectionRef.current;
-              if (selection) {
-                selection.selectOnly(id);
-              }
-            }}
-            onToggleVisible={(id) => {
-              const scene = canvasRef.current?.getScene();
-              if (!scene) return;
-              const item = scene.getById(id);
-              if (item) {
-                item.data.visible = !item.data.visible;
-                item.displayObject.visible = item.data.visible;
-                onCanvasChange();
-                refreshLayers();
-              }
-            }}
-            onToggleLock={(id) => {
-              const scene = canvasRef.current?.getScene();
-              if (!scene) return;
-              const item = scene.getById(id);
-              if (item) {
-                item.data.locked = !item.data.locked;
-                item.displayObject.eventMode = item.data.locked ? 'none' : 'static';
-                refreshLayers();
-              }
-            }}
-            onReorder={(from, to) => {
-              const scene = canvasRef.current?.getScene();
-              if (!scene) return;
-              const items = scene.getAllItems().sort((a, b) => a.data.z - b.data.z);
-              if (from < 0 || from >= items.length || to < 0 || to >= items.length) return;
-              // Swap z values
-              const tmp = items[from].data.z;
-              items[from].data.z = items[to].data.z;
-              items[to].data.z = tmp;
-              scene._applyZOrder();
-              onCanvasChange();
-              refreshLayers();
-            }}
-            onDelete={(id) => {
-              const scene = canvasRef.current?.getScene();
-              const selection = selectionRef.current;
-              if (!scene) return;
-              scene.removeItem(id, true);
-              if (selection) selection.clear();
-              onCanvasChange();
-              refreshLayers();
-            }}
-            onRename={(id, name) => {
-              const scene = canvasRef.current?.getScene();
-              if (!scene) return;
-              const item = scene.getById(id);
-              if (item) {
-                item.data.name = name;
-                refreshLayers();
-              }
-            }}
+            onSelect={layerHandlers.onSelect}
+            onToggleVisible={(id) => { layerHandlers.onToggleVisible(id); refreshLayers(); }}
+            onToggleLock={(id) => { layerHandlers.onToggleLock(id); refreshLayers(); }}
+            onReorder={(from, to) => { layerHandlers.onReorder(from, to); refreshLayers(); }}
+            onDelete={(id) => { layerHandlers.onDelete(id); refreshLayers(); }}
+            onRename={(id, name) => { layerHandlers.onRename(id, name); refreshLayers(); }}
             onGroup={handleGroup}
             onUngroup={handleUngroup}
             hasSelection={(selectionRef.current?.selectedIds.size ?? 0) > 1}
@@ -1077,11 +542,11 @@ export default function Editor({ isPublicView }: EditorProps) {
       </div>
 
       {/* Status bar */}
-      <StatusBar
+      {!focusMode && <StatusBar
         boardName={board?.name || 'Untitled'}
         imageCount={objectCount}
         saveStatus={saveStatus}
-      />
+      />}
 
       {/* Shortcuts help overlay */}
       {showHelp && (
