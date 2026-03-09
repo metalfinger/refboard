@@ -98,6 +98,26 @@ router.get('/:boardId', (req, res) => {
     if (!result) return;
 
     const { board, collection } = result;
+
+    // Auto-convert Fabric v1 → v2 on first load
+    if (board.canvas_state) {
+      try {
+        const parsed = typeof board.canvas_state === 'string'
+          ? JSON.parse(board.canvas_state)
+          : board.canvas_state;
+        if (!parsed.v || parsed.v < 2) {
+          const { convertFabricToV2 } = require('../services/scene-converter');
+          const v2 = convertFabricToV2(parsed);
+          const v2json = JSON.stringify(v2);
+          saveBoardCanvas(board.id, v2json, null);
+          board.canvas_state = v2json;
+        }
+      } catch (e) {
+        // Don't block board load on conversion failure
+        console.error('[boards] Scene conversion failed:', e);
+      }
+    }
+
     const images = getBoardImages(board.id);
 
     return res.json({
