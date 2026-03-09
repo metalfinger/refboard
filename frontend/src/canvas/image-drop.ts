@@ -29,7 +29,7 @@ function removePlaceholder(viewport: Viewport, g: Graphics) {
 /*  Handle upload response (image or video)                            */
 /* ------------------------------------------------------------------ */
 
-/** Returns the placed width so callers can offset subsequent items. */
+/** Returns the placed dimensions so callers can offset subsequent items. */
 function handleUploadResult(
   res: any,
   viewport: Viewport,
@@ -37,7 +37,7 @@ function handleUploadResult(
   x: number,
   y: number,
   onChange: OnChange,
-): number {
+): { w: number; h: number } {
   const imgData = res.data.image || res.data;
   const mediaType: string = imgData.media_type || 'image';
   const assetKey: string | undefined = imgData.asset_key;
@@ -65,7 +65,7 @@ function handleUploadResult(
   }
 
   onChange();
-  return finalW;
+  return { w: finalW, h: finalH };
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,24 +122,49 @@ export function setupDragDrop(
 
     const rect = container.getBoundingClientRect();
     const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
-    const GAP = 20; // px gap between dropped images
-    let cursorX = world.x; // running x position for side-by-side placement
+    const GAP = 20;
+
+    // Count valid media files to determine grid columns
+    let mediaCount = 0;
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('image/') || files[i].type.startsWith('video/')) mediaCount++;
+    }
+    const cols = Math.ceil(Math.sqrt(mediaCount)); // square-ish grid
+    let col = 0;
+    let row = 0;
+    let rowMaxH = 0;
+    let cursorY = world.y;
+    const colWidths: number[] = new Array(cols).fill(0); // track widest per column
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
 
-      const placeholder = createPlaceholder(viewport, cursorX, world.y);
+      // Compute x from column widths so far
+      let cursorX = world.x;
+      for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
+
+      const placeholder = createPlaceholder(viewport, cursorX, cursorY);
 
       try {
         const res = await uploadImage(boardId, file);
         removePlaceholder(viewport, placeholder);
-        const placedWidth = handleUploadResult(res, viewport, sceneManager, cursorX, world.y, onChange);
-        cursorX += placedWidth + GAP;
+        const { w: placedW, h: placedH } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
+        if (placedW > (colWidths[col] || 0)) colWidths[col] = placedW;
+        if (placedH > rowMaxH) rowMaxH = placedH;
       } catch (err) {
         console.error('Image upload failed:', err);
         removePlaceholder(viewport, placeholder);
-        cursorX += 220; // fallback offset if upload fails
+        if (220 > (colWidths[col] || 0)) colWidths[col] = 220;
+        if (150 > rowMaxH) rowMaxH = 150;
+      }
+
+      col++;
+      if (col >= cols) {
+        col = 0;
+        row++;
+        cursorY += rowMaxH + GAP;
+        rowMaxH = 0;
       }
     }
   }
