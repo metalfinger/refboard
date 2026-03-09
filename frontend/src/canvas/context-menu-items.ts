@@ -82,8 +82,8 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => { ops.alignRight(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
     { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => { ops.alignTop(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
     { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => { ops.alignBottom(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: selected.length < 3 },
-    { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: selected.length < 3 },
+    { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
+    { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Layer ordering --

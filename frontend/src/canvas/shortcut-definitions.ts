@@ -143,12 +143,12 @@ export const shortcuts: ShortcutDef[] = [
 
   {
     id: 'distribute-h', keys: { key: 'arrowup', ctrl: true, alt: true, shift: true },
-    category: 'alignment', description: 'Distribute horizontal', needsSelection: true, minSelection: 3,
+    category: 'alignment', description: 'Distribute horizontal', needsSelection: true, minSelection: 2,
     handler: (ctx) => _opUpdate(ctx, ops.distributeHorizontal),
   },
   {
     id: 'distribute-v', keys: { key: 'arrowdown', ctrl: true, alt: true, shift: true },
-    category: 'alignment', description: 'Distribute vertical', needsSelection: true, minSelection: 3,
+    category: 'alignment', description: 'Distribute vertical', needsSelection: true, minSelection: 2,
     handler: (ctx) => _opUpdate(ctx, ops.distributeVertical),
   },
 
