@@ -40,10 +40,8 @@ async function generateLOD(buffer, originalExt) {
     const { maxWidth, quality } = LOD_TIERS[tierKey];
 
     if (origWidth <= maxWidth) {
-      // Image is smaller than tier width — convert to WebP but don't upscale
-      const result = sharp(buffer).webp({ quality });
-      const outBuf = await result.toBuffer();
-      return { buffer: outBuf, ext: '.webp', width: origWidth, height: origHeight };
+      // Image is smaller than tier width — reuse full image, no point re-encoding
+      return full;
     }
 
     // Resize down (width-based, preserve aspect ratio)
