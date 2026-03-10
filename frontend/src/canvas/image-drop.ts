@@ -119,14 +119,22 @@ export function setupDragDrop(
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
         const placeholder = createPlaceholder(viewport, world.x, world.y);
 
+        // Derive a filename from the URL for the upload manager
+        const urlFilename = url.split('/').pop()?.split('?')[0] || 'url-import';
+        const isVideoUrl = /\.(mp4|webm|mov)(\?|$)/i.test(url);
+        const jobId = uploads?.addUrlJob(urlFilename, isVideoUrl ? 'video' : 'image');
+
         try {
           const res = await uploadImageFromUrl(boardId, url);
           removePlaceholder(viewport, placeholder);
           const { id } = handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
           selection?.selectOnly(id);
+          const imgData = res.data.image || res.data;
+          if (jobId) uploads?.uploadComplete(jobId, imgData.id);
         } catch (err: any) {
           console.error('URL image upload failed:', err);
           removePlaceholder(viewport, placeholder);
+          if (jobId) uploads?.setFailed(jobId, err.response?.data?.error || err.message || 'URL import failed');
         }
       }
       return;

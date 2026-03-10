@@ -64,6 +64,11 @@ export default function Editor({ isPublicView }: EditorProps) {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [uploadManager] = useState(() => new UploadManager());
 
+  // Reset upload manager when switching boards
+  useEffect(() => {
+    uploadManager.clear();
+  }, [boardId, uploadManager]);
+
   // UI state
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.SELECT);
   const [color, setColor] = useState('#ffffff');

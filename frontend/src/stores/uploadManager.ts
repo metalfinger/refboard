@@ -32,7 +32,7 @@ export class UploadManager {
     for (const fn of this._listeners) fn();
   }
 
-  /** Create a new upload job. Returns the job ID. */
+  /** Create a new upload job from a local file. Returns the job ID. */
   addJob(file: File, boardId: string): string {
     const id = crypto.randomUUID();
     const isVideo = file.type.startsWith('video/');
@@ -45,6 +45,22 @@ export class UploadManager {
       progress: 0,
       file,
       boardId,
+      createdAt: Date.now(),
+    });
+    this._notify();
+    return id;
+  }
+
+  /** Create a job for a URL-based import (no File object, unknown size). */
+  addUrlJob(fileName: string, mediaType: 'image' | 'video'): string {
+    const id = crypto.randomUUID();
+    this.jobs.set(id, {
+      id,
+      fileName,
+      fileSize: 0,
+      mediaType,
+      status: 'uploading',
+      progress: 0,
       createdAt: Date.now(),
     });
     this._notify();
@@ -116,6 +132,13 @@ export class UploadManager {
     this._notify();
   }
 
+  /** Remove all jobs (used on board change). */
+  clear() {
+    for (const id of this._dismissTimers.keys()) this._clearDismissTimer(id);
+    this.jobs.clear();
+    this._notify();
+  }
+
   /** Remove all completed/failed jobs. */
   clearFinished() {
     for (const [id, job] of this.jobs) {
@@ -127,11 +150,11 @@ export class UploadManager {
     this._notify();
   }
 
-  /** Get active (non-done) job count. */
+  /** Get active (uploading or processing) job count. */
   get activeCount(): number {
     let count = 0;
     for (const job of this.jobs.values()) {
-      if (job.status !== 'done') count++;
+      if (job.status === 'uploading' || job.status === 'processing') count++;
     }
     return count;
   }
