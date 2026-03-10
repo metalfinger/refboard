@@ -299,9 +299,10 @@ export function setupPaste(
 
       // Reject unsupported media types with feedback
       if (!ALLOWED_MIME_TYPES.has(item.type)) {
+        const ext = extFromMime(item.type);
         uploads?.addRejected(
-          item.type.split('/')[1] || 'unknown',
-          `Unsupported format: ${extFromMime(item.type)}`,
+          `pasted-item${ext.startsWith('.') ? ext : '.' + ext}`,
+          `Unsupported format: ${ext}`,
         );
         continue;
       }
