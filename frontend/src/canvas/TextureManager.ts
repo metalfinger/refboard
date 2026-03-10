@@ -1,10 +1,5 @@
 import { Texture, Assets } from "pixi.js";
 
-// Max texture dimension — avoids WebGL INVALID_VALUE on large images.
-// Most GPUs support 4096 or 8192; we cap at 2048 for memory efficiency
-// since display sizes are typically 300-600px anyway.
-const MAX_TEXTURE_DIM = 2048;
-
 interface TextureEntry {
   texture: Texture;
   url: string; // needed for Assets.unload()
@@ -14,12 +9,11 @@ interface TextureEntry {
 
 /**
  * TextureManager — GPU texture cache with LRU eviction and memory budget.
- * Caps texture dimensions at MAX_TEXTURE_DIM to prevent WebGL OOM.
  * Uses Assets.unload() instead of texture.destroy() for proper cleanup.
  */
 export class TextureManager {
   private cache = new Map<string, TextureEntry>();
-  private budget = 256 * 1024 * 1024; // 256 MB (conservative for 90+ items)
+  private budget = 512 * 1024 * 1024; // 512 MB
   private currentUsage = 0;
 
   /** Build the URL for a given asset. */
@@ -33,7 +27,6 @@ export class TextureManager {
   /**
    * Load a texture for the given asset.
    * Returns cached texture if available, otherwise fetches and caches.
-   * Large images are downscaled server-side via width param to stay within GPU limits.
    */
   async load(assetKey: string): Promise<Texture> {
     const existing = this.cache.get(assetKey);
@@ -42,11 +35,7 @@ export class TextureManager {
       return existing.texture;
     }
 
-    // Request capped size from server to avoid loading huge textures into GPU
-    let url = this.urlForAsset(assetKey);
-    if (!url.includes('?')) {
-      url += `?w=${MAX_TEXTURE_DIM}`;
-    }
+    const url = this.urlForAsset(assetKey);
 
     let texture: Texture;
     try {
