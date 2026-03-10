@@ -113,7 +113,7 @@ export class ImageSprite extends Container {
   unloadTexture(): void {
     if (!this.loaded) return;
 
-    this.textures.unload(this.assetKey);
+    this.textures.release(this.assetKey);
 
     // Remove sprite from display tree entirely — avoids PixiJS v8 render crash
     if (this._sprite) {
