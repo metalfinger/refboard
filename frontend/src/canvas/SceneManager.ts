@@ -9,6 +9,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
+import { AnimatedGifSprite } from './sprites/AnimatedGifSprite';
 import { VideoSprite } from './sprites/VideoSprite';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
@@ -275,7 +276,11 @@ export class SceneManager {
     switch (data.type) {
       case 'image': {
         const imgData = data as ImageObject;
-        displayObject = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);
+        if (imgData.asset.toLowerCase().endsWith('.gif')) {
+          displayObject = new AnimatedGifSprite(imgData.asset, imgData.w, imgData.h, this.textures);
+        } else {
+          displayObject = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);
+        }
         break;
       }
 

@@ -14,15 +14,20 @@ import {
   useCallback,
   useState,
 } from 'react';
-import { Application } from 'pixi.js';
+import { Application, extensions } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
+import { GifAsset } from 'pixi.js/gif';
 import { SceneManager, getItemWorldBounds, type SceneItem } from './SceneManager';
 import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
 import { VideoSprite } from './sprites/VideoSprite';
+import { AnimatedGifSprite } from './sprites/AnimatedGifSprite';
 import { SpringManager } from './spring';
 import { convertFabricToV2 } from './scene-format';
 import type { SceneData } from './scene-format';
+
+// Register PixiJS GIF asset loader (once, at module level)
+extensions.add(GifAsset);
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -188,7 +193,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           const vcx = bounds.x + bounds.width / 2;
           const vcy = bounds.y + bounds.height / 2;
 
-          const imageItems: { item: SceneItem; sprite: ImageSprite; dist: number; near: boolean }[] = [];
+          const imageItems: { item: SceneItem; sprite: ImageSprite | AnimatedGifSprite; dist: number; near: boolean }[] = [];
           const videoItems: { item: SceneItem; sprite: VideoSprite; dist: number; near: boolean }[] = [];
 
           // Spatial query: only check items within the extended viewport region
@@ -203,7 +208,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             const cy = item.data.y + (item.data.h * Math.abs(item.data.sy)) / 2;
             const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
 
-            if (item.type === 'image' && item.displayObject instanceof ImageSprite) {
+            if (item.type === 'image' && (item.displayObject instanceof ImageSprite || item.displayObject instanceof AnimatedGifSprite)) {
               imageItems.push({ item, sprite: item.displayObject, dist, near: true });
             } else if (item.type === 'video' && item.displayObject instanceof VideoSprite) {
               videoItems.push({ item, sprite: item.displayObject, dist, near: true });
@@ -231,7 +236,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             const item = scene.items.get(id);
             if (!item) { loadedImages.delete(id); continue; }
             const sprite = item.displayObject;
-            if (sprite instanceof ImageSprite && sprite.loaded) {
+            if ((sprite instanceof ImageSprite || sprite instanceof AnimatedGifSprite) && sprite.loaded) {
               sprite.unloadTexture();
             }
             loadedImages.delete(id);
