@@ -112,7 +112,10 @@ export default function UploadPanel({ uploadManager }: UploadPanelProps) {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <span style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>
-          Uploads {uploadManager.activeCount > 0 ? `(${uploadManager.activeCount})` : ''}
+          Uploads{uploadManager.activeCount > 0 ? ` (${uploadManager.activeCount})` : ''}
+          {uploadManager.queuedCount > 0 && (
+            <span style={{ color: '#555', fontWeight: 400 }}> · {uploadManager.queuedCount} queued</span>
+          )}
         </span>
         {jobs.some((j) => j.status === 'done' || j.status === 'failed') && (
           <button onClick={() => uploadManager.clearFinished()} style={{

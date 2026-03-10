@@ -199,6 +199,15 @@ export class UploadManager {
     return count;
   }
 
+  /** Get queued job count. */
+  get queuedCount(): number {
+    let count = 0;
+    for (const job of this.jobs.values()) {
+      if (job.status === 'queued') count++;
+    }
+    return count;
+  }
+
   private _autoDismiss(jobId: string) {
     this._clearDismissTimer(jobId);
     this._dismissTimers.set(jobId, setTimeout(() => {
