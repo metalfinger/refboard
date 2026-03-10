@@ -119,7 +119,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
 
       (async () => {
         await app.init({
-          background: '#1e1e1e',
+          backgroundAlpha: 0,
           resizeTo: container,
           antialias: true,
           autoDensity: true,

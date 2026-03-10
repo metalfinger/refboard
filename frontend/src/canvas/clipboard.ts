@@ -169,13 +169,9 @@ export async function pasteFromSystemClipboard(
       const assetKey = imgData.asset_key;
       const w = imgData.width || 400;
       const h = imgData.height || 300;
-      const maxDim = 600;
-      let fw = w, fh = h;
-      if (w > maxDim || h > maxDim) {
-        const s = maxDim / Math.max(w, h);
-        fw = Math.round(w * s);
-        fh = Math.round(h * s);
-      }
+      // Display at native size — let user resize manually if needed
+      const fw = w;
+      const fh = h;
       if (assetKey) {
         const center = viewport.center;
         scene.addImageFromUpload(assetKey, fw, fh, center.x - fw / 2, center.y - fh / 2);
