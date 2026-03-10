@@ -3,18 +3,17 @@ import { Texture, Assets } from "pixi.js";
 interface TextureEntry {
   texture: Texture;
   url: string; // needed for Assets.unload()
-  lastUsed: number;
-  memoryEstimate: number;
 }
 
 /**
- * TextureManager — GPU texture cache with LRU eviction and memory budget.
- * Uses Assets.unload() instead of texture.destroy() for proper cleanup.
+ * TextureManager — GPU texture cache.
+ *
+ * No internal LRU eviction — the viewport culling system (PixiCanvas)
+ * manages loading/unloading based on proximity. This avoids destroying
+ * textures that sprites still reference (which crashes PixiJS v8).
  */
 export class TextureManager {
   private cache = new Map<string, TextureEntry>();
-  private budget = 256 * 1024 * 1024; // 256 MB — keeps headroom for GPU ops
-  private currentUsage = 0;
 
   /** Build the URL for a given asset. */
   urlForAsset(assetKey: string): string {
@@ -31,7 +30,6 @@ export class TextureManager {
   async load(assetKey: string): Promise<Texture> {
     const existing = this.cache.get(assetKey);
     if (existing) {
-      existing.lastUsed = performance.now();
       return existing.texture;
     }
 
@@ -45,23 +43,7 @@ export class TextureManager {
       return Texture.EMPTY;
     }
 
-    const w = texture.source.width ?? 256;
-    const h = texture.source.height ?? 256;
-    const memoryEstimate = w * h * 4; // RGBA
-
-    this.currentUsage += memoryEstimate;
-
-    this.cache.set(assetKey, {
-      texture,
-      url,
-      lastUsed: performance.now(),
-      memoryEstimate,
-    });
-
-    while (this.currentUsage > this.budget && this.cache.size > 1) {
-      this.evictLRU();
-    }
-
+    this.cache.set(assetKey, { texture, url });
     return texture;
   }
 
@@ -70,39 +52,19 @@ export class TextureManager {
     const entry = this.cache.get(assetKey);
     if (!entry) return;
 
-    this.currentUsage -= entry.memoryEstimate;
+    this.cache.delete(assetKey);
     try {
       Assets.unload(entry.url);
     } catch {
-      // Fallback if Assets doesn't know about it
-      entry.texture.destroy(true);
-    }
-    this.cache.delete(assetKey);
-  }
-
-  /** Evict the least-recently-used cache entry. */
-  private evictLRU(): void {
-    let oldestKey: string | null = null;
-    let oldestTime = Infinity;
-
-    for (const [key, entry] of this.cache) {
-      if (entry.lastUsed < oldestTime) {
-        oldestTime = entry.lastUsed;
-        oldestKey = key;
-      }
-    }
-
-    if (oldestKey) {
-      this.unload(oldestKey);
+      // ignore — texture may already be gone
     }
   }
 
-  /** Unload all cached textures and reset memory tracking. */
+  /** Unload all cached textures. */
   clear(): void {
     for (const [key] of this.cache) {
       this.unload(key);
     }
     this.cache.clear();
-    this.currentUsage = 0;
   }
 }
