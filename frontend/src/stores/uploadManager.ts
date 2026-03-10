@@ -67,6 +67,23 @@ export class UploadManager {
     return id;
   }
 
+  /** Create an immediately-failed job (for unsupported file types). */
+  addRejected(fileName: string, error: string): string {
+    const id = crypto.randomUUID();
+    this.jobs.set(id, {
+      id,
+      fileName,
+      fileSize: 0,
+      mediaType: 'image',
+      status: 'failed',
+      progress: 0,
+      error,
+      createdAt: Date.now(),
+    });
+    this._notify();
+    return id;
+  }
+
   /** Update upload progress (0-1). */
   setProgress(jobId: string, progress: number) {
     const job = this.jobs.get(jobId);

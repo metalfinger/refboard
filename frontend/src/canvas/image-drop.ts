@@ -11,6 +11,31 @@ type OnChange = () => void;
 const MAX_FILE_SIZE_MB = 200;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+/** Explicit MIME allowlist — matches backend ALLOWED_MIME_TYPES exactly. */
+const ALLOWED_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+]);
+
+/** Human-readable extension from MIME type, for error messages. */
+function extFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
+    'image/webp': '.webp', 'image/svg+xml': '.svg',
+    'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+    'image/bmp': '.bmp', 'image/tiff': '.tiff', 'image/avif': '.avif',
+    'image/heic': '.heic', 'image/heif': '.heif',
+    'application/pdf': '.pdf', 'image/x-adobe-dng': '.dng',
+  };
+  return map[mime] || mime.split('/')[1] || mime;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Placeholder helper                                                 */
 /* ------------------------------------------------------------------ */
@@ -147,7 +172,7 @@ export function setupDragDrop(
     // Count valid media files to determine grid columns
     let mediaCount = 0;
     for (let i = 0; i < files.length; i++) {
-      if (files[i].type.startsWith('image/') || files[i].type.startsWith('video/')) mediaCount++;
+      if (ALLOWED_MIME_TYPES.has(files[i].type)) mediaCount++;
     }
     const cols = Math.ceil(Math.sqrt(mediaCount)); // square-ish grid
     let col = 0;
@@ -159,7 +184,17 @@ export function setupDragDrop(
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
+
+      // Reject unsupported file types with immediate feedback
+      if (!ALLOWED_MIME_TYPES.has(file.type)) {
+        if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type) {
+          uploads?.addRejected(
+            file.name || 'unknown',
+            `Unsupported format: ${extFromMime(file.type)}`,
+          );
+        }
+        continue;
+      }
 
       // Compute x from column widths so far
       let cursorX = world.x;
@@ -256,9 +291,21 @@ export function setupPaste(
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
+
+      // Skip non-media clipboard items (text, html, etc.)
       if (!item.type.startsWith('image/') && !item.type.startsWith('video/')) continue;
 
       e.preventDefault();
+
+      // Reject unsupported media types with feedback
+      if (!ALLOWED_MIME_TYPES.has(item.type)) {
+        uploads?.addRejected(
+          item.type.split('/')[1] || 'unknown',
+          `Unsupported format: ${extFromMime(item.type)}`,
+        );
+        continue;
+      }
+
       const file = item.getAsFile();
       if (!file) continue;
 
