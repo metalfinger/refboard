@@ -31,6 +31,7 @@ export class VideoSprite extends Container {
   private videoTexture: Texture | null = null;
   private posterTexture: Texture | null = null;
   private _serverPosterLoaded = false;
+  private _serverPosterLoading = false;
   private _sprite: Sprite | null = null;
   private _shadow: Graphics;
   private _overlay: Graphics;
@@ -99,10 +100,14 @@ export class VideoSprite extends Container {
 
   /** Load server poster. Called by culling system when within poster budget. */
   async loadServerPoster(): Promise<void> {
-    if (!this.posterAssetKey || !this.textures || this.destroyed) return;
+    if (this._serverPosterLoading || !this.posterAssetKey || !this.textures || this.destroyed) return;
+    this._serverPosterLoading = true;
     try {
       const tex = await this.textures.load(this.posterAssetKey);
-      if (this.destroyed || this._isPlaying) return;
+      if (this.destroyed || this._isPlaying) {
+        this.textures!.release(this.posterAssetKey!);
+        return;
+      }
 
       this.posterTexture = tex;
       this._hasPoster = true;
@@ -112,6 +117,8 @@ export class VideoSprite extends Container {
       this._removePlaceholder();
     } catch {
       // Server poster failed — will fall back to client capture if needed
+    } finally {
+      this._serverPosterLoading = false;
     }
   }
 
