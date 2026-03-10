@@ -81,11 +81,8 @@ export class VideoSprite extends Container {
     this._drawPlayIcon();
     this.addChild(this._overlay);
 
-    // If server poster available, load it immediately as an image texture
-    // This is the key optimization: video thumbnail = image, no <video> needed
-    if (this.posterAssetKey && this.textures) {
-      this._loadServerPoster();
-    }
+    // NOTE: Server poster is NOT loaded here. The culling system calls
+    // loadServerPoster() when this video is within the poster budget.
   }
 
   get isPlaying(): boolean { return this._isPlaying; }
@@ -95,9 +92,13 @@ export class VideoSprite extends Container {
   /** Expose the underlying HTMLVideoElement for external controls. Null if not initialized. */
   get videoElement(): HTMLVideoElement | null { return this.videoEl; }
 
+  /** Whether this video has a server-generated poster available (not yet loaded). */
+  get hasServerPoster(): boolean { return !!this.posterAssetKey && !!this.textures; }
+
   // ---- Tier 0.5: Server-generated poster (loaded like an image) -----------
 
-  private async _loadServerPoster(): Promise<void> {
+  /** Load server poster. Called by culling system when within poster budget. */
+  async loadServerPoster(): Promise<void> {
     if (!this.posterAssetKey || !this.textures || this.destroyed) return;
     try {
       const tex = await this.textures.load(this.posterAssetKey);

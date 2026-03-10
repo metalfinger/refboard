@@ -112,18 +112,27 @@ function extractPoster(buffer) {
   });
 }
 
-function cleanup(...files) {
-  for (const f of files) {
-    try { unlinkSync(f); } catch { /* ignore */ }
-  }
-  // Try removing parent dirs (they're temp dirs we created)
-  for (const f of files) {
+/**
+ * Clean up temp files and directories.
+ * Pass file paths first, then the temp directory last.
+ * Files are unlinked, then the directory is removed.
+ */
+function cleanup(...paths) {
+  const dirs = [];
+  // First pass: unlink files, collect directories
+  for (const p of paths) {
     try {
-      const dir = path.dirname(f);
-      if (dir.includes('refboard-')) {
-        require('fs').rmdirSync(dir);
+      const stat = require('fs').statSync(p);
+      if (stat.isDirectory()) {
+        dirs.push(p);
+      } else {
+        unlinkSync(p);
       }
-    } catch { /* ignore — dir may not be empty or already removed */ }
+    } catch { /* already gone */ }
+  }
+  // Second pass: remove directories (now empty)
+  for (const d of dirs) {
+    try { require('fs').rmdirSync(d); } catch { /* ignore */ }
   }
 }
 

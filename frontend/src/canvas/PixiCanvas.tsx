@@ -248,9 +248,14 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             }
           }
 
-          // Capture posters for nearest subset (only if already initialized)
+          // Load posters for nearest subset within budget
           for (const { item, sprite } of videoItems) {
-            if (shouldPoster.has(item.id) && sprite.isInitialized && !sprite.hasPoster) {
+            if (!shouldPoster.has(item.id) || sprite.hasPoster) continue;
+            if (sprite.hasServerPoster) {
+              // Server poster: load as image texture (no <video> needed)
+              sprite.loadServerPoster();
+            } else if (sprite.isInitialized) {
+              // Fallback: client-capture from video element
               sprite.capturePoster();
             }
           }
