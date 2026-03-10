@@ -7,6 +7,8 @@ import { TextureManager } from "../TextureManager";
  *
  * Textures are loaded/unloaded by the viewport culling system (PixiCanvas).
  * The constructor does NOT start loading — call loadTexture() when near viewport.
+ * The Sprite is NOT added to the display tree until a real texture is loaded,
+ * because PixiJS v8 crashes when rendering a Sprite with Texture.EMPTY.
  */
 // Shadow defaults (resting state)
 const SHADOW_REST = { offsetX: 3, offsetY: 3, alpha: 0.2 };
@@ -20,7 +22,7 @@ export class ImageSprite extends Container {
   loaded = false;
   private loading = false;
   private placeholder: Graphics | null = null;
-  private _sprite: Sprite;
+  private _sprite: Sprite | null = null;
   private _shadow: Graphics;
   private _naturalWidth: number;
   private _naturalHeight: number;
@@ -43,20 +45,13 @@ export class ImageSprite extends Container {
     this._drawShadow(SHADOW_REST);
     this.addChild(this._shadow);
 
-    // Main sprite — hidden until texture loads (prevents PixiJS render errors with EMPTY)
-    this._sprite = new Sprite(Texture.EMPTY);
-    this._sprite.width = w;
-    this._sprite.height = h;
-    this._sprite.visible = false;
-    this.addChild(this._sprite);
-
     // Placeholder: dark rect shown until texture is loaded by culling system
     const placeholder = new Graphics();
     placeholder.rect(0, 0, w, h).fill(0x2a2a2a);
     this.placeholder = placeholder;
     this.addChild(placeholder);
 
-    // NOTE: texture loading is deferred — PixiCanvas culling ticker calls loadTexture()
+    // NOTE: Sprite is created lazily in loadTexture() — NOT added here.
   }
 
   private _drawShadow(cfg: { offsetX: number; offsetY: number; alpha: number }): void {
@@ -77,7 +72,7 @@ export class ImageSprite extends Container {
 
   /** The underlying sprite's texture (used by clipboard for resolution detection). */
   get texture(): Texture {
-    return this._sprite.texture;
+    return this._sprite?.texture ?? Texture.EMPTY;
   }
 
   /** Load the full-res texture. Called by viewport culling when near viewport. */
@@ -87,11 +82,15 @@ export class ImageSprite extends Container {
     this.loading = true;
     try {
       const tex = await this.textures.load(this.assetKey);
-      if (this.destroyed) return; // component may have been removed while loading
-      this._sprite.texture = tex;
-      this._sprite.width = this._naturalWidth;
-      this._sprite.height = this._naturalHeight;
-      this._sprite.visible = true;
+      if (this.destroyed) return;
+
+      // Create sprite with real texture and add to display tree
+      const sprite = new Sprite(tex);
+      sprite.width = this._naturalWidth;
+      sprite.height = this._naturalHeight;
+      this._sprite = sprite;
+      // Insert before placeholder (so placeholder is on top until removed)
+      this.addChild(sprite);
       this.loaded = true;
 
       // Remove placeholder after successful load
@@ -115,8 +114,13 @@ export class ImageSprite extends Container {
     if (!this.loaded) return;
 
     this.textures.unload(this.assetKey);
-    this._sprite.texture = Texture.EMPTY;
-    this._sprite.visible = false;
+
+    // Remove sprite from display tree entirely — avoids PixiJS v8 render crash
+    if (this._sprite) {
+      this.removeChild(this._sprite);
+      this._sprite.destroy();
+      this._sprite = null;
+    }
     this.loaded = false;
 
     // Restore placeholder
