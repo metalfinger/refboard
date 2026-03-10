@@ -1,6 +1,7 @@
 import { Graphics } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
+import type { SelectionManager } from './SelectionManager';
 import { uploadImage, uploadImageFromUrl } from '../api';
 
 type OnChange = () => void;
@@ -29,7 +30,7 @@ function removePlaceholder(viewport: Viewport, g: Graphics) {
 /*  Handle upload response (image or video)                            */
 /* ------------------------------------------------------------------ */
 
-/** Returns the placed dimensions so callers can offset subsequent items. */
+/** Returns the placed dimensions and item ID so callers can offset subsequent items and select them. */
 function handleUploadResult(
   res: any,
   viewport: Viewport,
@@ -37,7 +38,7 @@ function handleUploadResult(
   x: number,
   y: number,
   onChange: OnChange,
-): { w: number; h: number } {
+): { w: number; h: number; id: string } {
   const imgData = res.data.image || res.data;
   const mediaType: string = imgData.media_type || 'image';
   const assetKey: string | undefined = imgData.asset_key;
@@ -54,20 +55,21 @@ function handleUploadResult(
     finalH = Math.round(h * scale);
   }
 
+  let item;
   if (mediaType === 'video' && assetKey) {
     const posterKey: string | undefined = imgData.poster_asset_key;
     const duration: number | undefined = imgData.duration;
-    sceneManager.addVideoFromUpload(assetKey, finalW, finalH, x, y, posterKey, duration);
+    item = sceneManager.addVideoFromUpload(assetKey, finalW, finalH, x, y, posterKey, duration);
   } else if (assetKey) {
-    sceneManager.addImageFromUpload(assetKey, finalW, finalH, x, y);
+    item = sceneManager.addImageFromUpload(assetKey, finalW, finalH, x, y);
   } else {
     // Fallback: legacy response without asset_key — use addImageFromUpload with public_url as key
     const fallbackKey = imgData.public_url || imgData.id || 'unknown';
-    sceneManager.addImageFromUpload(fallbackKey, finalW, finalH, x, y);
+    item = sceneManager.addImageFromUpload(fallbackKey, finalW, finalH, x, y);
   }
 
   onChange();
-  return { w: finalW, h: finalH };
+  return { w: finalW, h: finalH, id: item.id };
 }
 
 /* ------------------------------------------------------------------ */
@@ -80,6 +82,7 @@ export function setupDragDrop(
   sceneManager: SceneManager,
   boardId: string,
   onChange: OnChange,
+  selection?: SelectionManager | null,
 ): () => void {
   function onDragOver(e: DragEvent) {
     e.preventDefault();
@@ -113,7 +116,8 @@ export function setupDragDrop(
         try {
           const res = await uploadImageFromUrl(boardId, url);
           removePlaceholder(viewport, placeholder);
-          handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
+          const { id } = handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
+          selection?.selectOnly(id);
         } catch (err) {
           console.error('URL image upload failed:', err);
           removePlaceholder(viewport, placeholder);
@@ -137,6 +141,7 @@ export function setupDragDrop(
     let rowMaxH = 0;
     let cursorY = world.y;
     const colWidths: number[] = new Array(cols).fill(0); // track widest per column
+    const newItemIds: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -151,7 +156,8 @@ export function setupDragDrop(
       try {
         const res = await uploadImage(boardId, file);
         removePlaceholder(viewport, placeholder);
-        const { w: placedW, h: placedH } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
+        const { w: placedW, h: placedH, id } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
+        newItemIds.push(id);
         if (placedW > (colWidths[col] || 0)) colWidths[col] = placedW;
         if (placedH > rowMaxH) rowMaxH = placedH;
       } catch (err) {
@@ -167,6 +173,14 @@ export function setupDragDrop(
         row++;
         cursorY += rowMaxH + GAP;
         rowMaxH = 0;
+      }
+    }
+
+    // Select all newly imported items
+    if (selection && newItemIds.length > 0) {
+      selection.selectOnly(newItemIds[0]);
+      for (let i = 1; i < newItemIds.length; i++) {
+        selection.toggle(newItemIds[i]);
       }
     }
   }
@@ -201,10 +215,13 @@ export function setupPaste(
   sceneManager: SceneManager,
   boardId: string,
   onChange: OnChange,
+  selection?: SelectionManager | null,
 ): () => void {
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
+
+    const newItemIds: string[] = [];
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -224,10 +241,19 @@ export function setupPaste(
       try {
         const res = await uploadImage(boardId, file);
         removePlaceholder(viewport, placeholder);
-        handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
+        const { id } = handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
+        newItemIds.push(id);
       } catch (err) {
         console.error('Image paste upload failed:', err);
         removePlaceholder(viewport, placeholder);
+      }
+    }
+
+    // Select all pasted items
+    if (selection && newItemIds.length > 0) {
+      selection.selectOnly(newItemIds[0]);
+      for (let i = 1; i < newItemIds.length; i++) {
+        selection.toggle(newItemIds[i]);
       }
     }
   }

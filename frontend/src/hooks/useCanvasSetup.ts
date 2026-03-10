@@ -296,9 +296,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           dropTarget = canvasEl?.parentElement ?? null;
         }
         if (dropTarget) {
-          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange);
+          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection);
         }
-        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
+        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection);
       }
     }, 200);
 
