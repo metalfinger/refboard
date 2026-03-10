@@ -117,10 +117,15 @@ export class VideoSprite extends Container {
   capturePoster(): void {
     if (this._hasPoster || !this.videoEl || this.destroyed) return;
 
-    // Need loadeddata to capture a frame — listen if not yet ready
     if (this.videoEl.readyState >= 2) {
+      // Frame data already available — capture directly
       this._captureFirstFrame();
+    } else if (this.videoEl.readyState >= 1) {
+      // Metadata loaded but no frame decoded (preload='metadata').
+      // Force a seek to trigger frame decode, capture on 'seeked'.
+      this._trySeekCapture();
     } else {
+      // Not even metadata yet — wait for loadeddata
       this.videoEl.addEventListener('loadeddata', this._onLoadedData, { once: true });
     }
   }
