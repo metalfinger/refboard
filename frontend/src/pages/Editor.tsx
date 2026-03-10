@@ -9,6 +9,7 @@ import { SyncHandle } from '../canvas/sync';
 import { UndoManager } from '../canvas/history';
 import { shortcuts as shortcutDefs } from '../canvas/shortcut-definitions';
 import { writeCanvasToClipboard as writeClipboard } from '../canvas/clipboard';
+import { exportAsImage } from '../canvas/export';
 import { buildContextMenuItems } from '../canvas/context-menu-items';
 import { groupItems, ungroupItems } from '../canvas/grouping';
 import { getSocket } from '../socket';
@@ -24,6 +25,7 @@ import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
 import Minimap from '../components/Minimap';
 import UploadPanel from '../components/UploadPanel';
+import ExportDialog from '../components/ExportDialog';
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
@@ -87,6 +89,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showGrid, setShowGrid] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const [showMmImport, setShowMmImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -486,6 +489,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         showLayers={showLayers}
         onToggleHelp={() => setShowHelp((v) => !v)}
         onMmImport={() => setShowMmImport(true)}
+        onExport={() => setShowExport(true)}
         boardName={board?.name}
       />}
 
@@ -682,6 +686,27 @@ export default function Editor({ isPublicView }: EditorProps) {
               inboxZoneRef.current.addMedia(assets);
             }
           }}
+        />
+      )}
+
+      {/* Export dialog */}
+      {showExport && (
+        <ExportDialog
+          selectedItems={selectionRef.current?.getSelectedItems() ?? []}
+          allItems={canvasRef.current?.getScene()?.getAllItems() ?? []}
+          boardName={board?.name || 'export'}
+          onExport={async (items, options) => {
+            setShowExport(false);
+            try {
+              const app = canvasRef.current?.getApp() ?? null;
+              const viewport = canvasRef.current?.getViewport() ?? null;
+              await exportAsImage(app, viewport, items, options);
+              showToast('Exported successfully');
+            } catch (err: any) {
+              showToast('Export failed: ' + (err.message || 'unknown error'));
+            }
+          }}
+          onClose={() => setShowExport(false)}
         />
       )}
     </div>

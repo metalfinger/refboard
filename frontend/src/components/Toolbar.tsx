@@ -33,6 +33,7 @@ interface ToolbarProps {
   showLayers?: boolean;
   onToggleHelp?: () => void;
   onMmImport?: () => void;
+  onExport?: () => void;
   boardName?: string;
 }
 
@@ -148,6 +149,7 @@ export default function Toolbar({
   showLayers,
   onToggleHelp,
   onMmImport,
+  onExport,
 }: ToolbarProps) {
   const showStroke = activeTool === ToolType.PEN;
   const showFontSize = activeTool === ToolType.TEXT;
@@ -293,6 +295,16 @@ export default function Toolbar({
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
             <path d="M2 10V4a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
             <path d="M5 7h4M7 5v4" strokeLinecap="round" />
+          </svg>
+        </ActionBtn>
+      )}
+
+      {/* Export */}
+      {onExport && (
+        <ActionBtn onClick={onExport} title="Export as image (Ctrl+Shift+E)">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M2 9v3h10V9" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M7 2v7M4 6l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </ActionBtn>
       )}
