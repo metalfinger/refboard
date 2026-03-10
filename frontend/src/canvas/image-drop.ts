@@ -135,10 +135,23 @@ export function setupDragDrop(
         e.dataTransfer?.getData('text/uri-list') ||
         e.dataTransfer?.getData('text/plain') ||
         '';
+      const isHttpUrl = url && (url.startsWith('http://') || url.startsWith('https://'));
+      const supportedUrlPattern = /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov)(\?|#|$)/i;
+      // Broader media pattern: URLs that look like media but aren't in our supported set
+      const mediaUrlPattern = /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov|bmp|tiff?|avif|heic|heif|psd|raw|dng|ico|apng)(\?|#|$)/i;
+
+      if (isHttpUrl && !supportedUrlPattern.test(url) && mediaUrlPattern.test(url)) {
+        // URL looks like media but isn't supported — show rejection
+        const ext = url.split('?')[0].split('#')[0].match(/\.(\w+)$/)?.[1] || 'unknown';
+        uploads?.addRejected(
+          url.split('/').pop()?.split('?')[0] || 'url-import',
+          `Unsupported format: .${ext}`,
+        );
+        return;
+      }
       if (
-        url &&
-        (url.startsWith('http://') || url.startsWith('https://')) &&
-        /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov)(\?|$)/i.test(url)
+        isHttpUrl &&
+        supportedUrlPattern.test(url)
       ) {
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
