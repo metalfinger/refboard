@@ -28,6 +28,18 @@ import type {
 } from './scene-format';
 
 // ---------------------------------------------------------------------------
+// GIF detection
+// ---------------------------------------------------------------------------
+
+/** Check if an asset key points to a GIF file.
+ *  Strips query strings and fragments before checking extension. */
+function isGifAsset(asset: string): boolean {
+  // Strip query string and fragment
+  const clean = asset.split('?')[0].split('#')[0];
+  return clean.toLowerCase().endsWith('.gif');
+}
+
+// ---------------------------------------------------------------------------
 // SceneItem
 // ---------------------------------------------------------------------------
 
@@ -276,7 +288,7 @@ export class SceneManager {
     switch (data.type) {
       case 'image': {
         const imgData = data as ImageObject;
-        if (imgData.asset.toLowerCase().endsWith('.gif')) {
+        if (isGifAsset(imgData.asset)) {
           displayObject = new AnimatedGifSprite(imgData.asset, imgData.w, imgData.h, this.textures);
         } else {
           displayObject = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);

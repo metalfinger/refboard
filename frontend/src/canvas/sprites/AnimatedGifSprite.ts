@@ -1,5 +1,5 @@
-import { Container, Graphics, Assets } from "pixi.js";
-import { GifSprite, GifSource } from "pixi.js/gif";
+import { Container, Graphics } from "pixi.js";
+import { GifSprite } from "pixi.js/gif";
 import { TextureManager } from "../TextureManager";
 
 /**
@@ -8,7 +8,8 @@ import { TextureManager } from "../TextureManager";
  * Follows the same pattern as ImageSprite:
  * - Shadow + placeholder shown immediately
  * - Texture loaded lazily by viewport culling system
- * - GIF plays automatically when loaded, pauses when unloaded
+ * - GIF loaded/unloaded via TextureManager's ref-counted gifCache
+ *   (safe for duplicated GIFs on the same board)
  *
  * Uses PixiJS v8's built-in GifSprite (backed by gifuct-js).
  */
@@ -26,6 +27,7 @@ export class AnimatedGifSprite extends Container {
   private _shadow: Graphics;
   private _naturalWidth: number;
   private _naturalHeight: number;
+  private _playing = false;
 
   constructor(
     assetKey: string,
@@ -71,20 +73,29 @@ export class AnimatedGifSprite extends Container {
     return this._gif?.texture ?? null;
   }
 
-  /** Load the GIF. Called by viewport culling when near viewport. */
+  /** Whether the GIF is currently animating. */
+  get playing(): boolean {
+    return this._playing;
+  }
+
+  /** Load the GIF source (ref-counted). Called by viewport culling. */
   async loadTexture(): Promise<void> {
     if (this.loaded || this.loading) return;
 
     this.loading = true;
     try {
-      const url = this.textures.urlForAsset(this.assetKey);
-      const source: GifSource = await Assets.load(url);
-      if (this.destroyed) return;
+      const source = await this.textures.loadGif(this.assetKey);
+      if (this.destroyed) {
+        this.textures.releaseGif(this.assetKey);
+        return;
+      }
 
-      const gif = new GifSprite({ source, loop: true, autoPlay: true });
+      // Create GifSprite paused — culling system decides whether to play
+      const gif = new GifSprite({ source, loop: true, autoPlay: false });
       gif.width = this._naturalWidth;
       gif.height = this._naturalHeight;
       this._gif = gif;
+      this._playing = false;
       this.addChild(gif);
       this.loaded = true;
 
@@ -101,20 +112,36 @@ export class AnimatedGifSprite extends Container {
     }
   }
 
-  /** Unload GIF to free memory. Called by viewport culling when far from viewport. */
+  /** Start GIF animation. Called by culling when within play budget. */
+  play(): void {
+    if (this._gif && !this._playing) {
+      this._gif.play();
+      this._playing = true;
+    }
+  }
+
+  /** Stop GIF animation (stays on current frame). Called by culling when outside budget. */
+  stop(): void {
+    if (this._gif && this._playing) {
+      this._gif.stop();
+      this._playing = false;
+    }
+  }
+
+  /** Unload GIF to free memory (ref-counted). Called by viewport culling. */
   unloadTexture(): void {
     if (!this.loaded) return;
 
     if (this._gif) {
       this._gif.stop();
+      this._playing = false;
       this.removeChild(this._gif);
       this._gif.destroy();
       this._gif = null;
     }
 
-    // Unload the GifSource from Assets cache
-    const url = this.textures.urlForAsset(this.assetKey);
-    try { Assets.unload(url); } catch { /* ignore */ }
+    // Release through ref-counted manager (safe for duplicates)
+    this.textures.releaseGif(this.assetKey);
 
     this.loaded = false;
 

@@ -176,6 +176,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         // Distance-based priority: nearest to viewport center get resources first.
 
         const MAX_LOADED_TEXTURES = 60;   // max image textures in GPU
+        const MAX_PLAYING_GIFS = 8;      // max GIFs actively animating
         const MAX_INITIALIZED_VIDEOS = 6; // max <video> elements (tier 1+)
         const MAX_POSTER_VIDEOS = 4;      // max poster textures in GPU (tier 2)
 
@@ -215,10 +216,18 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             }
           }
 
-          // ---- Image budget management ----
+          // ---- Image + GIF texture budget management ----
+          // Both static images and GIFs share the texture load budget.
+          // GIFs additionally have a separate play budget (only nearest N animate).
           imageItems.sort((a, b) => a.dist - b.dist);
           const shouldLoadImage = new Set(
             imageItems.slice(0, MAX_LOADED_TEXTURES).map(i => i.item.id)
+          );
+
+          // Build GIF play budget: only nearest loaded GIFs should animate
+          const gifItems = imageItems.filter(i => i.sprite instanceof AnimatedGifSprite);
+          const shouldPlayGif = new Set(
+            gifItems.slice(0, MAX_PLAYING_GIFS).map(i => i.item.id)
           );
 
           let imgLoadsThisTick = 0;
@@ -227,6 +236,14 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
               sprite.loadTexture();
               loadedImages.add(item.id);
               imgLoadsThisTick++;
+            }
+            // Manage GIF play/stop based on play budget
+            if (sprite instanceof AnimatedGifSprite && sprite.loaded) {
+              if (shouldPlayGif.has(item.id)) {
+                sprite.play();
+              } else {
+                sprite.stop();
+              }
             }
           }
 

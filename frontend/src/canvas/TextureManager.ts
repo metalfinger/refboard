@@ -1,7 +1,14 @@
 import { Texture, Assets } from "pixi.js";
+import type { GifSource } from "pixi.js/gif";
 
 interface TextureEntry {
   texture: Texture;
+  url: string;
+  refCount: number;
+}
+
+interface GifEntry {
+  source: GifSource;
   url: string;
   refCount: number;
 }
@@ -19,6 +26,7 @@ interface TextureEntry {
  */
 export class TextureManager {
   private cache = new Map<string, TextureEntry>();
+  private gifCache = new Map<string, GifEntry>();
 
   /** Build the URL for a given asset. */
   urlForAsset(assetKey: string): string {
@@ -84,11 +92,54 @@ export class TextureManager {
     }
   }
 
-  /** Unload all cached textures. */
+  // -- GIF source management (ref-counted, same pattern as textures) --
+
+  /**
+   * Load a GifSource for the given asset. Increments ref count.
+   * Returns cached source if available, otherwise fetches and caches.
+   */
+  async loadGif(assetKey: string): Promise<GifSource> {
+    const existing = this.gifCache.get(assetKey);
+    if (existing) {
+      existing.refCount++;
+      return existing.source;
+    }
+
+    const url = this.urlForAsset(assetKey);
+    const source: GifSource = await Assets.load(url);
+
+    this.gifCache.set(assetKey, { source, url, refCount: 1 });
+    return source;
+  }
+
+  /**
+   * Release a reference to a GifSource. Only actually unloads
+   * when the last reference is released.
+   */
+  releaseGif(assetKey: string): void {
+    const entry = this.gifCache.get(assetKey);
+    if (!entry) return;
+
+    entry.refCount--;
+    if (entry.refCount > 0) return;
+
+    this.gifCache.delete(assetKey);
+    try {
+      Assets.unload(entry.url);
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Unload all cached textures and GIF sources. */
   clear(): void {
     for (const [, entry] of this.cache) {
       try { Assets.unload(entry.url); } catch { /* ignore */ }
     }
     this.cache.clear();
+    for (const [, entry] of this.gifCache) {
+      try { Assets.unload(entry.url); } catch { /* ignore */ }
+    }
+    this.gifCache.clear();
   }
 }
