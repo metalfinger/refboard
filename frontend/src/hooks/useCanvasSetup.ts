@@ -253,7 +253,12 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
       // Setup drag/drop and paste
       if (!isPublicView || user) {
-        const dropTarget = canvasContainerRef.current;
+        // Use the ref first, fall back to DOM query for the canvas parent
+        let dropTarget: HTMLElement | null = canvasContainerRef.current;
+        if (!dropTarget) {
+          const canvasEl = document.querySelector('canvas');
+          dropTarget = canvasEl?.parentElement ?? null;
+        }
         if (dropTarget) {
           dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange);
         }

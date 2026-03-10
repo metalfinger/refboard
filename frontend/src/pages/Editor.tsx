@@ -474,7 +474,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       />}
 
       {/* Canvas */}
-      <div ref={canvasContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1e1e1e' }} onContextMenu={handleContextMenu}>
+      <div ref={canvasContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1e1e1e' }} onContextMenu={handleContextMenu} onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
         {/* Dot grid — behind transparent canvas */}
         {showGrid && (() => {
           const scale = canvasTransform[0] || 1;
