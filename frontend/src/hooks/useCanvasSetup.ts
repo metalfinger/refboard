@@ -9,6 +9,8 @@ import { InboxZone } from '../canvas/InboxZone';
 import { LaserPointer } from '../canvas/LaserPointer';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import { UploadManager } from '../stores/uploadManager';
+import { AnnotationStore } from '../stores/annotationStore';
+import { PinOverlay } from '../canvas/PinOverlay';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 
@@ -64,6 +66,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   const dropCleanupRef = useRef<(() => void) | null>(null);
   const pasteCleanupRef = useRef<(() => void) | null>(null);
   const laserCleanupRef = useRef<(() => void) | null>(null);
+  const annotationStoreRef = useRef<AnnotationStore | null>(null);
+  if (!annotationStoreRef.current) annotationStoreRef.current = new AnnotationStore();
+  const pinOverlayRef = useRef<PinOverlay | null>(null);
 
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
@@ -298,6 +303,65 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
             laser.removeRemote(uid);
           }
         });
+
+        // ── Annotations: load threads + votes, wire socket events ──
+        const token = localStorage.getItem('token');
+        if (token) {
+          fetch(`/api/boards/${resolvedBoardId}/threads`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+            .then((r) => r.json())
+            .then((data) => {
+              if (data.threads) annotationStoreRef.current?.loadThreads(data.threads);
+            })
+            .catch((err) => console.error('[annotations] load threads error:', err));
+
+          fetch(`/api/boards/${resolvedBoardId}/votes`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+            .then((r) => r.json())
+            .then((data) => {
+              if (data.votes) annotationStoreRef.current?.loadVotes(data.votes);
+            })
+            .catch((err) => console.error('[annotations] load votes error:', err));
+        }
+
+        socket.on('thread:add', (data: any) => {
+          annotationStoreRef.current?.onThreadAdd(data.thread, data.comment);
+        });
+        socket.on('thread:status', (data: any) => {
+          annotationStoreRef.current?.onThreadStatus(data.threadId, data.status, data.resolvedBy, data.resolvedAt);
+        });
+        socket.on('thread:delete', (data: any) => {
+          annotationStoreRef.current?.onThreadDelete(data.threadId);
+        });
+        socket.on('comment:add', (data: any) => {
+          annotationStoreRef.current?.onCommentAdd(data.threadId, data.comment);
+        });
+        socket.on('comment:update', (data: any) => {
+          annotationStoreRef.current?.onCommentUpdate(data.threadId, data.commentId, data.content, data.editedAt);
+        });
+        socket.on('comment:delete', (data: any) => {
+          annotationStoreRef.current?.onCommentDelete(data.threadId, data.commentId);
+        });
+        socket.on('vote:toggle', (data: any) => {
+          annotationStoreRef.current?.onVoteToggle(data.objectId, data.userId, data.active);
+        });
+
+        // ── Pin overlay (hidden by default, shown in Review Mode) ──
+        const pinOverlay = new PinOverlay(viewport, scene, annotationStoreRef.current!);
+        pinOverlay.visible = false;
+        viewport.addChild(pinOverlay);
+        pinOverlayRef.current = pinOverlay;
+
+        // Refresh overlay on viewport move
+        viewport.on('moved', () => {
+          if (pinOverlay.visible) pinOverlay.refresh();
+        });
+        // Refresh on store change
+        annotationStoreRef.current!.subscribe(() => {
+          if (pinOverlay.visible) pinOverlay.refresh();
+        });
       }
 
       // Setup drag/drop and paste
@@ -329,7 +393,14 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       laserCleanupRef.current = null;
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
+      if (pinOverlayRef.current) {
+        pinOverlayRef.current.destroy();
+        pinOverlayRef.current = null;
+      }
+      annotationStoreRef.current?.clear();
       disconnectSocket();
     };
   }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
+
+  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current };
 }

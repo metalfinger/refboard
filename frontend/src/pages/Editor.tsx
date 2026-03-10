@@ -26,6 +26,7 @@ import MattermostImport from '../components/MattermostImport';
 import Minimap from '../components/Minimap';
 import UploadPanel from '../components/UploadPanel';
 import ExportDialog from '../components/ExportDialog';
+import FeedbackPanel from '../components/FeedbackPanel';
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
@@ -90,6 +91,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showHelp, setShowHelp] = useState(false);
   const [showMmImport, setShowMmImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -153,12 +155,20 @@ export default function Editor({ isPublicView }: EditorProps) {
     getViewport,
   });
 
-  // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox)
-  useCanvasSetup({
+  // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
+  const { annotationStore, pinOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   });
+
+  // Toggle pin overlay visibility with review mode
+  useEffect(() => {
+    if (pinOverlay) {
+      pinOverlay.visible = reviewMode;
+      if (reviewMode) pinOverlay.refresh();
+    }
+  }, [reviewMode, pinOverlay]);
 
   // Tool activation
   useEffect(() => {
@@ -490,6 +500,8 @@ export default function Editor({ isPublicView }: EditorProps) {
         onToggleHelp={() => setShowHelp((v) => !v)}
         onMmImport={() => setShowMmImport(true)}
         onExport={() => setShowExport(true)}
+        onToggleReview={() => setReviewMode((v) => !v)}
+        reviewMode={reviewMode}
         boardName={board?.name}
       />}
 
@@ -640,6 +652,37 @@ export default function Editor({ isPublicView }: EditorProps) {
               const item = scene.getById(id);
               return item?.data.type === 'group';
             })()}
+          />
+        )}
+
+        {/* Feedback / Review panel */}
+        {reviewMode && annotationStore && user && resolvedBoardId && (
+          <FeedbackPanel
+            annotationStore={annotationStore}
+            selectedObjectId={selectedLayerIds.length === 1 ? selectedLayerIds[0] : null}
+            userId={user.id}
+            boardId={resolvedBoardId}
+            token={localStorage.getItem('token') || ''}
+            canvasObjects={(() => {
+              const scene = canvasRef.current?.getScene();
+              const map = new Map<string, { id: string; name?: string; type: string }>();
+              if (scene) {
+                for (const item of scene.items.values()) {
+                  map.set(item.id, { id: item.id, name: item.data.name, type: item.data.type });
+                }
+              }
+              return map;
+            })()}
+            onJumpToObject={(objectId) => {
+              const scene = canvasRef.current?.getScene();
+              const vp = canvasRef.current?.getViewport();
+              if (!scene || !vp) return;
+              const item = scene.items.get(objectId);
+              if (!item) return;
+              const b = getItemWorldBounds(item);
+              vp.animate({ time: 300, position: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, ease: 'easeOutQuad' });
+              selectionRef.current?.selectOnly(objectId);
+            }}
           />
         )}
 

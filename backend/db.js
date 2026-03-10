@@ -115,6 +115,53 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_media_jobs_image ON media_jobs(image_id);
 `);
 
+// ── Comment Threads & Comments ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS comment_threads (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL,
+    anchor_type TEXT NOT NULL DEFAULT 'object',
+    pin_x REAL,
+    pin_y REAL,
+    status TEXT NOT NULL DEFAULT 'open',
+    resolved_by TEXT REFERENCES users(id),
+    resolved_at TEXT,
+    comment_count INTEGER NOT NULL DEFAULT 1,
+    last_commented_at TEXT,
+    last_commented_by TEXT,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_threads_board ON comment_threads(board_id);
+  CREATE INDEX IF NOT EXISTS idx_threads_object ON comment_threads(board_id, object_id);
+
+  CREATE TABLE IF NOT EXISTS comments (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    author_name TEXT NOT NULL,
+    author_color TEXT,
+    content TEXT NOT NULL,
+    edited_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_comments_thread ON comments(thread_id);
+`);
+
+// ── Object Votes ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS object_votes (
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (board_id, object_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_votes_object ON object_votes(board_id, object_id);
+`);
+
 // Migrations — add columns to existing tables
 try {
   db.prepare("SELECT thumbnail FROM boards LIMIT 0").get();
@@ -480,6 +527,132 @@ function updateImageMedia(imageId, { posterAssetKey, duration, nativeWidth, nati
   `).run(posterAssetKey || null, duration || null, nativeWidth || null, nativeHeight || null, imageId);
 }
 
+// ---------------------
+// Vote helpers
+// ---------------------
+function getVotesByBoard(boardId) {
+  return db.prepare('SELECT * FROM object_votes WHERE board_id = ?').all(boardId);
+}
+
+function toggleVote(boardId, objectId, userId) {
+  const existing = db.prepare(
+    'SELECT 1 FROM object_votes WHERE board_id = ? AND object_id = ? AND user_id = ?'
+  ).get(boardId, objectId, userId);
+
+  if (existing) {
+    db.prepare('DELETE FROM object_votes WHERE board_id = ? AND object_id = ? AND user_id = ?')
+      .run(boardId, objectId, userId);
+    return false; // vote removed
+  } else {
+    db.prepare('INSERT INTO object_votes (board_id, object_id, user_id) VALUES (?, ?, ?)')
+      .run(boardId, objectId, userId);
+    return true; // vote added
+  }
+}
+
+// ---------------------
+// Thread helpers
+// ---------------------
+function getThreadsByBoard(boardId) {
+  return db.prepare(`
+    SELECT t.*, u.display_name AS author_name
+    FROM comment_threads t
+    LEFT JOIN users u ON u.id = t.created_by
+    WHERE t.board_id = ?
+    ORDER BY t.created_at ASC
+  `).all(boardId);
+}
+
+function getThread(threadId) {
+  return db.prepare('SELECT * FROM comment_threads WHERE id = ?').get(threadId);
+}
+
+function createThread({ id, boardId, objectId, anchorType, pinX, pinY, createdBy }) {
+  db.prepare(`
+    INSERT INTO comment_threads (id, board_id, object_id, anchor_type, pin_x, pin_y, created_by, last_commented_at, last_commented_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+  `).run(id, boardId, objectId, anchorType, pinX ?? null, pinY ?? null, createdBy, createdBy);
+  return getThread(id);
+}
+
+function updateThreadStatus(threadId, status, resolvedBy) {
+  if (status === 'resolved') {
+    db.prepare(`
+      UPDATE comment_threads SET status = ?, resolved_by = ?, resolved_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, resolvedBy, threadId);
+  } else {
+    db.prepare(`
+      UPDATE comment_threads SET status = ?, resolved_by = NULL, resolved_at = NULL, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, threadId);
+  }
+  return getThread(threadId);
+}
+
+function deleteThread(threadId) {
+  db.prepare('DELETE FROM comment_threads WHERE id = ?').run(threadId);
+}
+
+function incrementThreadCommentCount(threadId, userId) {
+  db.prepare(`
+    UPDATE comment_threads
+    SET comment_count = comment_count + 1,
+        last_commented_at = datetime('now'),
+        last_commented_by = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(userId, threadId);
+}
+
+function decrementThreadCommentCount(threadId) {
+  db.prepare(`
+    UPDATE comment_threads
+    SET comment_count = MAX(0, comment_count - 1),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(threadId);
+}
+
+// ---------------------
+// Comment helpers
+// ---------------------
+function getCommentsByThread(threadId) {
+  return db.prepare('SELECT * FROM comments WHERE thread_id = ? ORDER BY created_at ASC').all(threadId);
+}
+
+function getCommentsByBoard(boardId) {
+  return db.prepare(`
+    SELECT c.* FROM comments c
+    JOIN comment_threads t ON t.id = c.thread_id
+    WHERE t.board_id = ?
+    ORDER BY c.created_at ASC
+  `).all(boardId);
+}
+
+function getComment(commentId) {
+  return db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId);
+}
+
+function createComment({ id, threadId, userId, authorName, authorColor, content }) {
+  db.prepare(`
+    INSERT INTO comments (id, thread_id, user_id, author_name, author_color, content)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, threadId, userId, authorName, authorColor ?? null, content);
+  return getComment(id);
+}
+
+function updateComment(commentId, content) {
+  db.prepare(`
+    UPDATE comments SET content = ?, edited_at = datetime('now') WHERE id = ?
+  `).run(content, commentId);
+  return getComment(commentId);
+}
+
+function deleteComment(commentId) {
+  db.prepare('DELETE FROM comments WHERE id = ?').run(commentId);
+}
+
 module.exports = {
   db,
   // Users
@@ -499,4 +672,11 @@ module.exports = {
   getAllBoardChannelLinks, getImageByMmFileId,
   // Media Jobs
   createMediaJob, updateMediaJob, getMediaJob, getPendingMediaJobs, updateImageMedia,
+  // Threads
+  getThreadsByBoard, getThread, createThread, updateThreadStatus, deleteThread,
+  incrementThreadCommentCount, decrementThreadCommentCount,
+  // Comments
+  getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
+  // Votes
+  getVotesByBoard, toggleVote,
 };
