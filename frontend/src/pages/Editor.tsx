@@ -59,6 +59,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const toolCleanupRef = useRef<(() => void) | null>(null);
   const inboxZoneRef = useRef<InboxZone | null>(null);
   const clipboardRef = useRef<SceneItem[]>([]);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   // UI state
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.SELECT);
@@ -136,7 +137,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox)
   useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
-    canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef,
+    canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   });
 
@@ -473,7 +474,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       />}
 
       {/* Canvas */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1e1e1e' }} onContextMenu={handleContextMenu}>
+      <div ref={canvasContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1e1e1e' }} onContextMenu={handleContextMenu}>
         {/* Dot grid — behind transparent canvas */}
         {showGrid && (() => {
           const scale = canvasTransform[0] || 1;

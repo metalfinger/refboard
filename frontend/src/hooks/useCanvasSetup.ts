@@ -40,6 +40,7 @@ interface CanvasSetupDeps {
   undoRef: React.MutableRefObject<UndoManager | null>;
   syncRef: React.MutableRefObject<SyncHandle | null>;
   inboxZoneRef: React.MutableRefObject<InboxZone | null>;
+  canvasContainerRef: React.RefObject<HTMLDivElement | null>;
   onCanvasChange: (changedIds?: string[]) => void;
   showToast: (msg: string) => void;
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>;
@@ -53,7 +54,7 @@ interface CanvasSetupDeps {
 export function useCanvasSetup(deps: CanvasSetupDeps) {
   const {
     boardData, resolvedBoardId, user, isPublicView,
-    canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef,
+    canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   } = deps;
 
@@ -252,21 +253,11 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
       // Setup drag/drop and paste
       if (!isPublicView || user) {
-        const canvasElements = document.querySelectorAll('canvas');
-        let domContainer: HTMLElement | null = null;
-        for (const c of canvasElements) {
-          if (c.parentElement && c.width > 100) {
-            domContainer = c.parentElement;
-            break;
-          }
+        const dropTarget = canvasContainerRef.current;
+        if (dropTarget) {
+          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange);
         }
-
-        if (domContainer) {
-          dropCleanupRef.current = setupDragDrop(domContainer, viewport, scene, resolvedBoardId, onCanvasChange);
-          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
-        } else {
-          pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
-        }
+        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange);
       }
     }, 200);
 
