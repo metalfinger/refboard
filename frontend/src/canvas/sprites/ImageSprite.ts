@@ -43,10 +43,11 @@ export class ImageSprite extends Container {
     this._drawShadow(SHADOW_REST);
     this.addChild(this._shadow);
 
-    // Main sprite
+    // Main sprite — hidden until texture loads (prevents PixiJS render errors with EMPTY)
     this._sprite = new Sprite(Texture.EMPTY);
     this._sprite.width = w;
     this._sprite.height = h;
+    this._sprite.visible = false;
     this.addChild(this._sprite);
 
     // Placeholder: dark rect shown until texture is loaded by culling system
@@ -90,6 +91,7 @@ export class ImageSprite extends Container {
       this._sprite.texture = tex;
       this._sprite.width = this._naturalWidth;
       this._sprite.height = this._naturalHeight;
+      this._sprite.visible = true;
       this.loaded = true;
 
       // Remove placeholder after successful load
@@ -114,6 +116,7 @@ export class ImageSprite extends Container {
 
     this.textures.unload(this.assetKey);
     this._sprite.texture = Texture.EMPTY;
+    this._sprite.visible = false;
     this.loaded = false;
 
     // Restore placeholder
