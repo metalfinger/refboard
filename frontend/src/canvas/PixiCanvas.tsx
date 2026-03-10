@@ -18,6 +18,7 @@ import { Application } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
 import { SceneManager, getItemWorldBounds } from './SceneManager';
 import { TextureManager } from './TextureManager';
+import { ImageSprite } from './sprites/ImageSprite';
 import { SpringManager } from './spring';
 import { convertFabricToV2 } from './scene-format';
 import type { SceneData } from './scene-format';
@@ -165,6 +166,9 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         });
 
         // -- Visibility culling ticker (runs every 200ms, not every frame) --
+        // Images: load textures when near viewport, unload when far away.
+        // Uses preload margin (1 screen) and larger unload margin (2 screens)
+        // to avoid thrashing during panning.
 
         let lastCullCheck = 0;
         app.ticker.add((ticker) => {
@@ -173,16 +177,42 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           lastCullCheck = 0;
 
           const bounds = viewport.getVisibleBounds();
-          const margin = 200;
+          // Preload margin: 1x screen size beyond viewport edges
+          const loadMargin = Math.max(bounds.width, bounds.height);
+          // Unload margin: 2x screen size — hysteresis prevents thrash
+          const unloadMargin = loadMargin * 2;
 
           for (const item of scene.getAllItems()) {
+            const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
+
+            if (item.type === 'image' && item.displayObject instanceof ImageSprite) {
+              const nearViewport =
+                ix + iw > bounds.x - loadMargin &&
+                ix < bounds.x + bounds.width + loadMargin &&
+                iy + ih > bounds.y - loadMargin &&
+                iy < bounds.y + bounds.height + loadMargin;
+
+              if (nearViewport && !item.displayObject.loaded) {
+                item.displayObject.loadTexture();
+              } else if (!nearViewport) {
+                // Only unload if well outside viewport (hysteresis)
+                const farFromViewport =
+                  ix + iw < bounds.x - unloadMargin ||
+                  ix > bounds.x + bounds.width + unloadMargin ||
+                  iy + ih < bounds.y - unloadMargin ||
+                  iy > bounds.y + bounds.height + unloadMargin;
+                if (farFromViewport && item.displayObject.loaded) {
+                  item.displayObject.unloadTexture();
+                }
+              }
+            }
+
             if (item.type === 'video' && 'onVisibilityChange' in item.displayObject) {
-              const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
               const inView =
-                ix + iw > bounds.x - margin &&
-                ix < bounds.x + bounds.width + margin &&
-                iy + ih > bounds.y - margin &&
-                iy < bounds.y + bounds.height + margin;
+                ix + iw > bounds.x - loadMargin &&
+                ix < bounds.x + bounds.width + loadMargin &&
+                iy + ih > bounds.y - loadMargin &&
+                iy < bounds.y + bounds.height + loadMargin;
               (item.displayObject as any).onVisibilityChange(inView);
             }
           }
