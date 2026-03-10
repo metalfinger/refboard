@@ -9,7 +9,8 @@ const PIN_COLOR_RESOLVED = 0x666666;
 
 export class PinOverlay extends Container {
   private _pins = new Map<string, Graphics>();
-  private _voteBadges: Graphics[] = [];
+  private _voteBadges = new Map<string, Graphics>();
+  private _pool: Graphics[] = [];
   private _viewport: Viewport;
   private _scene: SceneManager;
   private _store: AnnotationStore;
@@ -21,16 +22,30 @@ export class PinOverlay extends Container {
     this._store = store;
   }
 
+  private _acquire(): Graphics {
+    const gfx = this._pool.pop() || new Graphics();
+    gfx.clear();
+    gfx.removeChildren();
+    gfx.visible = true;
+    gfx.eventMode = 'none';
+    gfx.cursor = 'default';
+    return gfx;
+  }
+
+  private _release(gfx: Graphics) {
+    gfx.visible = false;
+    this._pool.push(gfx);
+  }
+
   /** Call on every viewport moved/zoomed event and on store change */
   refresh(showResolved = false) {
-    const scale = 1 / this._viewport.scale.x; // scale-independent size
+    const scale = 1 / this._viewport.scale.x;
 
-    // Remove old pins + badges
-    for (const gfx of this._pins.values()) gfx.destroy();
-    for (const gfx of this._voteBadges) gfx.destroy();
+    // Return current pins and badges to pool
+    for (const gfx of this._pins.values()) this._release(gfx);
+    for (const gfx of this._voteBadges.values()) this._release(gfx);
     this._pins.clear();
-    this._voteBadges = [];
-    this.removeChildren();
+    this._voteBadges.clear();
 
     // ── Thread pins ──
     for (const thread of this._store.threads.values()) {
@@ -46,12 +61,11 @@ export class PinOverlay extends Container {
         wx = bounds.x + thread.pin_x * bounds.width;
         wy = bounds.y + thread.pin_y * bounds.height;
       } else {
-        // Object-level: top-right corner
         wx = bounds.x + bounds.width;
         wy = bounds.y;
       }
 
-      const gfx = new Graphics();
+      const gfx = this._acquire();
       const r = PIN_RADIUS * scale;
       const color = thread.status === 'open' ? PIN_COLOR_OPEN : PIN_COLOR_RESOLVED;
 
@@ -59,27 +73,21 @@ export class PinOverlay extends Container {
       gfx.fill({ color, alpha: 0.9 });
       gfx.stroke({ color: 0xffffff, width: 1.5 * scale, alpha: 0.8 });
       gfx.position.set(wx, wy);
+      gfx.eventMode = 'static';
+      gfx.cursor = 'pointer';
+      (gfx as any)._threadId = thread.id;
 
-      // Count label
       if (thread.comment_count > 1) {
         const label = new Text({
           text: String(thread.comment_count),
-          style: new TextStyle({
-            fontSize: 9 * scale,
-            fill: '#ffffff',
-            fontWeight: 'bold',
-          }),
+          style: new TextStyle({ fontSize: 9 * scale, fill: '#ffffff', fontWeight: 'bold' }),
         });
         label.anchor.set(0.5);
         gfx.addChild(label);
       }
 
-      gfx.eventMode = 'static';
-      gfx.cursor = 'pointer';
-      (gfx as any)._threadId = thread.id;
-
+      if (!gfx.parent) this.addChild(gfx);
       this._pins.set(thread.id, gfx);
-      this.addChild(gfx);
     }
 
     // ── Vote badges ──
@@ -92,7 +100,7 @@ export class PinOverlay extends Container {
       const wx = bounds.x + bounds.width;
       const wy = bounds.y + bounds.height;
 
-      const gfx = new Graphics();
+      const gfx = this._acquire();
       const pw = 24 * scale;
       const ph = 16 * scale;
       const pr = 4 * scale;
@@ -106,8 +114,9 @@ export class PinOverlay extends Container {
       });
       label.anchor.set(0.5);
       gfx.addChild(label);
-      this.addChild(gfx);
-      this._voteBadges.push(gfx);
+
+      if (!gfx.parent) this.addChild(gfx);
+      this._voteBadges.set(objectId, gfx);
     }
   }
 
@@ -125,9 +134,11 @@ export class PinOverlay extends Container {
 
   override destroy(options?: any) {
     for (const gfx of this._pins.values()) gfx.destroy();
-    for (const gfx of this._voteBadges) gfx.destroy();
+    for (const gfx of this._voteBadges.values()) gfx.destroy();
+    for (const gfx of this._pool) gfx.destroy();
     this._pins.clear();
-    this._voteBadges = [];
+    this._voteBadges.clear();
+    this._pool = [];
     super.destroy(options);
   }
 }

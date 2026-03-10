@@ -2,9 +2,6 @@ const { Router } = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../auth');
 const {
-  getBoard,
-  getCollection,
-  getCollectionMember,
   getThreadsByBoard,
   getThread,
   createThread,
@@ -18,34 +15,13 @@ const {
   incrementThreadCommentCount,
   decrementThreadCommentCount,
 } = require('../db');
+const { hasCollectionRole, resolveBoard } = require('./board-access');
 
 const router = Router();
 
 router.use(authMiddleware);
 
-function hasCollectionRole(member, minRole) {
-  if (!member) return false;
-  const hierarchy = { owner: 3, editor: 2, viewer: 1 };
-  return (hierarchy[member.role] || 0) >= (hierarchy[minRole] || 0);
-}
-
-function resolveBoard(req, res, minRole = 'viewer') {
-  const board = getBoard(req.params.boardId);
-  if (!board) { res.status(404).json({ error: 'Board not found' }); return null; }
-
-  const collection = getCollection(board.collection_id);
-  if (!collection) { res.status(404).json({ error: 'Collection not found' }); return null; }
-
-  const member = getCollectionMember(board.collection_id, req.user.id);
-  if (minRole === 'viewer' && collection.is_public) {
-    return { board, collection, member: member || { role: 'viewer' } };
-  }
-  if (!hasCollectionRole(member, minRole)) {
-    res.status(403).json({ error: `${minRole} access required` });
-    return null;
-  }
-  return { board, collection, member };
-}
+const MAX_COMMENT_LENGTH = 5000;
 
 // GET /api/boards/:boardId/threads — all threads + comments for board
 router.get('/:boardId/threads', (req, res) => {
@@ -84,6 +60,12 @@ router.post('/:boardId/threads', (req, res) => {
     const { object_id, anchor_type, pin_x, pin_y, content } = req.body;
     if (!object_id || !content || !content.trim()) {
       return res.status(400).json({ error: 'object_id and content are required' });
+    }
+    if (content.length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ error: `Content too long (max ${MAX_COMMENT_LENGTH} chars)` });
+    }
+    if (anchor_type && !['object', 'point'].includes(anchor_type)) {
+      return res.status(400).json({ error: 'anchor_type must be "object" or "point"' });
     }
 
     const threadId = uuidv4();
@@ -200,6 +182,9 @@ router.post('/:boardId/threads/:threadId/comments', (req, res) => {
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'content is required' });
     }
+    if (content.length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ error: `Content too long (max ${MAX_COMMENT_LENGTH} chars)` });
+    }
 
     const thread = getThread(req.params.threadId);
     if (!thread || thread.board_id !== req.params.boardId) {
@@ -245,6 +230,9 @@ router.put('/:boardId/threads/:threadId/comments/:commentId', (req, res) => {
     const { content } = req.body;
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'content is required' });
+    }
+    if (content.length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ error: `Content too long (max ${MAX_COMMENT_LENGTH} chars)` });
     }
 
     const comment = getComment(req.params.commentId);

@@ -355,13 +355,18 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         pinOverlayRef.current = pinOverlay;
 
         // Refresh overlay on viewport move
-        viewport.on('moved', () => {
+        const onViewportMoved = () => {
+          if (pinOverlay.visible) pinOverlay.refresh();
+        };
+        viewport.on('moved', onViewportMoved);
+        // Refresh on store change (save unsub for cleanup)
+        const unsubPinOverlay = annotationStoreRef.current!.subscribe(() => {
           if (pinOverlay.visible) pinOverlay.refresh();
         });
-        // Refresh on store change
-        annotationStoreRef.current!.subscribe(() => {
-          if (pinOverlay.visible) pinOverlay.refresh();
-        });
+        (pinOverlay as any)._cleanup = () => {
+          viewport.off('moved', onViewportMoved);
+          unsubPinOverlay();
+        };
       }
 
       // Setup drag/drop and paste
@@ -394,6 +399,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
       if (pinOverlayRef.current) {
+        (pinOverlayRef.current as any)._cleanup?.();
         pinOverlayRef.current.destroy();
         pinOverlayRef.current = null;
       }

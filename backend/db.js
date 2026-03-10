@@ -534,7 +534,7 @@ function getVotesByBoard(boardId) {
   return db.prepare('SELECT * FROM object_votes WHERE board_id = ?').all(boardId);
 }
 
-function toggleVote(boardId, objectId, userId) {
+const _toggleVoteTx = db.transaction((boardId, objectId, userId) => {
   const existing = db.prepare(
     'SELECT 1 FROM object_votes WHERE board_id = ? AND object_id = ? AND user_id = ?'
   ).get(boardId, objectId, userId);
@@ -548,6 +548,10 @@ function toggleVote(boardId, objectId, userId) {
       .run(boardId, objectId, userId);
     return true; // vote added
   }
+});
+
+function toggleVote(boardId, objectId, userId) {
+  return _toggleVoteTx(boardId, objectId, userId);
 }
 
 // ---------------------

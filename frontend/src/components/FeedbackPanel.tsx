@@ -9,6 +9,7 @@ interface FeedbackPanelProps {
   token: string;
   canvasObjects: Map<string, { id: string; name?: string; type: string }>;
   onJumpToObject?: (objectId: string) => void;
+  onError?: (msg: string) => void;
 }
 
 export default function FeedbackPanel({
@@ -19,6 +20,7 @@ export default function FeedbackPanel({
   token,
   canvasObjects,
   onJumpToObject,
+  onError,
 }: FeedbackPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
@@ -30,7 +32,7 @@ export default function FeedbackPanel({
   // Subscribe to store changes
   const _version = useSyncExternalStore(
     (cb) => annotationStore.subscribe(cb),
-    () => annotationStore.threads.size + annotationStore.votes.size,
+    () => annotationStore.version,
   );
 
   const allThreads = Array.from(annotationStore.threads.values());
@@ -54,52 +56,76 @@ export default function FeedbackPanel({
 
   // ── API helpers ──
 
+  const apiFetch = useCallback(async (url: string, init?: RequestInit) => {
+    try {
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Request failed (${res.status})`);
+      }
+      return res;
+    } catch (err: any) {
+      onError?.(err.message || 'Request failed');
+      throw err;
+    }
+  }, [onError]);
+
   const postReply = useCallback(async (threadId: string) => {
     if (!replyText.trim()) return;
-    await fetch(`/api/boards/${boardId}/threads/${threadId}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ content: replyText.trim() }),
-    });
-    setReplyText('');
-  }, [boardId, token, replyText]);
+    try {
+      await apiFetch(`/api/boards/${boardId}/threads/${threadId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: replyText.trim() }),
+      });
+      setReplyText('');
+    } catch {}
+  }, [boardId, token, replyText, apiFetch]);
 
   const resolveThread = useCallback(async (threadId: string, status: string) => {
-    await fetch(`/api/boards/${boardId}/threads/${threadId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status }),
-    });
-  }, [boardId, token]);
+    try {
+      await apiFetch(`/api/boards/${boardId}/threads/${threadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      });
+    } catch {}
+  }, [boardId, token, apiFetch]);
 
   const deleteComment = useCallback(async (threadId: string, commentId: string) => {
-    await fetch(`/api/boards/${boardId}/threads/${threadId}/comments/${commentId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  }, [boardId, token]);
+    try {
+      await apiFetch(`/api/boards/${boardId}/threads/${threadId}/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {}
+  }, [boardId, token, apiFetch]);
 
   const toggleVote = useCallback(async (objectId: string) => {
-    await fetch(`/api/boards/${boardId}/votes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ object_id: objectId }),
-    });
-  }, [boardId, token]);
+    try {
+      await apiFetch(`/api/boards/${boardId}/votes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ object_id: objectId }),
+      });
+    } catch {}
+  }, [boardId, token, apiFetch]);
 
   const createThread = useCallback(async () => {
     if (!newCommentText.trim() || !selectedObjectId) return;
-    await fetch(`/api/boards/${boardId}/threads`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        object_id: selectedObjectId,
-        anchor_type: 'object',
-        content: newCommentText.trim(),
-      }),
-    });
-    setNewCommentText('');
-  }, [boardId, token, newCommentText, selectedObjectId]);
+    try {
+      await apiFetch(`/api/boards/${boardId}/threads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          object_id: selectedObjectId,
+          anchor_type: 'object',
+          content: newCommentText.trim(),
+        }),
+      });
+      setNewCommentText('');
+    } catch {}
+  }, [boardId, token, newCommentText, selectedObjectId, apiFetch]);
 
   // ── Collapsed state ──
 

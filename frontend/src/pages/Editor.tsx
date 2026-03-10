@@ -162,6 +162,19 @@ export default function Editor({ isPublicView }: EditorProps) {
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   });
 
+  // Build canvas objects map for FeedbackPanel (memoized on object count changes)
+  const canvasObjectMap = React.useMemo(() => {
+    const scene = canvasRef.current?.getScene();
+    const map = new Map<string, { id: string; name?: string; type: string }>();
+    if (scene) {
+      for (const item of scene.items.values()) {
+        map.set(item.id, { id: item.id, name: item.data.name, type: item.data.type });
+      }
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objectCount]);
+
   // Toggle pin overlay visibility with review mode
   useEffect(() => {
     if (pinOverlay) {
@@ -663,16 +676,8 @@ export default function Editor({ isPublicView }: EditorProps) {
             userId={user.id}
             boardId={resolvedBoardId}
             token={localStorage.getItem('token') || ''}
-            canvasObjects={(() => {
-              const scene = canvasRef.current?.getScene();
-              const map = new Map<string, { id: string; name?: string; type: string }>();
-              if (scene) {
-                for (const item of scene.items.values()) {
-                  map.set(item.id, { id: item.id, name: item.data.name, type: item.data.type });
-                }
-              }
-              return map;
-            })()}
+            canvasObjects={canvasObjectMap}
+            onError={(msg) => showToast(msg)}
             onJumpToObject={(objectId) => {
               const scene = canvasRef.current?.getScene();
               const vp = canvasRef.current?.getViewport();

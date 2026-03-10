@@ -42,6 +42,10 @@ export class AnnotationStore {
   votes = new Map<string, Set<string>>();
 
   private _listeners = new Set<Listener>();
+  private _version = 0;
+
+  /** Monotonic version counter for useSyncExternalStore snapshots */
+  get version(): number { return this._version; }
 
   subscribe(fn: Listener): () => void {
     this._listeners.add(fn);
@@ -49,6 +53,7 @@ export class AnnotationStore {
   }
 
   private _notify() {
+    this._version++;
     for (const fn of this._listeners) fn();
   }
 
