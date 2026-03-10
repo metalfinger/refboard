@@ -8,6 +8,7 @@ import { UndoManager } from '../canvas/history';
 import { InboxZone } from '../canvas/InboxZone';
 import { LaserPointer } from '../canvas/LaserPointer';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
+import { UploadManager } from '../stores/uploadManager';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 
@@ -42,6 +43,7 @@ interface CanvasSetupDeps {
   syncRef: React.MutableRefObject<SyncHandle | null>;
   inboxZoneRef: React.MutableRefObject<InboxZone | null>;
   canvasContainerRef: React.RefObject<HTMLDivElement | null>;
+  uploadManager: UploadManager;
   onCanvasChange: (changedIds?: string[]) => void;
   showToast: (msg: string) => void;
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>;
@@ -56,7 +58,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   const {
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
-    onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
+    uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   } = deps;
 
   const dropCleanupRef = useRef<(() => void) | null>(null);
@@ -186,6 +188,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           const { imageId, posterAssetKey, nativeWidth, nativeHeight, duration } = data;
           if (!imageId) return;
 
+          // Update upload manager — transitions video jobs from "processing" to "done"
+          uploadManager.processingComplete(imageId);
+
           // Find the video item by matching its DB image ID stored in scene data
           for (const item of scene.items.values()) {
             if (item.data.type !== 'video') continue;
@@ -296,9 +301,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           dropTarget = canvasEl?.parentElement ?? null;
         }
         if (dropTarget) {
-          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection);
+          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
         }
-        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection);
+        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
       }
     }, 200);
 
@@ -318,5 +323,5 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       pasteCleanupRef.current?.();
       disconnectSocket();
     };
-  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, setOnlineUsers, setSelectedLayerIds]);
+  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
 }

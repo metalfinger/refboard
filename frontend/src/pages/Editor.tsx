@@ -23,6 +23,8 @@ import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
 import Minimap from '../components/Minimap';
+import UploadPanel from '../components/UploadPanel';
+import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
@@ -60,6 +62,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const inboxZoneRef = useRef<InboxZone | null>(null);
   const clipboardRef = useRef<SceneItem[]>([]);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [uploadManager] = useState(() => new UploadManager());
 
   // UI state
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.SELECT);
@@ -146,7 +149,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
-    onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
+    uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   });
 
   // Tool activation
@@ -630,6 +633,9 @@ export default function Editor({ isPublicView }: EditorProps) {
             })()}
           />
         )}
+
+        {/* Upload progress panel */}
+        <UploadPanel uploadManager={uploadManager} />
 
         {/* Toasts */}
         <div style={{

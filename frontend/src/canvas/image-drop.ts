@@ -2,6 +2,7 @@ import { Graphics } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
+import type { UploadManager } from '../stores/uploadManager';
 import { uploadImage, uploadImageFromUrl } from '../api';
 
 type OnChange = () => void;
@@ -83,6 +84,7 @@ export function setupDragDrop(
   boardId: string,
   onChange: OnChange,
   selection?: SelectionManager | null,
+  uploads?: UploadManager | null,
 ): () => void {
   function onDragOver(e: DragEvent) {
     e.preventDefault();
@@ -118,7 +120,7 @@ export function setupDragDrop(
           removePlaceholder(viewport, placeholder);
           const { id } = handleUploadResult(res, viewport, sceneManager, world.x, world.y, onChange);
           selection?.selectOnly(id);
-        } catch (err) {
+        } catch (err: any) {
           console.error('URL image upload failed:', err);
           removePlaceholder(viewport, placeholder);
         }
@@ -152,17 +154,24 @@ export function setupDragDrop(
       for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
 
       const placeholder = createPlaceholder(viewport, cursorX, cursorY);
+      const jobId = uploads?.addJob(file, boardId);
 
       try {
-        const res = await uploadImage(boardId, file);
+        const res = await uploadImage(boardId, file, (p) => {
+          if (jobId) uploads?.setProgress(jobId, p);
+        });
         removePlaceholder(viewport, placeholder);
         const { w: placedW, h: placedH, id } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
         newItemIds.push(id);
         if (placedW > (colWidths[col] || 0)) colWidths[col] = placedW;
         if (placedH > rowMaxH) rowMaxH = placedH;
-      } catch (err) {
+        // Link upload job to DB image for processing tracking
+        const imgData = res.data.image || res.data;
+        if (jobId) uploads?.uploadComplete(jobId, imgData.id);
+      } catch (err: any) {
         console.error('Image upload failed:', err);
         removePlaceholder(viewport, placeholder);
+        if (jobId) uploads?.setFailed(jobId, err.response?.data?.error || err.message || 'Upload failed');
         if (220 > (colWidths[col] || 0)) colWidths[col] = 220;
         if (150 > rowMaxH) rowMaxH = 150;
       }
@@ -216,6 +225,7 @@ export function setupPaste(
   boardId: string,
   onChange: OnChange,
   selection?: SelectionManager | null,
+  uploads?: UploadManager | null,
 ): () => void {
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
@@ -237,15 +247,21 @@ export function setupPaste(
       const cy = center.y;
 
       const placeholder = createPlaceholder(viewport, cx - 100, cy - 75);
+      const jobId = uploads?.addJob(file, boardId);
 
       try {
-        const res = await uploadImage(boardId, file);
+        const res = await uploadImage(boardId, file, (p) => {
+          if (jobId) uploads?.setProgress(jobId, p);
+        });
         removePlaceholder(viewport, placeholder);
         const { id } = handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
         newItemIds.push(id);
-      } catch (err) {
+        const imgData = res.data.image || res.data;
+        if (jobId) uploads?.uploadComplete(jobId, imgData.id);
+      } catch (err: any) {
         console.error('Image paste upload failed:', err);
         removePlaceholder(viewport, placeholder);
+        if (jobId) uploads?.setFailed(jobId, err.response?.data?.error || err.message || 'Upload failed');
       }
     }
 

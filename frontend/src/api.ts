@@ -107,11 +107,14 @@ export function saveCanvas(boardId: string, canvasState: string, thumbnail?: str
   return api.post(`/api/boards/${boardId}/save`, { canvas_state: canvasState, thumbnail });
 }
 
-export function uploadImage(boardId: string, file: File) {
+export function uploadImage(boardId: string, file: File, onProgress?: (progress: number) => void) {
   const formData = new FormData();
   formData.append('image', file);
   return api.post(`/api/upload/boards/${boardId}/images`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress
+      ? (e) => { if (e.total) onProgress(e.loaded / e.total); }
+      : undefined,
   });
 }
 
