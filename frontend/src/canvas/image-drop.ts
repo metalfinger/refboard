@@ -55,7 +55,9 @@ function handleUploadResult(
   }
 
   if (mediaType === 'video' && assetKey) {
-    sceneManager.addVideoFromUpload(assetKey, finalW, finalH, x, y);
+    const posterKey: string | undefined = imgData.poster_asset_key;
+    const duration: number | undefined = imgData.duration;
+    sceneManager.addVideoFromUpload(assetKey, finalW, finalH, x, y, posterKey, duration);
   } else if (assetKey) {
     sceneManager.addImageFromUpload(assetKey, finalW, finalH, x, y);
   } else {

@@ -35,6 +35,10 @@ export interface VideoObject extends SceneObject {
   /** Native video dimensions, cached after first metadata load. */
   nativeW?: number;
   nativeH?: number;
+  /** Server-generated poster asset key (JPEG). */
+  poster?: string;
+  /** Video duration in seconds. */
+  duration?: number;
 }
 
 export interface TextObject extends SceneObject {

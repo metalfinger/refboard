@@ -1,20 +1,18 @@
 import { Container, Sprite, Texture, Graphics } from 'pixi.js';
+import { TextureManager } from '../TextureManager';
 
 /**
  * VideoSprite — Container with budget-aware lazy video lifecycle.
  *
  * Memory tiers (managed by external culling system):
  *   Tier 0 — placeholder only (offscreen, default state)
+ *   Tier 0.5 — server poster loaded as image texture (no <video> needed!)
  *   Tier 1 — initialized <video> with preload='metadata' (near viewport)
- *   Tier 2 — poster texture captured (nearest subset / selected)
+ *   Tier 2 — client-captured poster from video frame (fallback if no server poster)
  *   Tier 3 — actively playing with live video texture (user-initiated)
  *
- * The culling system in PixiCanvas manages budgets:
- *   - MAX_INITIALIZED_VIDEOS (tier 1+)
- *   - MAX_POSTER_VIDEOS (tier 2+)
- *   - MAX_PLAYING_VIDEOS (tier 3)
- *
- * Constructor creates only shadow + placeholder + overlay. No <video> element.
+ * If the server provides a poster asset key at upload time, the video renders
+ * as a plain image until explicitly played. No <video> element needed for thumbnails.
  */
 
 const MAX_PLAYING_VIDEOS = 1;
@@ -26,10 +24,13 @@ const SHADOW_LIFT = { offsetX: 6, offsetY: 8, alpha: 0.3 };
 export class VideoSprite extends Container {
   readonly assetKey: string;
   readonly videoUrl: string;
+  readonly posterAssetKey: string | null;
 
+  private textures: TextureManager | null;
   private videoEl: HTMLVideoElement | null = null;
   private videoTexture: Texture | null = null;
   private posterTexture: Texture | null = null;
+  private _serverPosterLoaded = false;
   private _sprite: Sprite | null = null;
   private _shadow: Graphics;
   private _overlay: Graphics;
@@ -48,11 +49,20 @@ export class VideoSprite extends Container {
   /** Called when playback state changes (for external controls). */
   onStateChange: (() => void) | null = null;
 
-  constructor(assetKey: string, w: number, h: number, videoUrl: string) {
+  constructor(
+    assetKey: string,
+    w: number,
+    h: number,
+    videoUrl: string,
+    posterAssetKey?: string | null,
+    textures?: TextureManager | null,
+  ) {
     super();
 
     this.assetKey = assetKey;
     this.videoUrl = videoUrl;
+    this.posterAssetKey = posterAssetKey ?? null;
+    this.textures = textures ?? null;
     this._naturalWidth = w;
     this._naturalHeight = h;
 
@@ -70,6 +80,12 @@ export class VideoSprite extends Container {
     this._overlay = new Graphics();
     this._drawPlayIcon();
     this.addChild(this._overlay);
+
+    // If server poster available, load it immediately as an image texture
+    // This is the key optimization: video thumbnail = image, no <video> needed
+    if (this.posterAssetKey && this.textures) {
+      this._loadServerPoster();
+    }
   }
 
   get isPlaying(): boolean { return this._isPlaying; }
@@ -78,6 +94,25 @@ export class VideoSprite extends Container {
 
   /** Expose the underlying HTMLVideoElement for external controls. Null if not initialized. */
   get videoElement(): HTMLVideoElement | null { return this.videoEl; }
+
+  // ---- Tier 0.5: Server-generated poster (loaded like an image) -----------
+
+  private async _loadServerPoster(): Promise<void> {
+    if (!this.posterAssetKey || !this.textures || this.destroyed) return;
+    try {
+      const tex = await this.textures.load(this.posterAssetKey);
+      if (this.destroyed || this._isPlaying) return;
+
+      this.posterTexture = tex;
+      this._hasPoster = true;
+      this._serverPosterLoaded = true;
+
+      this._ensureSprite(tex);
+      this._removePlaceholder();
+    } catch {
+      // Server poster failed — will fall back to client capture if needed
+    }
+  }
 
   // ---- Tier 1: Initialize <video> element ---------------------------------
 
@@ -97,35 +132,32 @@ export class VideoSprite extends Container {
 
     this.videoEl = video;
     video.src = this.videoUrl;
-    this.onStateChange?.(); // notify controls of new element
+    this.onStateChange?.();
   }
 
   /** Tear down the <video> element. Keeps poster if present. */
   teardownVideo(): void {
     if (!this._videoInitialized) return;
-    if (this._isPlaying) return; // don't tear down while user is watching
+    if (this._isPlaying) return;
 
     this._destroyVideoEl();
     this._destroyVideoTexture();
     this._videoInitialized = false;
-    this.onStateChange?.(); // notify controls element is gone
+    this.onStateChange?.();
   }
 
-  // ---- Tier 2: Poster texture ---------------------------------------------
+  // ---- Tier 2: Client-captured poster (fallback) --------------------------
 
-  /** Capture a poster frame. Requires initialized video. */
+  /** Capture a poster frame from video. Only needed if no server poster. */
   capturePoster(): void {
     if (this._hasPoster || !this.videoEl || this.destroyed) return;
 
     if (this.videoEl.readyState >= 2) {
-      // Frame data already available — capture directly
       this._captureFirstFrame();
     } else if (this.videoEl.readyState >= 1) {
-      // Metadata loaded but no frame decoded (preload='metadata').
-      // Force a seek to trigger frame decode, capture on 'seeked'.
+      // preload='metadata' may not decode frames. Force a seek.
       this._trySeekCapture();
     } else {
-      // Not even metadata yet — wait for loadeddata
       this.videoEl.addEventListener('loadeddata', this._onLoadedData, { once: true });
     }
   }
@@ -134,14 +166,19 @@ export class VideoSprite extends Container {
   destroyPoster(): void {
     if (!this._hasPoster) return;
     if (this.posterTexture) {
-      // If sprite is showing poster, switch back to nothing
       if (this._sprite && this._sprite.texture === this.posterTexture) {
         this._removeSpriteFromTree();
       }
-      this.posterTexture.destroy(true);
+      // Release via TextureManager if server poster, otherwise destroy directly
+      if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
+        this.textures.release(this.posterAssetKey);
+      } else {
+        this.posterTexture.destroy(true);
+      }
       this.posterTexture = null;
     }
     this._hasPoster = false;
+    this._serverPosterLoaded = false;
     this._restorePlaceholder();
   }
 
@@ -157,31 +194,32 @@ export class VideoSprite extends Container {
   play(): void {
     if (this._isPlaying) return;
 
-    // Ensure video element exists
     if (!this._videoInitialized) this.initVideo();
     if (!this.videoEl) return;
 
-    // Evict oldest if at capacity
     if (activeVideos.size >= MAX_PLAYING_VIDEOS) {
       const oldest = activeVideos.values().next().value as VideoSprite;
       oldest.pause();
     }
 
-    // Promote to full load for playback
     this.videoEl.preload = 'auto';
     this.videoEl.muted = this.muted;
     this.videoEl.loop = this.loop;
 
-    // Create live video texture
     if (!this.videoTexture) {
       this.videoTexture = Texture.from(this.videoEl);
     }
 
     // Drop poster while playing — don't keep both resident
-    if (this.posterTexture && this._hasPoster) {
-      this.posterTexture.destroy(true);
+    if (this._hasPoster && this.posterTexture) {
+      if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
+        this.textures.release(this.posterAssetKey);
+      } else {
+        this.posterTexture.destroy(true);
+      }
       this.posterTexture = null;
       this._hasPoster = false;
+      this._serverPosterLoaded = false;
     }
 
     this._ensureSprite(this.videoTexture);
@@ -193,7 +231,6 @@ export class VideoSprite extends Container {
     this.onStateChange?.();
 
     this.videoEl.play().catch(() => {
-      // Autoplay blocked — show placeholder
       this._isPlaying = false;
       this._overlay.visible = true;
       activeVideos.delete(this);
@@ -208,7 +245,6 @@ export class VideoSprite extends Container {
     this._overlay.visible = true;
     activeVideos.delete(this);
     this.onStateChange?.();
-    // Keep video texture showing last frame
   }
 
   togglePlayPause(): void {
@@ -228,13 +264,10 @@ export class VideoSprite extends Container {
 
   // ---- Visibility (called by culling system) ------------------------------
 
-  /** Simple visibility callback — culling system manages budgets externally. */
   onVisibilityChange(visible: boolean): void {
     if (!visible && this._isPlaying) {
       this.pause();
     }
-    // NOTE: init/teardown is now managed by the culling budget system,
-    // not by individual visibility changes.
   }
 
   // ---- Shadow / overlay ---------------------------------------------------
@@ -267,7 +300,7 @@ export class VideoSprite extends Container {
     this._overlay.fill({ color: 0xffffff, alpha: 0.9 });
   }
 
-  // ---- Media event handlers (arrow fns for stable `this`) -----------------
+  // ---- Media event handlers -----------------------------------------------
 
   private _onLoadedMetadata = (): void => {
     if (!this.videoEl || this.destroyed) return;
@@ -357,7 +390,6 @@ export class VideoSprite extends Container {
       this._sprite = new Sprite(texture);
       this._sprite.width = this._naturalWidth;
       this._sprite.height = this._naturalHeight;
-      // Insert after shadow (index 0), before placeholder/overlay
       this.addChildAt(this._sprite, 1);
     } else {
       this._sprite.texture = texture;
@@ -387,7 +419,6 @@ export class VideoSprite extends Container {
     const p = new Graphics();
     p.rect(0, 0, this._naturalWidth, this._naturalHeight).fill(0x2a2a2a);
     this._placeholder = p;
-    // Insert after shadow
     this.addChildAt(p, 1);
   }
 
@@ -403,7 +434,6 @@ export class VideoSprite extends Container {
 
   private _destroyVideoTexture(): void {
     if (this.videoTexture) {
-      // If sprite is showing live texture, remove it
       if (this._sprite && this._sprite.texture === this.videoTexture) {
         this._removeSpriteFromTree();
         this._restorePlaceholder();
@@ -417,7 +447,14 @@ export class VideoSprite extends Container {
     this.pause();
     this._destroyVideoEl();
     if (this.videoTexture) { this.videoTexture.destroy(true); this.videoTexture = null; }
-    if (this.posterTexture) { this.posterTexture.destroy(true); this.posterTexture = null; }
+    if (this._hasPoster && this.posterTexture) {
+      if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
+        this.textures.release(this.posterAssetKey);
+      } else {
+        this.posterTexture.destroy(true);
+      }
+      this.posterTexture = null;
+    }
     super.destroy(options);
   }
 }

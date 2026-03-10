@@ -27,8 +27,9 @@ COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 # Data directory for SQLite
 RUN mkdir -p /app/data
 
+# ffmpeg for video poster/metadata extraction at upload time
 # Health check utility
-RUN apk add --no-cache wget
+RUN apk add --no-cache wget ffmpeg
 
 EXPOSE 8000
 

@@ -271,7 +271,7 @@ export class SceneManager {
         // Use cached native dimensions if available (avoids re-init just to discover size)
         const vw = vidData.nativeW || vidData.w;
         const vh = vidData.nativeH || vidData.h;
-        const videoSprite = new VideoSprite(vidData.asset, vw, vh, videoUrl);
+        const videoSprite = new VideoSprite(vidData.asset, vw, vh, videoUrl, vidData.poster, this.textures);
         // Apply cached native dims to scene data so display matches
         if (vidData.nativeW && vidData.nativeH) {
           data.w = vw;
@@ -607,6 +607,8 @@ export class SceneManager {
     h: number,
     x: number,
     y: number,
+    posterAssetKey?: string,
+    duration?: number,
   ): SceneItem {
     const data: VideoObject = {
       id: crypto.randomUUID(),
@@ -626,6 +628,10 @@ export class SceneManager {
       asset: assetKey,
       muted: true,
       loop: true,
+      nativeW: w,
+      nativeH: h,
+      poster: posterAssetKey,
+      duration,
     };
 
     this._createItem(data, true);
