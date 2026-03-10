@@ -31,7 +31,7 @@ export interface ShortcutContext {
   selection: SelectionManager;
   history: UndoManager;
   viewport: Viewport;
-  onChange: () => void;
+  onChange: (changedIds?: string[]) => void;
   clipboardRef: React.MutableRefObject<SceneItem[]>;
   showToast: (msg: string) => void;
   fitAll: () => void;

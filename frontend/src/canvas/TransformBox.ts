@@ -58,7 +58,7 @@ export class TransformBox extends Container {
   private _drag: DragState | null = null;
   private _viewport: Viewport | null = null;
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
-  private _onDragEnd: (() => void) | null = null;
+  private _onDragEnd: ((itemIds: string[]) => void) | null = null;
   private _snapGuides: SnapGuides | null = null;
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
@@ -68,7 +68,7 @@ export class TransformBox extends Container {
   }
 
   /** Called when resize/rotate drag ends — use to persist/sync final state. */
-  set onDragEnd(fn: () => void) {
+  set onDragEnd(fn: (itemIds: string[]) => void) {
     this._onDragEnd = fn;
   }
 
@@ -401,7 +401,7 @@ export class TransformBox extends Container {
       this._dimLabelBg.visible = false;
       this._snapGuides?.endSession();
       // Notify that drag ended — persist/sync the final state
-      this._onDragEnd?.();
+      this._onDragEnd?.(this._items.map(i => i.id));
     }
   }
 }

@@ -25,7 +25,7 @@ interface MenuContext {
   viewport: Viewport | null;
   clipboardRef: React.MutableRefObject<SceneItem[]>;
   writeCanvasToClipboard: (items?: SceneItem[]) => Promise<void>;
-  onChange: () => void;
+  onChange: (changedIds?: string[]) => void;
   refreshLayers: () => void;
   handleGroup: () => void;
   handleUngroup: () => void;
@@ -37,6 +37,7 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
   const selected = selection ? selection.getSelectedItems() : [];
   const hasSel = selected.length > 0;
   const multiSel = selected.length >= 2;
+  const ids = selected.map((s) => s.id);
 
   return [
     // -- Clipboard --
@@ -78,12 +79,12 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Alignment --
-    { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => { ops.alignLeft(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => { ops.alignRight(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => { ops.alignTop(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => { ops.alignBottom(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
+    { label: 'Align Left', shortcut: 'Ctrl+\u2190', onClick: () => { ops.alignLeft(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Align Right', shortcut: 'Ctrl+\u2192', onClick: () => { ops.alignRight(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Align Top', shortcut: 'Ctrl+\u2191', onClick: () => { ops.alignTop(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Align Bottom', shortcut: 'Ctrl+\u2193', onClick: () => { ops.alignBottom(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Distribute H', shortcut: '', onClick: () => { ops.distributeHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Distribute V', shortcut: '', onClick: () => { ops.distributeVertical(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Layer ordering --
@@ -134,23 +135,23 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Arrangement --
-    { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { ops.arrangeOptimal(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Arrange Grid', shortcut: '', onClick: () => { ops.arrangeGrid(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Arrange Row', shortcut: '', onClick: () => { ops.arrangeRow(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Arrange Column', shortcut: '', onClick: () => { ops.arrangeColumn(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { ops.stackObjects(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
+    { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { ops.arrangeOptimal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Grid', shortcut: '', onClick: () => { ops.arrangeGrid(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Row', shortcut: '', onClick: () => { ops.arrangeRow(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Column', shortcut: '', onClick: () => { ops.arrangeColumn(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { ops.stackObjects(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Normalize --
-    { label: 'Normalize Size', shortcut: '', onClick: () => { ops.normalizeSize(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Normalize Width', shortcut: '', onClick: () => { ops.normalizeWidth(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
-    { label: 'Normalize Height', shortcut: '', onClick: () => { ops.normalizeHeight(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !multiSel },
+    { label: 'Normalize Size', shortcut: '', onClick: () => { ops.normalizeSize(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Normalize Width', shortcut: '', onClick: () => { ops.normalizeWidth(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Normalize Height', shortcut: '', onClick: () => { ops.normalizeHeight(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Image --
-    { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !hasSel },
-    { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !hasSel },
-    { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); selection?.transformBox.update(selected); ctx.onChange(); }, disabled: !hasSel },
+    { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
+    { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
+    { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- View --
@@ -244,5 +245,5 @@ function _setFrameColor(item: SceneItem, color: string, ctx: MenuContext): void 
   if (item.displayObject instanceof FrameSprite) {
     item.displayObject.setBgColor(color);
   }
-  ctx.onChange();
+  ctx.onChange([item.id]);
 }

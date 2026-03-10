@@ -18,7 +18,7 @@ interface ShortcutHandlerDeps {
   undoRef: React.RefObject<UndoManager | null>;
   clipboardRef: React.MutableRefObject<SceneItem[]>;
   resolvedBoardId: string | undefined;
-  onCanvasChange: () => void;
+  onCanvasChange: (changedIds?: string[]) => void;
   showToast: (msg: string) => void;
   refreshLayers: () => void;
   handleGroup: () => void;

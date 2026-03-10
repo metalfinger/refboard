@@ -102,12 +102,12 @@ async function _pasteInternal(ctx: ShortcutContext): Promise<void> {
   ctx.onChange();
 }
 
-/** Run op on selected items → update transform box → fire onChange. */
+/** Run op on selected items → update transform box → fire onChange with IDs. */
 function _opUpdate(ctx: ShortcutContext, op: (items: SceneItem[]) => void): void {
   const items = ctx.selection.getSelectedItems();
   op(items);
   ctx.selection.transformBox.update(items);
-  ctx.onChange();
+  ctx.onChange(items.map(i => i.id));
 }
 
 export const shortcuts: ShortcutDef[] = [

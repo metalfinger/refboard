@@ -40,7 +40,7 @@ interface CanvasSetupDeps {
   undoRef: React.MutableRefObject<UndoManager | null>;
   syncRef: React.MutableRefObject<SyncHandle | null>;
   inboxZoneRef: React.MutableRefObject<InboxZone | null>;
-  onCanvasChange: () => void;
+  onCanvasChange: (changedIds?: string[]) => void;
   showToast: (msg: string) => void;
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>;
   setSelectedLayerIds: React.Dispatch<React.SetStateAction<string[]>>;
@@ -136,9 +136,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         selection.transformBox.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
         };
-        selection.transformBox.onDragEnd = () => {
-          syncRef.current?.broadcastSceneNow();
-          onCanvasChange();
+        selection.transformBox.onDragEnd = (itemIds) => {
+          syncRef.current?.broadcastElements(itemIds);
+          onCanvasChange(itemIds);
         };
 
         socket.on('user:joined', (data: any) => {

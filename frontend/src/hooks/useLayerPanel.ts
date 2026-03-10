@@ -17,7 +17,7 @@ interface LayerItem {
 interface LayerPanelDeps {
   canvasRef: React.RefObject<PixiCanvasHandle | null>;
   selectionRef: React.RefObject<SelectionManager | null>;
-  onCanvasChange: () => void;
+  onCanvasChange: (changedIds?: string[]) => void;
 }
 
 function autoName(item: SceneItem, i: number, counters: Record<string, number>): string {

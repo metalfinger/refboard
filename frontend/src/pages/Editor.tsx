@@ -102,11 +102,16 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Save manager
   const { scheduleSave } = useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSaveStatus });
 
-  // Canvas change handler
-  const onCanvasChange = useCallback(() => {
+  // Canvas change handler.
+  // Pass changedIds for incremental sync (fast, lightweight).
+  // Omit for structural changes — falls through to debounced full scene sync.
+  const onCanvasChange = useCallback((changedIds?: string[]) => {
     scheduleSave();
-    // Broadcast changes to other connected clients immediately
-    syncRef.current?.broadcastSceneNow();
+    if (changedIds && changedIds.length > 0) {
+      // Incremental: broadcast only changed elements
+      syncRef.current?.broadcastElements(changedIds);
+    }
+    // Full scene sync happens via debounced SceneManager.onChange chain in sync.ts
     if (undoRef.current && !undoRef.current.isLocked()) {
       undoRef.current.saveState();
       setCanUndo(undoRef.current.canUndo());
@@ -528,23 +533,23 @@ export default function Editor({ isPublicView }: EditorProps) {
             x={selToolbar.x}
             y={selToolbar.y}
             count={selToolbar.count}
-            onAlignLeft={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignLeft(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onAlignCenterH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterH(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onAlignRight={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignRight(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onAlignTop={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignTop(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onAlignCenterV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterV(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onAlignBottom={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignBottom(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onDistributeH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onDistributeV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onPack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeOptimal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onGrid={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeGrid(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
-            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onAlignLeft={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignLeft(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onAlignCenterH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterH(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onAlignRight={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignRight(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onAlignTop={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignTop(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onAlignCenterV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignCenterV(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onAlignBottom={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.alignBottom(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onDistributeH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onDistributeV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.distributeVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onPack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeOptimal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onGrid={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeGrid(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onGroup={handleGroup}
-            onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(); } }}
+            onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
           />
         )}
 
