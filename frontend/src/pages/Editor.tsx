@@ -675,7 +675,7 @@ export default function Editor({ isPublicView }: EditorProps) {
             selectedObjectId={selectedLayerIds.length === 1 ? selectedLayerIds[0] : null}
             userId={user.id}
             boardId={resolvedBoardId}
-            token={localStorage.getItem('token') || ''}
+            token={localStorage.getItem('refboard_token') || ''}
             canvasObjects={canvasObjectMap}
             onError={(msg) => showToast(msg)}
             onJumpToObject={(objectId) => {

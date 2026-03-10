@@ -528,33 +528,6 @@ function updateImageMedia(imageId, { posterAssetKey, duration, nativeWidth, nati
 }
 
 // ---------------------
-// Vote helpers
-// ---------------------
-function getVotesByBoard(boardId) {
-  return db.prepare('SELECT * FROM object_votes WHERE board_id = ?').all(boardId);
-}
-
-const _toggleVoteTx = db.transaction((boardId, objectId, userId) => {
-  const existing = db.prepare(
-    'SELECT 1 FROM object_votes WHERE board_id = ? AND object_id = ? AND user_id = ?'
-  ).get(boardId, objectId, userId);
-
-  if (existing) {
-    db.prepare('DELETE FROM object_votes WHERE board_id = ? AND object_id = ? AND user_id = ?')
-      .run(boardId, objectId, userId);
-    return false; // vote removed
-  } else {
-    db.prepare('INSERT INTO object_votes (board_id, object_id, user_id) VALUES (?, ?, ?)')
-      .run(boardId, objectId, userId);
-    return true; // vote added
-  }
-});
-
-function toggleVote(boardId, objectId, userId) {
-  return _toggleVoteTx(boardId, objectId, userId);
-}
-
-// ---------------------
 // Thread helpers
 // ---------------------
 function getThreadsByBoard(boardId) {
@@ -681,6 +654,4 @@ module.exports = {
   incrementThreadCommentCount, decrementThreadCommentCount,
   // Comments
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
-  // Votes
-  getVotesByBoard, toggleVote,
 };

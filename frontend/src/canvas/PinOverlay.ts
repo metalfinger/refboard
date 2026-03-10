@@ -9,7 +9,6 @@ const PIN_COLOR_RESOLVED = 0x666666;
 
 export class PinOverlay extends Container {
   private _pins = new Map<string, Graphics>();
-  private _voteBadges = new Map<string, Graphics>();
   private _pool: Graphics[] = [];
   private _viewport: Viewport;
   private _scene: SceneManager;
@@ -41,11 +40,9 @@ export class PinOverlay extends Container {
   refresh(showResolved = false) {
     const scale = 1 / this._viewport.scale.x;
 
-    // Return current pins and badges to pool
+    // Return current pins to pool
     for (const gfx of this._pins.values()) this._release(gfx);
-    for (const gfx of this._voteBadges.values()) this._release(gfx);
     this._pins.clear();
-    this._voteBadges.clear();
 
     // ── Thread pins ──
     for (const thread of this._store.threads.values()) {
@@ -89,35 +86,6 @@ export class PinOverlay extends Container {
       if (!gfx.parent) this.addChild(gfx);
       this._pins.set(thread.id, gfx);
     }
-
-    // ── Vote badges ──
-    for (const [objectId, voters] of this._store.votes) {
-      if (voters.size === 0) continue;
-      const item = this._scene.items.get(objectId);
-      if (!item || !item.displayObject) continue;
-
-      const bounds = item.displayObject.getBounds();
-      const wx = bounds.x + bounds.width;
-      const wy = bounds.y + bounds.height;
-
-      const gfx = this._acquire();
-      const pw = 24 * scale;
-      const ph = 16 * scale;
-      const pr = 4 * scale;
-      gfx.roundRect(-pw / 2, -ph / 2, pw, ph, pr);
-      gfx.fill({ color: 0x2a3a50, alpha: 0.9 });
-      gfx.position.set(wx - 16 * scale, wy - 4 * scale);
-
-      const label = new Text({
-        text: `${voters.size}`,
-        style: new TextStyle({ fontSize: 9 * scale, fill: '#4a9eff', fontWeight: 'bold' }),
-      });
-      label.anchor.set(0.5);
-      gfx.addChild(label);
-
-      if (!gfx.parent) this.addChild(gfx);
-      this._voteBadges.set(objectId, gfx);
-    }
   }
 
   getThreadIdAtPoint(worldX: number, worldY: number): string | null {
@@ -134,10 +102,8 @@ export class PinOverlay extends Container {
 
   override destroy(options?: any) {
     for (const gfx of this._pins.values()) gfx.destroy();
-    for (const gfx of this._voteBadges.values()) gfx.destroy();
     for (const gfx of this._pool) gfx.destroy();
     this._pins.clear();
-    this._voteBadges.clear();
     this._pool = [];
     super.destroy(options);
   }

@@ -101,7 +101,6 @@ const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const mmBridgeRoutes = require('./routes/mattermost-bridge');
 const threadRoutes = require('./routes/threads');
-const voteRoutes = require('./routes/votes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/collections', collectionRoutes);
@@ -110,7 +109,6 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/boards', mmBridgeRoutes);
 app.use('/api/boards', threadRoutes);
-app.use('/api/boards', voteRoutes);
 
 // Public shared collection route (no auth required)
 app.get('/api/c/:shareToken', (req, res) => {

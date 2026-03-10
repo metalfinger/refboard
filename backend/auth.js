@@ -14,7 +14,7 @@ const REFBOARD_API_KEY = process.env.REFBOARD_API_KEY || '';
 
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, role: user.role, username: user.username, display_name: user.display_name },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );

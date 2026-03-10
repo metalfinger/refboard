@@ -28,18 +28,10 @@ export interface Comment {
   created_at: string;
 }
 
-export interface Vote {
-  board_id: string;
-  object_id: string;
-  user_id: string;
-}
-
 type Listener = () => void;
 
 export class AnnotationStore {
   threads = new Map<string, Thread>();
-  /** objectId → Set<userId> */
-  votes = new Map<string, Set<string>>();
 
   private _listeners = new Set<Listener>();
   private _version = 0;
@@ -67,18 +59,8 @@ export class AnnotationStore {
     this._notify();
   }
 
-  loadVotes(votes: Vote[]) {
-    this.votes.clear();
-    for (const v of votes) {
-      if (!this.votes.has(v.object_id)) this.votes.set(v.object_id, new Set());
-      this.votes.get(v.object_id)!.add(v.user_id);
-    }
-    this._notify();
-  }
-
   clear() {
     this.threads.clear();
-    this.votes.clear();
     this._notify();
   }
 
@@ -133,15 +115,15 @@ export class AnnotationStore {
     this._notify();
   }
 
-  onVoteToggle(objectId: string, userId: string, active: boolean) {
-    if (!this.votes.has(objectId)) this.votes.set(objectId, new Set());
-    const set = this.votes.get(objectId)!;
-    if (active) set.add(userId); else set.delete(userId);
-    if (set.size === 0) this.votes.delete(objectId);
-    this._notify();
-  }
-
   // ── Convenience getters ──
+
+  /** Get 1-based sequential pin number for a thread on this board */
+  getPinNumber(threadId: string): number {
+    const sorted = Array.from(this.threads.values())
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const idx = sorted.findIndex((t) => t.id === threadId);
+    return idx + 1;
+  }
 
   getThreadsForObject(objectId: string): Thread[] {
     const result: Thread[] = [];
@@ -151,11 +133,4 @@ export class AnnotationStore {
     return result;
   }
 
-  getVoteCount(objectId: string): number {
-    return this.votes.get(objectId)?.size ?? 0;
-  }
-
-  hasVoted(objectId: string, userId: string): boolean {
-    return this.votes.get(objectId)?.has(userId) ?? false;
-  }
 }

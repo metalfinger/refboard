@@ -14,8 +14,18 @@ const {
   deleteComment,
   incrementThreadCommentCount,
   decrementThreadCommentCount,
+  getUserById,
 } = require('../db');
 const { hasCollectionRole, resolveBoard } = require('./board-access');
+
+function resolveAuthorName(reqUser) {
+  if (reqUser.display_name || reqUser.username) {
+    return reqUser.display_name || reqUser.username;
+  }
+  // Fallback: look up from DB (old JWT tokens lack these fields)
+  const dbUser = getUserById(reqUser.id);
+  return dbUser ? (dbUser.display_name || dbUser.username || dbUser.email) : 'Unknown';
+}
 
 const router = Router();
 
@@ -86,7 +96,7 @@ router.post('/:boardId/threads', (req, res) => {
       id: commentId,
       threadId,
       userId,
-      authorName: req.user.display_name || req.user.username,
+      authorName: resolveAuthorName(req.user),
       authorColor: null,
       content: content.trim(),
     });
@@ -198,7 +208,7 @@ router.post('/:boardId/threads/:threadId/comments', (req, res) => {
       id: commentId,
       threadId: req.params.threadId,
       userId,
-      authorName: req.user.display_name || req.user.username,
+      authorName: resolveAuthorName(req.user),
       authorColor: null,
       content: content.trim(),
     });

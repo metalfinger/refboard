@@ -101,16 +101,6 @@ export default function FeedbackPanel({
     } catch {}
   }, [boardId, token, apiFetch]);
 
-  const toggleVote = useCallback(async (objectId: string) => {
-    try {
-      await apiFetch(`/api/boards/${boardId}/votes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ object_id: objectId }),
-      });
-    } catch {}
-  }, [boardId, token, apiFetch]);
-
   const createThread = useCallback(async () => {
     if (!newCommentText.trim() || !selectedObjectId) return;
     try {
@@ -166,15 +156,6 @@ export default function FeedbackPanel({
           <span style={{ color: '#aaa', fontSize: '12px', flex: 1 }}>
             {expandedThread.status === 'resolved' ? 'Resolved' : 'Open'}
           </span>
-          <button onClick={() => toggleVote(expandedThread.object_id)} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: annotationStore.hasVoted(expandedThread.object_id, userId) ? '#4a9eff' : '#444',
-            fontSize: '11px',
-          }}>
-            {annotationStore.getVoteCount(expandedThread.object_id) > 0
-              ? `+${annotationStore.getVoteCount(expandedThread.object_id)}`
-              : '+'}
-          </button>
           {onJumpToObject && (
             <button onClick={() => onJumpToObject(expandedThread.object_id)} style={{
               background: 'none', border: 'none', color: '#4a9eff', cursor: 'pointer', fontSize: '10px',
@@ -336,15 +317,6 @@ export default function FeedbackPanel({
                   {obj?.name || obj?.type || t.object_id.slice(0, 8)}
                 </span>
                 <span style={{ color: '#555', fontSize: '10px' }}>{t.comment_count}</span>
-                <button onClick={(e) => { e.stopPropagation(); toggleVote(t.object_id); }} style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
-                  color: annotationStore.hasVoted(t.object_id, userId) ? '#4a9eff' : '#444',
-                  fontSize: '11px', flexShrink: 0,
-                }}>
-                  {annotationStore.getVoteCount(t.object_id) > 0
-                    ? `+${annotationStore.getVoteCount(t.object_id)}`
-                    : '+'}
-                </button>
               </div>
               {firstComment && (
                 <div style={{ color: '#777', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

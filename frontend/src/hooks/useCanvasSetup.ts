@@ -304,8 +304,8 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           }
         });
 
-        // ── Annotations: load threads + votes, wire socket events ──
-        const token = localStorage.getItem('token');
+        // ── Annotations: load threads, wire socket events ──
+        const token = localStorage.getItem('refboard_token');
         if (token) {
           fetch(`/api/boards/${resolvedBoardId}/threads`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -315,15 +315,6 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
               if (data.threads) annotationStoreRef.current?.loadThreads(data.threads);
             })
             .catch((err) => console.error('[annotations] load threads error:', err));
-
-          fetch(`/api/boards/${resolvedBoardId}/votes`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-            .then((r) => r.json())
-            .then((data) => {
-              if (data.votes) annotationStoreRef.current?.loadVotes(data.votes);
-            })
-            .catch((err) => console.error('[annotations] load votes error:', err));
         }
 
         socket.on('thread:add', (data: any) => {
@@ -344,10 +335,6 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         socket.on('comment:delete', (data: any) => {
           annotationStoreRef.current?.onCommentDelete(data.threadId, data.commentId);
         });
-        socket.on('vote:toggle', (data: any) => {
-          annotationStoreRef.current?.onVoteToggle(data.objectId, data.userId, data.active);
-        });
-
         // ── Pin overlay (hidden by default, shown in Review Mode) ──
         const pinOverlay = new PinOverlay(viewport, scene, annotationStoreRef.current!);
         pinOverlay.visible = false;
