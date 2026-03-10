@@ -128,6 +128,19 @@ export class AnimatedGifSprite extends Container {
     }
   }
 
+  /** Release ref-counted GIF source on destroy (handles deletion while loaded). */
+  override destroy(options?: any): void {
+    if (this.loaded) {
+      if (this._gif) {
+        this._gif.stop();
+        this._playing = false;
+      }
+      this.textures.releaseGif(this.assetKey);
+      this.loaded = false;
+    }
+    super.destroy(options);
+  }
+
   /** Unload GIF to free memory (ref-counted). Called by viewport culling. */
   unloadTexture(): void {
     if (!this.loaded) return;
