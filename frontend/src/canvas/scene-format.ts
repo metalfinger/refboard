@@ -32,6 +32,9 @@ export interface VideoObject extends SceneObject {
   asset: string;
   muted: boolean;
   loop: boolean;
+  /** Native video dimensions, cached after first metadata load. */
+  nativeW?: number;
+  nativeH?: number;
 }
 
 export interface TextObject extends SceneObject {

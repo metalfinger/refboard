@@ -134,7 +134,6 @@ export function setupSync(
     }));
     socket.emit('object:transform', { boardId, transforms });
     moveTimer = setTimeout(() => { moveTimer = null; }, MOVE_THROTTLE);
-    broadcastSceneDebounced();
   }
 
   // ---- RECEIVE: full scene --------------------------------------------------

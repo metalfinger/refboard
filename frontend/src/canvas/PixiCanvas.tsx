@@ -19,6 +19,7 @@ import { Viewport } from 'pixi-viewport';
 import { SceneManager, getItemWorldBounds, type SceneItem } from './SceneManager';
 import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
+import { VideoSprite } from './sprites/VideoSprite';
 import { SpringManager } from './spring';
 import { convertFabricToV2 } from './scene-format';
 import type { SceneData } from './scene-format';
@@ -166,11 +167,13 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         });
 
         // -- Visibility culling ticker (runs every 200ms, not every frame) --
-        // Images: load textures when near viewport, unload when far away.
-        // Uses preload margin and hysteresis. Caps concurrent loaded textures
-        // to prevent GPU OOM when zoomed out (all items visible at once).
+        // Manages GPU/memory budgets for both images and videos.
+        // Distance-based priority: nearest to viewport center get resources first.
 
-        const MAX_LOADED_TEXTURES = 60; // GPU budget — only this many images loaded at once
+        const MAX_LOADED_TEXTURES = 60;   // max image textures in GPU
+        const MAX_INITIALIZED_VIDEOS = 6; // max <video> elements (tier 1+)
+        const MAX_POSTER_VIDEOS = 4;      // max poster textures in GPU (tier 2)
+
         let lastCullCheck = 0;
         app.ticker.add((ticker) => {
           lastCullCheck += ticker.deltaMS;
@@ -179,61 +182,96 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
 
           const bounds = viewport.getVisibleBounds();
           const loadMargin = Math.max(bounds.width, bounds.height);
-          const unloadMargin = loadMargin * 2;
           const vcx = bounds.x + bounds.width / 2;
           const vcy = bounds.y + bounds.height / 2;
 
-          // Collect image items with distance from viewport center
           const imageItems: { item: SceneItem; sprite: ImageSprite; dist: number; near: boolean }[] = [];
+          const videoItems: { item: SceneItem; sprite: VideoSprite; dist: number; near: boolean }[] = [];
 
           for (const item of scene.getAllItems()) {
             const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
+            const cx = ix + iw / 2;
+            const cy = iy + ih / 2;
+            const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
+            const near =
+              ix + iw > bounds.x - loadMargin &&
+              ix < bounds.x + bounds.width + loadMargin &&
+              iy + ih > bounds.y - loadMargin &&
+              iy < bounds.y + bounds.height + loadMargin;
 
             if (item.type === 'image' && item.displayObject instanceof ImageSprite) {
-              const near =
-                ix + iw > bounds.x - loadMargin &&
-                ix < bounds.x + bounds.width + loadMargin &&
-                iy + ih > bounds.y - loadMargin &&
-                iy < bounds.y + bounds.height + loadMargin;
-              const cx = ix + iw / 2;
-              const cy = iy + ih / 2;
-              const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
               imageItems.push({ item, sprite: item.displayObject, dist, near });
-            }
-
-            if (item.type === 'video' && 'onVisibilityChange' in item.displayObject) {
-              const inView =
-                ix + iw > bounds.x - loadMargin &&
-                ix < bounds.x + bounds.width + loadMargin &&
-                iy + ih > bounds.y - loadMargin &&
-                iy < bounds.y + bounds.height + loadMargin;
-              (item.displayObject as any).onVisibilityChange(inView);
+            } else if (item.type === 'video' && item.displayObject instanceof VideoSprite) {
+              videoItems.push({ item, sprite: item.displayObject, dist, near });
             }
           }
 
-          // Sort by distance — closest to viewport center first
+          // ---- Image budget management ----
           imageItems.sort((a, b) => a.dist - b.dist);
-
-          // Determine which should be loaded: nearest items up to budget
-          const nearItems = imageItems.filter(i => i.near);
-          const shouldBeLoaded = new Set(
-            nearItems.slice(0, MAX_LOADED_TEXTURES).map(i => i.item.id)
+          const nearImages = imageItems.filter(i => i.near);
+          const shouldLoadImage = new Set(
+            nearImages.slice(0, MAX_LOADED_TEXTURES).map(i => i.item.id)
           );
 
-          // Load nearest unloaded items (cap at 5 per tick to avoid spike)
-          let loadsThisTick = 0;
+          let imgLoadsThisTick = 0;
           for (const { item, sprite } of imageItems) {
-            if (shouldBeLoaded.has(item.id) && !sprite.loaded && loadsThisTick < 5) {
+            if (shouldLoadImage.has(item.id) && !sprite.loaded && imgLoadsThisTick < 5) {
               sprite.loadTexture();
-              loadsThisTick++;
+              imgLoadsThisTick++;
+            }
+          }
+          for (const { item, sprite, near } of imageItems) {
+            if (!sprite.loaded) continue;
+            if (!near || !shouldLoadImage.has(item.id)) {
+              sprite.unloadTexture();
             }
           }
 
-          // Unload items that are either far away or over budget
-          for (const { item, sprite, near } of imageItems) {
-            if (!sprite.loaded) continue;
-            if (!near || !shouldBeLoaded.has(item.id)) {
-              sprite.unloadTexture();
+          // ---- Video budget management ----
+          videoItems.sort((a, b) => a.dist - b.dist);
+
+          // Determine budget sets (sorted by distance, nearest first)
+          const nearVideos = videoItems.filter(i => i.near);
+          const shouldInit = new Set(
+            nearVideos.slice(0, MAX_INITIALIZED_VIDEOS).map(i => i.item.id)
+          );
+          const shouldPoster = new Set(
+            nearVideos.slice(0, MAX_POSTER_VIDEOS).map(i => i.item.id)
+          );
+
+          // Initialize nearest videos within budget
+          let vidInitsThisTick = 0;
+          for (const { item, sprite } of videoItems) {
+            if (shouldInit.has(item.id) && !sprite.isInitialized && vidInitsThisTick < 2) {
+              sprite.initVideo();
+              vidInitsThisTick++;
+            }
+          }
+
+          // Capture posters for nearest subset (only if already initialized)
+          for (const { item, sprite } of videoItems) {
+            if (shouldPoster.has(item.id) && sprite.isInitialized && !sprite.hasPoster) {
+              sprite.capturePoster();
+            }
+          }
+
+          // Tear down videos outside budgets (farthest first = reverse iteration)
+          for (let i = videoItems.length - 1; i >= 0; i--) {
+            const { item, sprite, near } = videoItems[i];
+
+            // Pause offscreen playing videos
+            if (!near && sprite.isPlaying) {
+              sprite.onVisibilityChange(false);
+            }
+
+            // Destroy poster if outside poster budget
+            if (!shouldPoster.has(item.id) && sprite.hasPoster && !sprite.isPlaying) {
+              sprite.destroyPoster();
+            }
+
+            // Tear down video element if outside init budget
+            if (!shouldInit.has(item.id) && sprite.isInitialized && !sprite.isPlaying) {
+              sprite.teardownVideo();
             }
           }
         });

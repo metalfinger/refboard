@@ -15,75 +15,104 @@ function formatTime(seconds: number): string {
 }
 
 export default function VideoControls({ videoSprite, screenRect }: VideoControlsProps) {
-  const video = videoSprite.videoElement;
   const [playing, setPlaying] = useState(videoSprite.isPlaying);
   const [muted, setMuted] = useState(videoSprite.muted);
-  const [currentTime, setCurrentTime] = useState(video.currentTime || 0);
-  const [duration, setDuration] = useState(video.duration || 0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [seeking, setSeeking] = useState(false);
-  const pollRef = useRef<number | null>(null);
 
-  // Poll currentTime while playing
+  // Track the actual HTMLVideoElement reference so the effect rebinds
+  // when the sprite creates/destroys the underlying element.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(videoSprite.videoElement);
+  const seekValueRef = useRef(0); // stable ref for commit value during drag
+
+  // Poll the videoElement reference via onStateChange (fires on init/teardown/play/pause)
   useEffect(() => {
-    if (pollRef.current) {
-      cancelAnimationFrame(pollRef.current);
-      pollRef.current = null;
-    }
-
-    if (!playing || seeking) return;
-
-    let lastUpdate = 0;
-    const poll = (now: number) => {
-      if (now - lastUpdate >= 250) {
-        setCurrentTime(video.currentTime || 0);
-        setDuration(video.duration || 0);
-        lastUpdate = now;
-      }
-      pollRef.current = requestAnimationFrame(poll);
+    const syncState = () => {
+      setPlaying(videoSprite.isPlaying);
+      setMuted(videoSprite.muted);
+      setVideoEl(videoSprite.videoElement);
     };
-    pollRef.current = requestAnimationFrame(poll);
+
+    const prev = videoSprite.onStateChange;
+    videoSprite.onStateChange = () => {
+      syncState();
+      prev?.();
+    };
+
+    // Also sync on mount
+    syncState();
+
+    return () => { videoSprite.onStateChange = prev ?? null; };
+  }, [videoSprite]);
+
+  // Subscribe to media events on the actual <video> element.
+  // Keyed off `videoEl` so it rebinds when the element changes.
+  useEffect(() => {
+    if (!videoEl) return;
+
+    const onTimeUpdate = () => {
+      if (!seeking) setCurrentTime(videoEl.currentTime || 0);
+    };
+    const onDurationChange = () => setDuration(videoEl.duration || 0);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    const onVolumeChange = () => setMuted(videoEl.muted);
+    const onSeeked = () => {
+      if (!seeking) setCurrentTime(videoEl.currentTime || 0);
+    };
+
+    videoEl.addEventListener('timeupdate', onTimeUpdate);
+    videoEl.addEventListener('durationchange', onDurationChange);
+    videoEl.addEventListener('loadedmetadata', onDurationChange);
+    videoEl.addEventListener('play', onPlay);
+    videoEl.addEventListener('pause', onPause);
+    videoEl.addEventListener('ended', onEnded);
+    videoEl.addEventListener('volumechange', onVolumeChange);
+    videoEl.addEventListener('seeked', onSeeked);
+
+    // Sync initial state from this element
+    setDuration(videoEl.duration || 0);
+    setCurrentTime(videoEl.currentTime || 0);
 
     return () => {
-      if (pollRef.current) {
-        cancelAnimationFrame(pollRef.current);
-        pollRef.current = null;
-      }
+      videoEl.removeEventListener('timeupdate', onTimeUpdate);
+      videoEl.removeEventListener('durationchange', onDurationChange);
+      videoEl.removeEventListener('loadedmetadata', onDurationChange);
+      videoEl.removeEventListener('play', onPlay);
+      videoEl.removeEventListener('pause', onPause);
+      videoEl.removeEventListener('ended', onEnded);
+      videoEl.removeEventListener('volumechange', onVolumeChange);
+      videoEl.removeEventListener('seeked', onSeeked);
     };
-  }, [playing, seeking, video]);
-
-  // Sync duration on metadata load
-  useEffect(() => {
-    const onMeta = () => setDuration(video.duration || 0);
-    video.addEventListener('loadedmetadata', onMeta);
-    // Also grab current values
-    setDuration(video.duration || 0);
-    setCurrentTime(video.currentTime || 0);
-    return () => video.removeEventListener('loadedmetadata', onMeta);
-  }, [video]);
+  }, [videoEl, seeking]);
 
   const handlePlayPause = useCallback(() => {
     videoSprite.togglePlayPause();
-    setPlaying(videoSprite.isPlaying);
+    // After play, the video element may have just been created
+    setVideoEl(videoSprite.videoElement);
   }, [videoSprite]);
 
   const handleMuteToggle = useCallback(() => {
     videoSprite.toggleMute();
-    setMuted(videoSprite.muted);
   }, [videoSprite]);
 
+  // Seek: onChange only updates local preview state + ref.
+  // Commit happens on pointerUp/touchEnd/blur using the ref value.
   const handleSeekStart = useCallback(() => {
     setSeeking(true);
   }, []);
 
-  const handleSeekChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeekPreview = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const t = parseFloat(e.target.value);
+    seekValueRef.current = t;
     setCurrentTime(t);
   }, []);
 
-  const handleSeekEnd = useCallback((e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
-    const t = parseFloat((e.target as HTMLInputElement).value);
-    videoSprite.seek(t);
-    setCurrentTime(t);
+  const commitSeek = useCallback(() => {
+    videoSprite.seek(seekValueRef.current);
+    setCurrentTime(seekValueRef.current);
     setSeeking(false);
   }, [videoSprite]);
 
@@ -113,6 +142,7 @@ export default function VideoControls({ videoSprite, screenRect }: VideoControls
         zIndex: 100,
         pointerEvents: 'auto',
         boxSizing: 'border-box',
+        opacity: videoEl ? 1 : 0.5,
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -140,18 +170,17 @@ export default function VideoControls({ videoSprite, screenRect }: VideoControls
         {playing ? <IcoPause /> : <IcoPlay />}
       </button>
 
-      {/* Seekbar */}
+      {/* Seekbar — onChange previews, pointerUp/blur commits */}
       <input
         type="range"
         min={0}
         max={duration || 1}
         step={0.1}
         value={currentTime}
-        onMouseDown={handleSeekStart}
-        onTouchStart={handleSeekStart}
-        onChange={handleSeekChange}
-        onMouseUp={handleSeekEnd}
-        onTouchEnd={handleSeekEnd}
+        onPointerDown={handleSeekStart}
+        onChange={handleSeekPreview}
+        onPointerUp={commitSeek}
+        onBlur={commitSeek}
         style={{
           flex: 1,
           height: '4px',

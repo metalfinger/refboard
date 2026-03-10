@@ -18,25 +18,53 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ---- Image proxy (MinIO → browser) ----
+// ---- Media proxy (MinIO → browser) with HTTP Range support ----
 app.get('/api/images/*', async (req, res) => {
   try {
     const objectPath = req.params[0]; // everything after /api/images/
     if (!objectPath) return res.status(400).json({ error: 'Missing path' });
     const { minioClient, MINIO_BUCKET } = require('./minio');
     const stat = await minioClient.statObject(MINIO_BUCKET, objectPath);
-    if (stat.metaData?.['content-type']) {
-      res.setHeader('Content-Type', stat.metaData['content-type']);
-    }
+    const contentType = stat.metaData?.['content-type'] || 'application/octet-stream';
+    const totalSize = stat.size;
+
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const rangeHeader = req.headers.range;
+    if (rangeHeader && totalSize) {
+      // Parse Range: bytes=start-end
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const requestedEnd = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+        const end = Math.min(requestedEnd, totalSize - 1);
+        if (start >= totalSize || end < start) {
+          res.status(416).setHeader('Content-Range', `bytes */${totalSize}`).end();
+          return;
+        }
+        const chunkSize = end - start + 1;
+        res.status(206);
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+        res.setHeader('Content-Length', chunkSize);
+        const stream = await minioClient.getPartialObject(MINIO_BUCKET, objectPath, start, chunkSize);
+        stream.pipe(res);
+        return;
+      }
+    }
+
+    // Full response
+    res.setHeader('Content-Type', contentType);
+    if (totalSize) res.setHeader('Content-Length', totalSize);
     const stream = await minioClient.getObject(MINIO_BUCKET, objectPath);
     stream.pipe(res);
   } catch (err) {
     if (err.code === 'NoSuchKey' || err.code === 'NotFound') {
       return res.status(404).json({ error: 'Image not found' });
     }
-    console.error('[server] image proxy error:', err);
-    return res.status(500).json({ error: 'Failed to serve image' });
+    console.error('[server] media proxy error:', err);
+    return res.status(500).json({ error: 'Failed to serve media' });
   }
 });
 

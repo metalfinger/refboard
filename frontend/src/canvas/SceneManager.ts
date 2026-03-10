@@ -268,7 +268,15 @@ export class SceneManager {
       case 'video': {
         const vidData = data as VideoObject;
         const videoUrl = this.textures.urlForAsset(vidData.asset);
-        const videoSprite = new VideoSprite(vidData.asset, vidData.w, vidData.h, videoUrl);
+        // Use cached native dimensions if available (avoids re-init just to discover size)
+        const vw = vidData.nativeW || vidData.w;
+        const vh = vidData.nativeH || vidData.h;
+        const videoSprite = new VideoSprite(vidData.asset, vw, vh, videoUrl);
+        // Apply cached native dims to scene data so display matches
+        if (vidData.nativeW && vidData.nativeH) {
+          data.w = vw;
+          data.h = vh;
+        }
         // Auto-correct dimensions when video metadata loads
         // NOTE: callback must update item.data (the stored copy), not the original `data` param.
         // We wire this after the item is created below (see post-creation video wiring).
@@ -330,6 +338,9 @@ export class SceneManager {
       displayObject.onDimensionsKnown = (realW, realH) => {
         item.data.w = realW;
         item.data.h = realH;
+        // Cache native dimensions so future scene loads skip re-init for size
+        (item.data as VideoObject).nativeW = realW;
+        (item.data as VideoObject).nativeH = realH;
         this._onChange?.();
         this._onItemDimensionsChanged?.(item.id);
       };

@@ -138,8 +138,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           syncRef.current?.broadcastTransform(item);
         };
         selection.transformBox.onDragEnd = (itemIds) => {
-          syncRef.current?.broadcastElements(itemIds);
-          onCanvasChange(itemIds);
+          onCanvasChange(itemIds); // broadcasts elements + saves + undo
         };
 
         socket.on('user:joined', (data: any) => {
