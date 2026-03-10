@@ -18,9 +18,66 @@ function scaledH(item: SceneItem): number {
   return item.data.h * item.data.sy;
 }
 
-/** Sync displayObject position from item.data. */
+// ─── Animated position sync ───
+
+let _animTargets = new Map<SceneItem, { startX: number; startY: number; endX: number; endY: number; t: number }>();
+let _animRaf = 0;
+let _animCallback: ((items: SceneItem[]) => void) | null = null;
+const ANIM_DURATION = 320; // ms
+const ANIM_STEP = 1000 / 60;
+
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function _animTick() {
+  const dt = ANIM_STEP / ANIM_DURATION;
+  let done = true;
+
+  for (const [item, anim] of _animTargets) {
+    anim.t = Math.min(1, anim.t + dt);
+    const e = easeOutCubic(anim.t);
+    item.displayObject.position.set(
+      anim.startX + (anim.endX - anim.startX) * e,
+      anim.startY + (anim.endY - anim.startY) * e,
+    );
+    if (anim.t < 1) done = false;
+  }
+
+  if (!done) {
+    _animRaf = requestAnimationFrame(_animTick);
+  } else {
+    // Snap to final positions and clean up
+    for (const [item, anim] of _animTargets) {
+      item.displayObject.position.set(anim.endX, anim.endY);
+    }
+    const items = Array.from(_animTargets.keys());
+    _animTargets.clear();
+    _animRaf = 0;
+    _animCallback?.(items);
+  }
+}
+
+/** Sync displayObject position from item.data with smooth animation. */
 function syncPosition(item: SceneItem): void {
-  item.displayObject.position.set(item.data.x, item.data.y);
+  _animTargets.set(item, {
+    startX: item.displayObject.x,
+    startY: item.displayObject.y,
+    endX: item.data.x,
+    endY: item.data.y,
+    t: 0,
+  });
+  if (!_animRaf) {
+    _animRaf = requestAnimationFrame(_animTick);
+  }
+}
+
+/**
+ * Register a callback that fires once when the current arrangement animation finishes.
+ * Use this to persist/broadcast final positions.
+ */
+export function onArrangeAnimationDone(cb: (items: SceneItem[]) => void): void {
+  _animCallback = cb;
 }
 
 /** Sync displayObject scale from item.data. */

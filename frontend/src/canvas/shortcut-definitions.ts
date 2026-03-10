@@ -99,6 +99,14 @@ async function _pasteInternal(ctx: ShortcutContext): Promise<void> {
   }
   ctx.clipboardRef.current = newItems;
   ctx.scene._applyZOrder();
+
+  // Select the newly pasted items
+  ctx.selection.selectedIds.clear();
+  for (const item of newItems) {
+    ctx.selection.selectedIds.add(item.id);
+  }
+  ctx.selection.transformBox.update(newItems);
+
   ctx.onChange();
 }
 
@@ -107,6 +115,15 @@ function _opUpdate(ctx: ShortcutContext, op: (items: SceneItem[]) => void): void
   const items = ctx.selection.getSelectedItems();
   op(items);
   ctx.selection.transformBox.update(items);
+  ctx.onChange(items.map(i => i.id));
+}
+
+/** Like _opUpdate but defers transformBox update until animation completes */
+function _opUpdateAnimated(ctx: ShortcutContext, op: (items: SceneItem[]) => void): void {
+  const items = ctx.selection.getSelectedItems();
+  const { onArrangeAnimationDone } = require('./operations');
+  onArrangeAnimationDone(() => ctx.selection.transformBox.update(items));
+  op(items);
   ctx.onChange(items.map(i => i.id));
 }
 
@@ -184,27 +201,27 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'arrange-optimal', keys: { key: 'p', ctrl: true, shift: true },
     category: 'arrangement', description: 'Arrange optimal (pack)', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.arrangeOptimal),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.arrangeOptimal),
   },
   {
     id: 'arrange-by-name', keys: { key: 'n', ctrl: true, alt: true },
     category: 'arrangement', description: 'Arrange by name', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.arrangeByName),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.arrangeByName),
   },
   {
     id: 'arrange-by-order', keys: { key: 'o', ctrl: true, alt: true },
     category: 'arrangement', description: 'Arrange by z-order', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.arrangeByZOrder),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.arrangeByZOrder),
   },
   {
     id: 'arrange-random', keys: { key: 'r', ctrl: true, alt: true },
     category: 'arrangement', description: 'Arrange randomly', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.arrangeRandomly),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.arrangeRandomly),
   },
   {
     id: 'stack', keys: { key: 's', ctrl: true, alt: true },
     category: 'arrangement', description: 'Stack (pile on top)', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.stackObjects),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.stackObjects),
   },
 
   // ═══════════════════════════════════════
@@ -322,12 +339,12 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'equal-spacing-h', keys: { key: 'h', ctrl: true, shift: true },
     category: 'arrangement', description: 'Equal horizontal spacing', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.equalSpacingH),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.equalSpacingH),
   },
   {
     id: 'equal-spacing-v', keys: { key: 'v', ctrl: true, shift: true },
     category: 'arrangement', description: 'Equal vertical spacing', needsSelection: true, minSelection: 2,
-    handler: (ctx) => _opUpdate(ctx, ops.equalSpacingV),
+    handler: (ctx) => _opUpdateAnimated(ctx, ops.equalSpacingV),
   },
 
   // ═══════════════════════════════════════

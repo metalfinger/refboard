@@ -1,7 +1,7 @@
 import React from 'react';
 import { Thread } from '../../stores/annotationStore';
 import { getAuthorColor, getAuthorInitial } from '../../utils/authorColors';
-import { relativeTime } from '../../utils/relativeTime';
+import { relativeTime, fullTimestamp } from '../../utils/relativeTime';
 import {
   TEXT_PRIMARY,
   TEXT_SECONDARY,
@@ -26,7 +26,7 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
     <div
       onClick={onClick}
       style={{
-        padding: '10px 14px',
+        padding: '12px 16px',
         borderBottom: `1px solid ${BORDER}`,
         cursor: 'pointer',
         transition: 'background 0.1s ease',
@@ -67,7 +67,7 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
         >
           {firstComment?.author_name || 'Unknown'}
         </span>
-        <span style={{ color: TEXT_MUTED, fontSize: '10px', flexShrink: 0 }}>
+        <span style={{ color: TEXT_MUTED, fontSize: '10px', flexShrink: 0 }} title={fullTimestamp(thread.last_commented_at || thread.created_at)}>
           {relativeTime(thread.last_commented_at || thread.created_at)}
         </span>
       </div>
@@ -89,7 +89,7 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
         </div>
       )}
 
-      {/* Row 3: meta — pin #, replies, status dot */}
+      {/* Row 3: meta — replies, status */}
       <div
         style={{
           display: 'flex',
@@ -99,9 +99,6 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
           marginLeft: '32px',
         }}
       >
-        <span style={{ color: TEXT_MUTED, fontSize: '10px', fontFamily: 'monospace' }}>
-          #{pinNumber}
-        </span>
         {thread.comment_count > 1 && (
           <span style={{ color: TEXT_MUTED, fontSize: '10px' }}>
             {thread.comment_count - 1} {thread.comment_count === 2 ? 'reply' : 'replies'}
@@ -109,13 +106,15 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
         )}
         <span
           style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            background: isResolved ? STATUS_RESOLVED : STATUS_OPEN,
+            fontSize: '10px',
+            fontWeight: 500,
+            color: isResolved ? STATUS_RESOLVED : STATUS_OPEN,
             marginLeft: 'auto',
+            textTransform: 'capitalize',
           }}
-        />
+        >
+          {thread.status}
+        </span>
       </div>
     </div>
   );

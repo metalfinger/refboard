@@ -135,21 +135,25 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           },
         });
 
-        // Wire live drag/resize transforms to sync broadcast (batched for multi-select)
+        // Wire live drag/resize transforms to sync broadcast + pin position update
+        // updatePositions() is the fast path — zero allocations, just position.set()
         selection.onItemsTransform = (items) => {
           syncRef.current?.broadcastTransform(items);
+          pinOverlayRef.current?.updatePositions();
         };
         selection.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
+          pinOverlayRef.current?.updatePositions();
         };
         selection.transformBox.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
+          pinOverlayRef.current?.updatePositions();
         };
         selection.onObjectDragEnd = (itemIds) => {
           onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
         };
         selection.transformBox.onDragEnd = (itemIds) => {
-          onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
+          onCanvasChange(itemIds);
         };
 
         socket.on('user:joined', (data: any) => {
@@ -335,20 +339,19 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         socket.on('comment:delete', (data: any) => {
           annotationStoreRef.current?.onCommentDelete(data.threadId, data.commentId);
         });
-        // ── Pin overlay (hidden by default, shown in Review Mode) ──
+        // ── Pin overlay — separate Container, positions from item.data directly ──
         const pinOverlay = new PinOverlay(viewport, scene, annotationStoreRef.current!);
-        pinOverlay.visible = false;
+        pinOverlay.visible = true;
         viewport.addChild(pinOverlay);
         pinOverlayRef.current = pinOverlay;
 
-        // Refresh overlay on viewport move
+        // Refresh on viewport move (zoom changes scale) and store changes
         const onViewportMoved = () => {
-          if (pinOverlay.visible) pinOverlay.refresh();
+          pinOverlay.refresh();
         };
         viewport.on('moved', onViewportMoved);
-        // Refresh on store change (save unsub for cleanup)
         const unsubPinOverlay = annotationStoreRef.current!.subscribe(() => {
-          if (pinOverlay.visible) pinOverlay.refresh();
+          pinOverlay.refresh();
         });
         (pinOverlay as any)._cleanup = () => {
           viewport.off('moved', onViewportMoved);

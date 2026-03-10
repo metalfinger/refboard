@@ -73,11 +73,13 @@ function IconText() {
   );
 }
 
-function IconEraser() {
+function IconReview() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M6.5 14H14M2 10l4.5-4.5 4 4L6 14H3l-1-1v-3z" strokeLinejoin="round" />
-      <path d="M6.5 5.5L14 2" strokeLinecap="round" />
+      <path d="M2.5 3A1.5 1.5 0 014 1.5h8A1.5 1.5 0 0113.5 3v7A1.5 1.5 0 0112 11.5H7l-3.5 3V11.5H4A1.5 1.5 0 012.5 10V3z" />
+      <circle cx="6" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -118,13 +120,14 @@ function IconLayers() {
   );
 }
 
-const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: string; Icon: React.FC }[] = [
-  { tool: ToolType.SELECT, label: 'Select', shortcut: 'V', numKey: '1', Icon: IconSelect },
-  { tool: ToolType.PAN, label: 'Pan', shortcut: 'H', numKey: '2', Icon: IconPan },
-  { tool: ToolType.PEN, label: 'Draw', shortcut: 'P', numKey: '3', Icon: IconPen },
-  { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText },
-  { tool: ToolType.ERASER, label: 'Eraser', shortcut: 'E', numKey: '5', Icon: IconEraser },
+const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: string; Icon: React.FC; hint?: string }[] = [
+  { tool: ToolType.SELECT, label: 'Select', shortcut: 'V', numKey: '1', Icon: IconSelect, hint: 'Click to select, drag to move, Shift+click for multi-select' },
+  { tool: ToolType.PAN, label: 'Pan', shortcut: 'H', numKey: '2', Icon: IconPan, hint: 'Click and drag to pan the canvas' },
+  { tool: ToolType.PEN, label: 'Draw', shortcut: 'P', numKey: '3', Icon: IconPen, hint: 'Click and drag to draw freehand' },
+  { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText, hint: 'Click on the canvas to place text' },
 ];
+
+const REVIEW_HINT = 'Click an image to leave a comment. Press . to toggle.';
 
 export default function Toolbar({
   activeTool,
@@ -158,26 +161,30 @@ export default function Toolbar({
   const showStroke = activeTool === ToolType.PEN;
   const showFontSize = activeTool === ToolType.TEXT;
 
+  // Determine active hint
+  const activeToolDef = toolButtons.find((t) => t.tool === activeTool);
+  const activeHint = reviewMode ? REVIEW_HINT : activeToolDef?.hint || '';
+
   return (
+    <div style={{ flexShrink: 0 }}>
     <div style={{
       display: 'flex',
       alignItems: 'center',
       gap: '2px',
       padding: '4px 8px',
       background: '#1a1a1a',
-      borderBottom: '1px solid #2a2a2a',
-      flexShrink: 0,
+      borderBottom: activeHint ? 'none' : '1px solid #2a2a2a',
       height: '44px',
       boxSizing: 'border-box',
     }}>
       {/* Tool buttons */}
       <div style={{ display: 'flex', gap: '1px', background: '#222', borderRadius: '8px', padding: '2px' }}>
         {toolButtons.map(({ tool, label, shortcut, numKey, Icon }) => {
-          const active = activeTool === tool;
+          const active = activeTool === tool && !reviewMode;
           return (
             <button
               key={tool}
-              onClick={() => onToolChange(tool)}
+              onClick={() => { onToolChange(tool); if (reviewMode && onToggleReview) onToggleReview(); }}
               title={`${label} (${shortcut} or ${numKey})`}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -205,6 +212,36 @@ export default function Toolbar({
             </button>
           );
         })}
+        {/* Review mode — in tool group */}
+        {onToggleReview && (
+          <button
+            onClick={onToggleReview}
+            title="Review (.)"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: '4px', height: '32px', padding: '0 10px',
+              background: reviewMode ? 'linear-gradient(135deg, #f97316, #ea580c)' : 'transparent',
+              border: 'none', borderRadius: '6px',
+              color: reviewMode ? '#fff' : '#777',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              boxShadow: reviewMode ? '0 1px 4px rgba(249,115,22,0.3)' : 'none',
+            }}
+            onMouseEnter={(e) => { if (!reviewMode) { e.currentTarget.style.background = '#2a2a2a'; e.currentTarget.style.color = '#bbb'; } }}
+            onMouseLeave={(e) => { if (!reviewMode) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#777'; } }}
+          >
+            <IconReview />
+            <span style={{ fontSize: '11px', fontWeight: reviewMode ? 600 : 400, letterSpacing: '0.2px' }}>Review</span>
+            <span style={{
+              fontSize: '9px', color: reviewMode ? 'rgba(255,255,255,0.5)' : '#555',
+              background: reviewMode ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
+              padding: '1px 4px', borderRadius: '3px', fontWeight: 500,
+              lineHeight: '14px', minWidth: '14px', textAlign: 'center',
+            }}>
+              .
+            </span>
+          </button>
+        )}
       </div>
 
       <Divider />
@@ -313,15 +350,6 @@ export default function Toolbar({
         </ActionBtn>
       )}
 
-      {/* Review / Feedback */}
-      {onToggleReview && (
-        <ActionBtn onClick={onToggleReview} title="Review Mode (.)" active={reviewMode}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <path d="M2 2.5A1.5 1.5 0 013.5 1h7A1.5 1.5 0 0112 2.5v6A1.5 1.5 0 0110.5 10H6l-3 3v-3H3.5A1.5 1.5 0 012 8.5v-6z" />
-          </svg>
-        </ActionBtn>
-      )}
-
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
@@ -369,6 +397,21 @@ export default function Toolbar({
           Share
         </button>
       )}
+    </div>
+    {/* Tool hint bar */}
+    {activeHint && (
+      <div style={{
+        padding: '4px 16px',
+        background: '#141416',
+        borderBottom: '1px solid #2a2a2a',
+        fontSize: '11px',
+        color: '#666',
+        letterSpacing: '0.2px',
+        lineHeight: '16px',
+      }}>
+        {activeHint}
+      </div>
+    )}
     </div>
   );
 }

@@ -249,8 +249,8 @@ export class SelectionManager {
         // Lift shadow + spring scale on all selected image sprites
         this._applyLift();
 
-        // Begin snap guide session
-        this._snapGuides.beginSession(this.selectedIds);
+        // Snap guides disabled — users found it annoying
+        // this._snapGuides.beginSession(this.selectedIds);
       }
 
       if (this._objectDragging) {
@@ -266,11 +266,11 @@ export class SelectionManager {
         prospective.x += ddx;
         prospective.y += ddy;
 
-        // Snap to alignment guides
-        const snap = this._snapGuides.computeSnap(prospective, this._viewport);
-        ddx += snap.dx;
-        ddy += snap.dy;
-        this._snapGuides.drawGuides(snap.guides, this._viewport);
+        // Snap guides disabled
+        // const snap = this._snapGuides.computeSnap(prospective, this._viewport);
+        // ddx += snap.dx;
+        // ddy += snap.dy;
+        // this._snapGuides.drawGuides(snap.guides, this._viewport);
 
         // Move all selected items by corrected delta and broadcast all together
         for (const item of selected) {
@@ -311,7 +311,7 @@ export class SelectionManager {
     if (this._objectDragging) {
       // End object drag — drop shadow + spring scale back
       this._applyDrop();
-      this._snapGuides.endSession();
+      // this._snapGuides.endSession();
       this._objectDragging = false;
 
       // Resume viewport drag

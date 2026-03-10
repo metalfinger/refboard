@@ -3,13 +3,14 @@ import { Thread, AnnotationStore } from '../../stores/annotationStore';
 import ThreadListItem from './ThreadListItem';
 import CommentInput from './CommentInput';
 import {
-  PANEL_BG,
-  PANEL_WIDTH,
+  panelContainerStyle,
   BORDER,
   TEXT_PRIMARY,
+  TEXT_SECONDARY,
   TEXT_MUTED,
   STATUS_OPEN,
   FILTER_ACTIVE_BG,
+  ACCENT,
 } from './feedbackStyles';
 
 export type FilterType = 'open' | 'resolved' | 'all' | 'mine';
@@ -23,7 +24,6 @@ interface ThreadListProps {
   onFilterChange: (f: FilterType) => void;
   onSelectThread: (id: string) => void;
   onCollapse: () => void;
-  // New comment
   selectedObjectId: string | null;
   selectedObjectLabel: string;
   newCommentText: string;
@@ -49,32 +49,21 @@ export default function ThreadList({
   const [showOrphans, setShowOrphans] = React.useState(false);
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: `${PANEL_WIDTH}px`,
-        background: PANEL_BG,
-        borderLeft: `1px solid ${BORDER}`,
-        zIndex: 100,
-        display: 'flex',
-        flexDirection: 'column',
-        userSelect: 'none',
-      }}
-    >
+    <div style={panelContainerStyle}>
       {/* Header */}
       <div
         style={{
-          padding: '12px 14px',
+          padding: '14px 16px',
           borderBottom: `1px solid ${BORDER}`,
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
+          gap: '10px',
         }}
       >
-        <span style={{ color: TEXT_PRIMARY, fontSize: '14px', fontWeight: 600, flex: 1 }}>
+        <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke={TEXT_SECONDARY} strokeWidth="1.2" style={{ flexShrink: 0 }}>
+          <path d="M2 2.5A1.5 1.5 0 013.5 1h7A1.5 1.5 0 0112 2.5v6A1.5 1.5 0 0110.5 10H6l-3 3v-3H3.5A1.5 1.5 0 012 8.5v-6z" />
+        </svg>
+        <span style={{ color: TEXT_PRIMARY, fontSize: '13px', fontWeight: 600, flex: 1, letterSpacing: '0.3px' }}>
           Feedback
         </span>
         {openCount > 0 && (
@@ -82,12 +71,13 @@ export default function ThreadList({
             style={{
               background: STATUS_OPEN,
               color: '#fff',
-              fontSize: '11px',
-              fontWeight: 600,
-              padding: '1px 7px',
+              fontSize: '10px',
+              fontWeight: 700,
+              padding: '2px 7px',
               borderRadius: '10px',
               minWidth: '18px',
               textAlign: 'center',
+              lineHeight: '14px',
             }}
           >
             {openCount}
@@ -102,8 +92,12 @@ export default function ThreadList({
             cursor: 'pointer',
             fontSize: '16px',
             lineHeight: 1,
-            padding: '2px',
+            padding: '2px 4px',
+            borderRadius: '4px',
+            transition: 'color 0.1s',
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = TEXT_PRIMARY)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_MUTED)}
         >
           &times;
         </button>
@@ -112,10 +106,10 @@ export default function ThreadList({
       {/* Filter bar */}
       <div
         style={{
-          padding: '8px 14px',
+          padding: '8px 16px',
           borderBottom: `1px solid ${BORDER}`,
           display: 'flex',
-          gap: '6px',
+          gap: '4px',
         }}
       >
         {(['open', 'resolved', 'all', 'mine'] as const).map((f) => (
@@ -124,15 +118,16 @@ export default function ThreadList({
             onClick={() => onFilterChange(f)}
             style={{
               background: filter === f ? FILTER_ACTIVE_BG : 'transparent',
-              border: 'none',
+              border: filter === f ? `1px solid ${BORDER}` : '1px solid transparent',
               borderRadius: '6px',
-              color: filter === f ? '#fff' : TEXT_MUTED,
+              color: filter === f ? TEXT_PRIMARY : TEXT_MUTED,
               padding: '4px 10px',
               cursor: 'pointer',
               fontSize: '11px',
               fontWeight: filter === f ? 600 : 400,
               textTransform: 'capitalize',
-              transition: 'all 0.1s ease',
+              transition: 'all 0.15s ease',
+              lineHeight: '16px',
             }}
           >
             {f}
@@ -142,9 +137,12 @@ export default function ThreadList({
 
       {/* New comment input (when object selected) */}
       {selectedObjectId && (
-        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${BORDER}` }}>
-          <div style={{ color: TEXT_MUTED, fontSize: '10px', marginBottom: '6px' }}>
-            Comment on: <span style={{ color: TEXT_PRIMARY }}>{selectedObjectLabel}</span>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BORDER}`, background: 'rgba(74, 158, 255, 0.03)' }}>
+          <div style={{ color: TEXT_MUTED, fontSize: '10px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Comment on
+          </div>
+          <div style={{ color: TEXT_PRIMARY, fontSize: '12px', marginBottom: '10px', fontWeight: 500 }}>
+            {selectedObjectLabel}
           </div>
           <CommentInput
             value={newCommentText}
@@ -157,24 +155,23 @@ export default function ThreadList({
       )}
 
       {/* Thread list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2a2a2e transparent' }}>
         {threads.length === 0 && (
-          <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="#333"
-              strokeWidth="1"
-              style={{ marginBottom: '12px' }}
-            >
-              <path d="M2 2.5A1.5 1.5 0 013.5 1h7A1.5 1.5 0 0112 2.5v6A1.5 1.5 0 0110.5 10H6l-3 3v-3H3.5A1.5 1.5 0 012 8.5v-6z" />
-            </svg>
-            <div style={{ color: TEXT_MUTED, fontSize: '12px', lineHeight: 1.5 }}>
+          <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+            <div style={{
+              width: '48px', height: '48px', borderRadius: '50%',
+              background: 'rgba(74, 158, 255, 0.06)', border: `1px solid rgba(74, 158, 255, 0.1)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 16px',
+            }}>
+              <svg width="20" height="20" viewBox="0 0 14 14" fill="none" stroke={TEXT_MUTED} strokeWidth="1">
+                <path d="M2 2.5A1.5 1.5 0 013.5 1h7A1.5 1.5 0 0112 2.5v6A1.5 1.5 0 0110.5 10H6l-3 3v-3H3.5A1.5 1.5 0 012 8.5v-6z" />
+              </svg>
+            </div>
+            <div style={{ color: TEXT_MUTED, fontSize: '12px', lineHeight: 1.6 }}>
               {selectedObjectId
                 ? 'No comments on this item.'
-                : 'No comments yet.\nSelect an image and add a comment.'}
+                : <>No comments yet.<br /><span style={{ color: TEXT_SECONDARY }}>Select an image to leave feedback.</span></>}
             </div>
           </div>
         )}
@@ -193,14 +190,14 @@ export default function ThreadList({
             <div
               onClick={() => setShowOrphans(!showOrphans)}
               style={{
-                padding: '10px 14px',
+                padding: '10px 16px',
                 cursor: 'pointer',
                 color: TEXT_MUTED,
                 fontSize: '11px',
                 borderTop: `1px solid ${BORDER}`,
-                transition: 'background 0.1s ease',
+                transition: 'background 0.15s ease',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#151515')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#16161a')}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             >
               {showOrphans ? '\u25BE' : '\u25B8'} Deleted items ({orphanedThreads.length})

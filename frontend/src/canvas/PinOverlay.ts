@@ -2,63 +2,64 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { AnnotationStore } from '../stores/annotationStore';
 import type { SceneManager } from './SceneManager';
+import { getItemWorldBounds } from './SceneManager';
 import { getAuthorColorHex, getAuthorInitial } from '../utils/authorColors';
 
-const PIN_RADIUS = 12;
+const PIN_RADIUS = 11;
 const PIN_COLOR_RESOLVED = 0x555555;
+const TAIL_WIDTH = 6;
+const TAIL_HEIGHT = 8;
 
-// Tail direction: 225° (down-left) in standard math coords.
-// In PixiJS screen coords (+y down), 225° maps to:
-//   cos(225°) = -√2/2  (left)
-//   sin(225°) = +√2/2  (down, because +y is down in screen space)
-// So the circle center is offset UP-RIGHT from the anchor tip:
-//   cx_offset = +r * √2/2,  cy_offset = -r * √2/2
-const SIN45 = Math.SQRT1_2; // √2/2 ≈ 0.7071
+function drawBubble(gfx: Graphics, r: number, color: number, alpha: number, scale: number): void {
+  const padding = r * 0.3;
+  const bubbleW = r * 2 + padding * 2;
+  const bubbleH = r * 2 + padding;
+  const cornerR = r * 0.4;
+  const tailW = TAIL_WIDTH * scale;
+  const tailH = TAIL_HEIGHT * scale;
+  const bx = -bubbleW / 2;
+  const by = -tailH - bubbleH;
 
-/**
- * Draws a Figma-style teardrop pin whose tip lands at (0, 0).
- * The circle body is offset up-right; the tail points down-left to (0,0).
- *
- * @param gfx     Graphics object (drawn in its own local space, tip = origin)
- * @param r       Pin radius (already scaled to world space)
- * @param color   Fill color (0xRRGGBB)
- * @param alpha   Fill alpha
- */
-function drawTeardrop(gfx: Graphics, r: number, color: number, alpha: number): void {
-  // Circle center relative to tip
-  const cx = r * SIN45;
-  const cy = -r * SIN45;
-
-  // Half-angle of the tail aperture from the tip (in radians).
-  // Controls how wide/sharp the tail looks. ~20° gives a nice taper.
-  const tailHalfAngle = (20 * Math.PI) / 180;
-
-  // Angle from circle center toward tip = 225° in screen coords
-  const tipAngle = (225 * Math.PI) / 180;
-
-  // The two "wing" angles on the circle where the tail edges start
-  const wingAngle1 = tipAngle - tailHalfAngle;
-  const wingAngle2 = tipAngle + tailHalfAngle;
-
-  // Build the teardrop as a single filled path:
-  // start at wing1 on circle → arc around (the "long way" CCW past top) → wing2 → line to tip → close
-  gfx.moveTo(cx + r * Math.cos(wingAngle1), cy + r * Math.sin(wingAngle1));
-  // Arc from wingAngle1 to wingAngle2 going CCW (counterclockwise = increasing angle in screen space)
-  // "long way" means going through the top of the circle (not through 225°).
-  // In PixiJS, arc() takes (cx, cy, r, startAngle, endAngle, anticlockwise).
-  // We want the arc that does NOT pass through 225°, so go anticlockwise from wingAngle1 to wingAngle2.
-  gfx.arc(cx, cy, r, wingAngle1, wingAngle2, true);
-  gfx.lineTo(0, 0); // tip at anchor
+  gfx.roundRect(bx, by, bubbleW, bubbleH, cornerR);
+  gfx.fill({ color, alpha });
+  gfx.moveTo(-tailW, -tailH);
+  gfx.lineTo(0, 0);
+  gfx.lineTo(tailW, -tailH);
   gfx.closePath();
   gfx.fill({ color, alpha });
+  gfx.roundRect(bx, by, bubbleW, bubbleH, cornerR);
+  gfx.stroke({ color: 0xffffff, width: 1.2 * scale, alpha: alpha * 0.5 });
 }
 
+// Shared TextStyle to avoid recreating per pin
+const sharedStyle = new TextStyle({
+  fill: '#ffffff',
+  fontWeight: 'bold',
+  fontFamily: 'Inter, system-ui, sans-serif',
+});
+
+interface PinData {
+  container: Container;
+  gfx: Graphics;
+  initialText: Text;
+  badge: Graphics | null;
+  badgeText: Text | null;
+  version: string; // tracks thread data changes
+}
+
+/**
+ * PinOverlay — comment bubbles in a separate overlay Container.
+ *
+ * Position: uses getItemWorldBounds() which reads item.data.x/y (always current).
+ * Visuals: Graphics redrawn in-place (clear + redraw), Text objects reused.
+ * No objects are created or destroyed during drag — only position.set() calls.
+ */
 export class PinOverlay extends Container {
-  private _pins = new Map<string, Container>();
-  private _pool: Container[] = [];
+  private _pins = new Map<string, PinData>();
   private _viewport: Viewport;
   private _scene: SceneManager;
   private _store: AnnotationStore;
+  private _lastScale = -1;
 
   constructor(viewport: Viewport, scene: SceneManager, store: AnnotationStore) {
     super();
@@ -67,124 +68,212 @@ export class PinOverlay extends Container {
     this._store = store;
   }
 
-  private _acquire(): Container {
-    const c = this._pool.pop() || new Container();
-    c.removeChildren();
-    c.visible = true;
-    c.eventMode = 'none';
-    c.cursor = 'default';
-    return c;
+  private _threadVersion(t: { status: string; created_by: string; comment_count: number }): string {
+    return `${t.status}|${t.created_by}|${t.comment_count}`;
   }
 
-  private _release(c: Container) {
-    c.visible = false;
-    this._pool.push(c);
+  private _getAnchorWorld(thread: { object_id: string; anchor_type: string; pin_x: number | null; pin_y: number | null }): { x: number; y: number } | null {
+    const item = this._scene.items.get(thread.object_id);
+    if (!item) return null;
+    const b = getItemWorldBounds(item);
+    if (thread.anchor_type === 'point' && thread.pin_x != null && thread.pin_y != null) {
+      return { x: b.x + thread.pin_x * b.w, y: b.y + thread.pin_y * b.h };
+    }
+    return { x: b.x + b.w * 0.9, y: b.y };
   }
 
-  /** Call on every viewport moved/zoomed event and on store change */
+  /**
+   * Fast path: only update positions. Called during drag.
+   * Zero allocations, zero texture work.
+   */
+  updatePositions() {
+    for (const [threadId, entry] of this._pins) {
+      const thread = this._store.threads.get(threadId);
+      if (!thread) continue;
+      const pos = this._getAnchorWorld(thread);
+      if (pos) {
+        entry.container.position.set(pos.x, pos.y);
+      }
+    }
+  }
+
+  /**
+   * Full refresh: sync pins with store, rebuild visuals on zoom/data change.
+   * Call on zoom, store change, or scene change — NOT during drag (use updatePositions).
+   */
   refresh(showResolved = false) {
     const scale = 1 / this._viewport.scale.x;
-
-    // Return current pins to pool
-    for (const c of this._pins.values()) this._release(c);
-    this._pins.clear();
+    const scaleChanged = Math.abs(scale - this._lastScale) > 0.0001;
+    this._lastScale = scale;
 
     const r = PIN_RADIUS * scale;
+    const active = new Set<string>();
 
     for (const thread of this._store.threads.values()) {
       if (thread.status === 'resolved' && !showResolved) continue;
 
-      const item = this._scene.items.get(thread.object_id);
-      if (!item || !item.displayObject) continue;
+      const pos = this._getAnchorWorld(thread);
+      if (!pos) continue;
 
-      const bounds = item.displayObject.getBounds();
-      let wx: number, wy: number;
+      active.add(thread.id);
+      const version = this._threadVersion(thread);
+      const existing = this._pins.get(thread.id);
 
-      if (thread.anchor_type === 'point' && thread.pin_x != null && thread.pin_y != null) {
-        wx = bounds.x + thread.pin_x * bounds.width;
-        wy = bounds.y + thread.pin_y * bounds.height;
-      } else {
-        // Default: top-right corner of object bounds
-        wx = bounds.x + bounds.width;
-        wy = bounds.y;
+      if (existing) {
+        existing.container.position.set(pos.x, pos.y);
+
+        if (existing.version !== version || scaleChanged) {
+          this._updateVisuals(existing, thread, r, scale);
+          existing.version = version;
+        }
+        continue;
       }
 
-      const isResolved = thread.status === 'resolved';
-      const fillColor = isResolved ? PIN_COLOR_RESOLVED : getAuthorColorHex(thread.created_by);
-      const fillAlpha = isResolved ? 0.5 : 1.0;
-
-      // Container whose origin = anchor tip
-      const pin = this._acquire();
-      pin.position.set(wx, wy);
-      pin.eventMode = 'static';
-      pin.cursor = 'pointer';
-      (pin as any)._threadId = thread.id;
-
-      // ── Teardrop body ──
-      const gfx = new Graphics();
-      drawTeardrop(gfx, r, fillColor, fillAlpha);
-      // White stroke around the circle part only (drawn as a separate circle stroke)
-      gfx.circle(r * SIN45, -r * SIN45, r);
-      gfx.stroke({ color: 0xffffff, width: 1.5 * scale, alpha: isResolved ? 0.4 : 0.85 });
-      pin.addChild(gfx);
-
-      // ── Author initial ──
-      const authorName = thread.comments[0]?.author_name ?? '';
-      const initial = getAuthorInitial(authorName);
-      const initialText = new Text({
-        text: initial,
-        style: new TextStyle({
-          fontSize: r * 1.1,
-          fill: '#ffffff',
-          fontWeight: 'bold',
-          fontFamily: 'Inter, system-ui, sans-serif',
-        }),
-      });
-      initialText.anchor.set(0.5);
-      // Center on the circle body
-      initialText.position.set(r * SIN45, -r * SIN45);
-      pin.addChild(initialText);
-
-      // ── Pin number label (#N) ──
-      const pinNum = this._store.getPinNumber(thread.id);
-      const numLabel = new Text({
-        text: `#${pinNum}`,
-        style: new TextStyle({
-          fontSize: r * 0.75,
-          fill: '#ffffff',
-          fontWeight: 'bold',
-          fontFamily: 'Inter, system-ui, sans-serif',
-          dropShadow: {
-            color: '#000000',
-            blur: 2 * scale,
-            distance: 0,
-            alpha: 0.6,
-          },
-        }),
-      });
-      numLabel.anchor.set(0, 1);
-      // Place just to the right of the circle top
-      numLabel.position.set(r * SIN45 + r * 1.1, -r * SIN45 - r * 0.9);
-      pin.addChild(numLabel);
-
-      if (!pin.parent) this.addChild(pin);
-      this._pins.set(thread.id, pin);
+      // Create new pin — only happens on store change, never during drag
+      const entry = this._createPin(thread, r, scale, pos);
+      this._pins.set(thread.id, entry);
     }
+
+    // Remove pins whose threads are gone
+    for (const [id, entry] of this._pins) {
+      if (!active.has(id)) {
+        this._destroyPin(entry);
+        this._pins.delete(id);
+      }
+    }
+  }
+
+  private _createPin(thread: any, r: number, scale: number, pos: { x: number; y: number }): PinData {
+    const container = new Container();
+    container.position.set(pos.x, pos.y);
+    container.eventMode = 'static';
+    container.cursor = 'pointer';
+    (container as any)._threadId = thread.id;
+
+    const gfx = new Graphics();
+    container.addChild(gfx);
+
+    const initialText = new Text({ text: '', style: sharedStyle.clone() });
+    initialText.anchor.set(0.5);
+    container.addChild(initialText);
+
+    const badge = new Graphics();
+    badge.visible = false;
+    container.addChild(badge);
+
+    const badgeText = new Text({ text: '', style: sharedStyle.clone() });
+    badgeText.anchor.set(0.5);
+    badgeText.visible = false;
+    container.addChild(badgeText);
+
+    const entry: PinData = { container, gfx, initialText, badge, badgeText, version: '' };
+    this._updateVisuals(entry, thread, r, scale);
+    entry.version = this._threadVersion(thread);
+
+    this.addChild(container);
+
+    // Entrance animation
+    container.alpha = 0;
+    container.scale.set(0.6);
+    this._animateEntrance(container);
+
+    return entry;
+  }
+
+  /**
+   * Update visuals IN PLACE — no object creation or destruction.
+   * Graphics are cleared and redrawn. Text content/style updated.
+   */
+  private _updateVisuals(entry: PinData, thread: any, r: number, scale: number) {
+    const isResolved = thread.status === 'resolved';
+    const fillColor = isResolved ? PIN_COLOR_RESOLVED : getAuthorColorHex(thread.created_by);
+    const fillAlpha = isResolved ? 0.45 : 0.92;
+
+    // Redraw bubble — clear() keeps the same GPU buffer
+    entry.gfx.clear();
+    drawBubble(entry.gfx, r, fillColor, fillAlpha, scale);
+
+    // Update initial text
+    const authorName = thread.comments[0]?.author_name ?? '';
+    const initial = getAuthorInitial(authorName);
+    const tailH = TAIL_HEIGHT * scale;
+    const bubbleH = r * 2 + r * 0.3;
+    const bubbleCenterY = -tailH - bubbleH / 2;
+
+    entry.initialText.text = initial;
+    entry.initialText.style.fontSize = r * 1.05;
+    entry.initialText.position.set(0, bubbleCenterY);
+
+    // Update badge
+    if (thread.comment_count > 1) {
+      const padding = r * 0.3;
+      const bubbleW = r * 2 + padding * 2;
+      const badgeR = r * 0.45;
+      const badgeX = bubbleW / 2 - badgeR * 0.5;
+      const badgeY = -tailH - bubbleH + badgeR * 0.5;
+
+      entry.badge!.clear();
+      entry.badge!.circle(badgeX, badgeY, badgeR);
+      entry.badge!.fill({ color: 0x000000, alpha: 0.6 });
+      entry.badge!.circle(badgeX, badgeY, badgeR);
+      entry.badge!.stroke({ color: 0xffffff, width: 0.8 * scale, alpha: 0.5 });
+      entry.badge!.visible = true;
+
+      entry.badgeText!.text = `${thread.comment_count}`;
+      entry.badgeText!.style.fontSize = r * 0.55;
+      entry.badgeText!.position.set(badgeX, badgeY);
+      entry.badgeText!.visible = true;
+    } else {
+      entry.badge!.visible = false;
+      entry.badgeText!.visible = false;
+    }
+  }
+
+  private _destroyPin(entry: PinData) {
+    if (!entry.container.destroyed) {
+      entry.container.destroy({ children: true });
+    }
+  }
+
+  private _animateEntrance(pin: Container) {
+    const tick = () => {
+      if (pin.destroyed) return;
+      let done = true;
+      if (pin.alpha < 0.99) {
+        pin.alpha += (1 - pin.alpha) * 0.3;
+        done = false;
+      } else {
+        pin.alpha = 1;
+      }
+      const s = pin.scale.x;
+      if (s < 0.99) {
+        pin.scale.set(s + (1 - s) * 0.3);
+        done = false;
+      } else {
+        pin.scale.set(1);
+      }
+      if (!done) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   getThreadIdAtPoint(worldX: number, worldY: number): string | null {
     const scale = 1 / this._viewport.scale.x;
     const r = PIN_RADIUS * scale;
-    // Hit-test against the circle body of each pin (not the tail tip)
-    const cx_off = r * SIN45;
-    const cy_off = -r * SIN45;
+    const tailH = TAIL_HEIGHT * scale;
+    const bubbleH = r * 2 + r * 0.3;
 
-    for (const [threadId, pin] of this._pins) {
-      const circleCx = pin.position.x + cx_off;
-      const circleCy = pin.position.y + cy_off;
-      const dx = circleCx - worldX;
-      const dy = circleCy - worldY;
-      if (dx * dx + dy * dy <= r * r) {
+    for (const [threadId, entry] of this._pins) {
+      const bx = entry.container.position.x;
+      const by = entry.container.position.y;
+      const halfW = r + r * 0.3;
+
+      if (
+        worldX >= bx - halfW &&
+        worldX <= bx + halfW &&
+        worldY >= by - tailH - bubbleH &&
+        worldY <= by
+      ) {
         return threadId;
       }
     }
@@ -192,10 +281,10 @@ export class PinOverlay extends Container {
   }
 
   override destroy(options?: any) {
-    for (const c of this._pins.values()) c.destroy({ children: true });
-    for (const c of this._pool) c.destroy({ children: true });
+    for (const entry of this._pins.values()) {
+      this._destroyPin(entry);
+    }
     this._pins.clear();
-    this._pool = [];
     super.destroy(options);
   }
 }

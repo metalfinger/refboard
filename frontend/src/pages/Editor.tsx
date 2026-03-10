@@ -176,27 +176,26 @@ export default function Editor({ isPublicView }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
 
-  // Toggle pin overlay visibility with review mode + wire pin clicks
+  // Pins are always visible; review mode just controls the panel + click-to-comment
   useEffect(() => {
     if (!pinOverlay) return;
-    pinOverlay.visible = reviewMode;
-    if (reviewMode) pinOverlay.refresh();
+    pinOverlay.visible = true;
+    pinOverlay.refresh();
 
-    // Pin click → expand thread in panel
+    // Pin click → expand thread in panel (listen on viewport since pins are item children)
+    const vp = canvasRef.current?.getViewport();
+    if (!vp) return;
     const onClick = (e: any) => {
-      const vp = canvasRef.current?.getViewport();
-      if (!vp) return;
       const worldPos = vp.toWorld(e.global);
       const threadId = pinOverlay.getThreadIdAtPoint(worldPos.x, worldPos.y);
       if (threadId) {
+        if (!reviewMode) setReviewMode(true);
         setFocusedThreadId(threadId);
-        // Reset so it can be triggered again for the same pin
         requestAnimationFrame(() => setFocusedThreadId(null));
       }
     };
-    pinOverlay.eventMode = 'static';
-    pinOverlay.on('pointerdown', onClick);
-    return () => { pinOverlay.off('pointerdown', onClick); };
+    vp.on('pointerdown', onClick);
+    return () => { vp.off('pointerdown', onClick); };
   }, [reviewMode, pinOverlay]);
 
   // Tool activation
@@ -386,8 +385,9 @@ export default function Editor({ isPublicView }: EditorProps) {
       });
     }
 
-    // Refresh annotation pins so they follow transforms
-    if (pinOverlay?.visible) pinOverlay.refresh();
+    // Pin positions follow media automatically (children of displayObjects).
+    // Only refresh on zoom to update counter-scale.
+    pinOverlay?.refresh();
   }, [pinOverlay]);
 
   // Listen to viewport moved event for overlay updates (throttled)

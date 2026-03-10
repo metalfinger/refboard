@@ -3,12 +3,13 @@ import { Thread, AnnotationStore } from '../../stores/annotationStore';
 import CommentItem from './CommentItem';
 import CommentInput from './CommentInput';
 import {
-  PANEL_BG,
-  PANEL_WIDTH,
+  panelContainerStyle,
   BORDER,
   TEXT_PRIMARY,
+  TEXT_SECONDARY,
   TEXT_MUTED,
   ACCENT,
+  HOVER_BG,
   STATUS_OPEN,
   STATUS_RESOLVED,
 } from './feedbackStyles';
@@ -58,25 +59,11 @@ export default function ThreadDetail({
   };
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: `${PANEL_WIDTH}px`,
-        background: PANEL_BG,
-        borderLeft: `1px solid ${BORDER}`,
-        zIndex: 100,
-        display: 'flex',
-        flexDirection: 'column',
-        userSelect: 'none',
-      }}
-    >
+    <div style={panelContainerStyle}>
       {/* Header */}
       <div
         style={{
-          padding: '10px 14px',
+          padding: '14px 16px',
           borderBottom: `1px solid ${BORDER}`,
           display: 'flex',
           alignItems: 'center',
@@ -90,13 +77,17 @@ export default function ThreadDetail({
             border: 'none',
             color: TEXT_MUTED,
             cursor: 'pointer',
-            fontSize: '14px',
-            padding: '2px',
+            fontSize: '16px',
+            padding: '2px 4px',
+            borderRadius: '4px',
+            transition: 'color 0.1s',
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = TEXT_PRIMARY)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_MUTED)}
         >
           &larr;
         </button>
-        <span style={{ color: TEXT_MUTED, fontSize: '11px', fontFamily: 'monospace' }}>
+        <span style={{ color: TEXT_SECONDARY, fontSize: '11px', fontFamily: 'monospace', fontWeight: 500 }}>
           #{pinNumber}
         </span>
         <span
@@ -105,8 +96,9 @@ export default function ThreadDetail({
             fontWeight: 600,
             padding: '2px 8px',
             borderRadius: '10px',
-            background: isOpen ? '#2a1515' : '#152a15',
+            background: isOpen ? 'rgba(240, 72, 72, 0.1)' : 'rgba(52, 210, 123, 0.1)',
             color: isOpen ? STATUS_OPEN : STATUS_RESOLVED,
+            letterSpacing: '0.3px',
           }}
         >
           {isOpen ? 'Open' : 'Resolved'}
@@ -116,12 +108,17 @@ export default function ThreadDetail({
           <button
             onClick={() => onJumpToObject(thread.object_id)}
             style={{
-              background: 'none',
-              border: 'none',
+              background: 'rgba(74, 158, 255, 0.08)',
+              border: `1px solid rgba(74, 158, 255, 0.15)`,
+              borderRadius: '6px',
               color: ACCENT,
               cursor: 'pointer',
               fontSize: '11px',
+              padding: '4px 10px',
+              transition: 'all 0.15s ease',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(74, 158, 255, 0.15)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(74, 158, 255, 0.08)')}
           >
             Jump
           </button>
@@ -130,14 +127,18 @@ export default function ThreadDetail({
           <button
             onClick={() => onResolve(thread.id, 'resolved')}
             style={{
-              background: '#152a15',
-              border: 'none',
+              background: 'rgba(52, 210, 123, 0.1)',
+              border: `1px solid rgba(52, 210, 123, 0.15)`,
               borderRadius: '6px',
               color: STATUS_RESOLVED,
               padding: '4px 10px',
               cursor: 'pointer',
               fontSize: '11px',
+              fontWeight: 500,
+              transition: 'all 0.15s ease',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(52, 210, 123, 0.18)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(52, 210, 123, 0.1)')}
           >
             Resolve
           </button>
@@ -145,14 +146,18 @@ export default function ThreadDetail({
           <button
             onClick={() => onResolve(thread.id, 'open')}
             style={{
-              background: '#1a1a2a',
-              border: 'none',
+              background: 'rgba(74, 158, 255, 0.08)',
+              border: `1px solid rgba(74, 158, 255, 0.15)`,
               borderRadius: '6px',
-              color: '#88f',
+              color: ACCENT,
               padding: '4px 10px',
               cursor: 'pointer',
               fontSize: '11px',
+              fontWeight: 500,
+              transition: 'all 0.15s ease',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(74, 158, 255, 0.15)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(74, 158, 255, 0.08)')}
           >
             Reopen
           </button>
@@ -194,11 +199,16 @@ export default function ThreadDetail({
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#633',
+                color: TEXT_MUTED,
                 cursor: 'pointer',
-                fontSize: '13px',
-                padding: '2px',
+                fontSize: '14px',
+                padding: '2px 4px',
+                borderRadius: '4px',
+                opacity: 0.6,
+                transition: 'all 0.1s',
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = STATUS_OPEN; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.color = TEXT_MUTED; }}
               title="Delete thread"
             >
               &times;
@@ -207,7 +217,7 @@ export default function ThreadDetail({
       </div>
 
       {/* Comments */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px', scrollbarWidth: 'thin', scrollbarColor: '#2a2a2e transparent' }}>
         {thread.comments.map((c) => (
           <CommentItem
             key={c.id}
@@ -219,7 +229,7 @@ export default function ThreadDetail({
       </div>
 
       {/* Reply input */}
-      <div style={{ padding: '10px 14px', borderTop: `1px solid ${BORDER}` }}>
+      <div style={{ padding: '12px 16px', borderTop: `1px solid ${BORDER}` }}>
         <CommentInput
           value={replyText}
           onChange={setReplyText}

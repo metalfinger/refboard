@@ -9,6 +9,7 @@ import type { Viewport } from 'pixi-viewport';
 import type { GroupObject } from './scene-format';
 import { FrameSprite } from './sprites/FrameSprite';
 import * as ops from './operations';
+import { onArrangeAnimationDone } from './operations';
 
 export interface MenuItem {
   label: string;
@@ -135,11 +136,11 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Arrangement --
-    { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { ops.arrangeOptimal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
-    { label: 'Arrange Grid', shortcut: '', onClick: () => { ops.arrangeGrid(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
-    { label: 'Arrange Row', shortcut: '', onClick: () => { ops.arrangeRow(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
-    { label: 'Arrange Column', shortcut: '', onClick: () => { ops.arrangeColumn(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
-    { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { ops.stackObjects(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Pack', shortcut: 'Ctrl+Shift+P', onClick: () => { onArrangeAnimationDone(() => selection?.transformBox.update(selected)); ops.arrangeOptimal(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Grid', shortcut: '', onClick: () => { onArrangeAnimationDone(() => selection?.transformBox.update(selected)); ops.arrangeGrid(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Row', shortcut: '', onClick: () => { onArrangeAnimationDone(() => selection?.transformBox.update(selected)); ops.arrangeRow(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Arrange Column', shortcut: '', onClick: () => { onArrangeAnimationDone(() => selection?.transformBox.update(selected)); ops.arrangeColumn(selected); ctx.onChange(ids); }, disabled: !multiSel },
+    { label: 'Stack', shortcut: 'Ctrl+Alt+S', onClick: () => { onArrangeAnimationDone(() => selection?.transformBox.update(selected)); ops.stackObjects(selected); ctx.onChange(ids); }, disabled: !multiSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 
     // -- Normalize --

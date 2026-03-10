@@ -227,9 +227,9 @@ export class TransformBox extends Container {
       origTransforms,
     };
 
-    // Begin snap session excluding current items
-    const itemIds = new Set(this._items.map((it) => it.id));
-    this._snapGuides?.beginSession(itemIds);
+    // Snap guides disabled
+    // const itemIds = new Set(this._items.map((it) => it.id));
+    // this._snapGuides?.beginSession(itemIds);
   }
 
   private _onHandleMove(e: FederatedPointerEvent): void {
@@ -346,21 +346,11 @@ export class TransformBox extends Container {
 
     this.update(this._items);
 
-    // Snap guides during resize
-    if (this._snapGuides && this._viewport) {
-      const snap = this._snapGuides.computeSnap(this._bounds, this._viewport);
-      if (snap.dx !== 0 || snap.dy !== 0) {
-        // Apply snap correction to all items
-        for (const item of this._items) {
-          item.data.x += snap.dx;
-          item.data.y += snap.dy;
-          item.displayObject.position.set(item.data.x, item.data.y);
-          this._onItemTransform?.(item);
-        }
-        this.update(this._items);
-      }
-      this._snapGuides.drawGuides(snap.guides, this._viewport);
-    }
+    // Snap guides disabled
+    // if (this._snapGuides && this._viewport) {
+    //   const snap = this._snapGuides.computeSnap(this._bounds, this._viewport);
+    //   ...
+    // }
 
     // Show dimension label
     const bounds = this._bounds;
@@ -399,7 +389,7 @@ export class TransformBox extends Container {
       this._drag = null;
       this._dimLabel.visible = false;
       this._dimLabelBg.visible = false;
-      this._snapGuides?.endSession();
+      // this._snapGuides?.endSession();
       // Notify that drag ended — persist/sync the final state
       this._onDragEnd?.(this._items.map(i => i.id));
     }

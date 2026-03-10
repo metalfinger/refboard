@@ -279,10 +279,8 @@ export const toolShortcuts: Record<string, ToolType> = {
   h: ToolType.PAN,
   p: ToolType.PEN,
   t: ToolType.TEXT,
-  e: ToolType.ERASER,
   '1': ToolType.SELECT,
   '2': ToolType.PAN,
   '3': ToolType.PEN,
   '4': ToolType.TEXT,
-  '5': ToolType.ERASER,
 };
