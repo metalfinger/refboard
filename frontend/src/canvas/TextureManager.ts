@@ -1,19 +1,25 @@
 import { Texture, Assets } from "pixi.js";
 
+// Max texture dimension — avoids WebGL INVALID_VALUE on large images.
+// Most GPUs support 4096 or 8192; we cap at 2048 for memory efficiency
+// since display sizes are typically 300-600px anyway.
+const MAX_TEXTURE_DIM = 2048;
+
 interface TextureEntry {
   texture: Texture;
+  url: string; // needed for Assets.unload()
   lastUsed: number;
   memoryEstimate: number;
 }
 
 /**
  * TextureManager — GPU texture cache with LRU eviction and memory budget.
- * No LOD tiers — PixiJS GPU handles scaling natively.
- * Just loads the full-res image and caches it.
+ * Caps texture dimensions at MAX_TEXTURE_DIM to prevent WebGL OOM.
+ * Uses Assets.unload() instead of texture.destroy() for proper cleanup.
  */
 export class TextureManager {
   private cache = new Map<string, TextureEntry>();
-  private budget = 512 * 1024 * 1024; // 512 MB
+  private budget = 256 * 1024 * 1024; // 256 MB (conservative for 90+ items)
   private currentUsage = 0;
 
   /** Build the URL for a given asset. */
@@ -27,7 +33,7 @@ export class TextureManager {
   /**
    * Load a texture for the given asset.
    * Returns cached texture if available, otherwise fetches and caches.
-   * GPU handles all scaling — no LOD tiers needed.
+   * Large images are downscaled server-side via width param to stay within GPU limits.
    */
   async load(assetKey: string): Promise<Texture> {
     const existing = this.cache.get(assetKey);
@@ -36,7 +42,12 @@ export class TextureManager {
       return existing.texture;
     }
 
-    const url = this.urlForAsset(assetKey);
+    // Request capped size from server to avoid loading huge textures into GPU
+    let url = this.urlForAsset(assetKey);
+    if (!url.includes('?')) {
+      url += `?w=${MAX_TEXTURE_DIM}`;
+    }
+
     let texture: Texture;
     try {
       texture = await Assets.load(url);
@@ -53,6 +64,7 @@ export class TextureManager {
 
     this.cache.set(assetKey, {
       texture,
+      url,
       lastUsed: performance.now(),
       memoryEstimate,
     });
@@ -64,13 +76,18 @@ export class TextureManager {
     return texture;
   }
 
-  /** Remove a specific texture from the cache and destroy it. */
+  /** Remove a specific texture from the cache via Assets.unload(). */
   unload(assetKey: string): void {
     const entry = this.cache.get(assetKey);
     if (!entry) return;
 
     this.currentUsage -= entry.memoryEstimate;
-    entry.texture.destroy(true);
+    try {
+      Assets.unload(entry.url);
+    } catch {
+      // Fallback if Assets doesn't know about it
+      entry.texture.destroy(true);
+    }
     this.cache.delete(assetKey);
   }
 
@@ -87,17 +104,14 @@ export class TextureManager {
     }
 
     if (oldestKey) {
-      const entry = this.cache.get(oldestKey)!;
-      this.currentUsage -= entry.memoryEstimate;
-      entry.texture.destroy(true);
-      this.cache.delete(oldestKey);
+      this.unload(oldestKey);
     }
   }
 
-  /** Destroy all cached textures and reset memory tracking. */
+  /** Unload all cached textures and reset memory tracking. */
   clear(): void {
-    for (const entry of this.cache.values()) {
-      entry.texture.destroy(true);
+    for (const [key] of this.cache) {
+      this.unload(key);
     }
     this.cache.clear();
     this.currentUsage = 0;

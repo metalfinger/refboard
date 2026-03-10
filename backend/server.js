@@ -18,19 +18,35 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ---- Image proxy (MinIO → browser) ----
+// ---- Image proxy (MinIO → browser, optional resize via ?w=) ----
 app.get('/api/images/*', async (req, res) => {
   try {
     const objectPath = req.params[0]; // everything after /api/images/
     if (!objectPath) return res.status(400).json({ error: 'Missing path' });
     const { minioClient, MINIO_BUCKET } = require('./minio');
     const stat = await minioClient.statObject(MINIO_BUCKET, objectPath);
-    if (stat.metaData?.['content-type']) {
-      res.setHeader('Content-Type', stat.metaData['content-type']);
-    }
+    const contentType = stat.metaData?.['content-type'] || '';
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     const stream = await minioClient.getObject(MINIO_BUCKET, objectPath);
-    stream.pipe(res);
+
+    const maxW = parseInt(req.query.w, 10);
+    const isImage = contentType.startsWith('image/') && !contentType.includes('svg');
+    if (maxW > 0 && isImage) {
+      // Resize on the fly with Sharp — cap width, preserve aspect ratio
+      const sharp = require('sharp');
+      const transform = sharp()
+        .resize({ width: maxW, withoutEnlargement: true })
+        .on('error', () => {
+          // If sharp fails (e.g. unsupported format), just pipe original
+          res.setHeader('Content-Type', contentType);
+        });
+      // Sharp outputs same format by default
+      if (contentType) res.setHeader('Content-Type', contentType);
+      stream.pipe(transform).pipe(res);
+    } else {
+      if (contentType) res.setHeader('Content-Type', contentType);
+      stream.pipe(res);
+    }
   } catch (err) {
     if (err.code === 'NoSuchKey' || err.code === 'NotFound') {
       return res.status(404).json({ error: 'Image not found' });
