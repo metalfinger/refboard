@@ -16,7 +16,7 @@ import {
 } from 'react';
 import { Application } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
-import { SceneManager, getItemWorldBounds } from './SceneManager';
+import { SceneManager, getItemWorldBounds, type SceneItem } from './SceneManager';
 import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
 import { SpringManager } from './spring';
@@ -167,9 +167,10 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
 
         // -- Visibility culling ticker (runs every 200ms, not every frame) --
         // Images: load textures when near viewport, unload when far away.
-        // Uses preload margin (1 screen) and larger unload margin (2 screens)
-        // to avoid thrashing during panning.
+        // Uses preload margin and hysteresis. Caps concurrent loaded textures
+        // to prevent GPU OOM when zoomed out (all items visible at once).
 
+        const MAX_LOADED_TEXTURES = 60; // GPU budget — only this many images loaded at once
         let lastCullCheck = 0;
         app.ticker.add((ticker) => {
           lastCullCheck += ticker.deltaMS;
@@ -177,34 +178,27 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           lastCullCheck = 0;
 
           const bounds = viewport.getVisibleBounds();
-          // Preload margin: 1x screen size beyond viewport edges
           const loadMargin = Math.max(bounds.width, bounds.height);
-          // Unload margin: 2x screen size — hysteresis prevents thrash
           const unloadMargin = loadMargin * 2;
+          const vcx = bounds.x + bounds.width / 2;
+          const vcy = bounds.y + bounds.height / 2;
+
+          // Collect image items with distance from viewport center
+          const imageItems: { item: SceneItem; sprite: ImageSprite; dist: number; near: boolean }[] = [];
 
           for (const item of scene.getAllItems()) {
             const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
 
             if (item.type === 'image' && item.displayObject instanceof ImageSprite) {
-              const nearViewport =
+              const near =
                 ix + iw > bounds.x - loadMargin &&
                 ix < bounds.x + bounds.width + loadMargin &&
                 iy + ih > bounds.y - loadMargin &&
                 iy < bounds.y + bounds.height + loadMargin;
-
-              if (nearViewport && !item.displayObject.loaded) {
-                item.displayObject.loadTexture();
-              } else if (!nearViewport) {
-                // Only unload if well outside viewport (hysteresis)
-                const farFromViewport =
-                  ix + iw < bounds.x - unloadMargin ||
-                  ix > bounds.x + bounds.width + unloadMargin ||
-                  iy + ih < bounds.y - unloadMargin ||
-                  iy > bounds.y + bounds.height + unloadMargin;
-                if (farFromViewport && item.displayObject.loaded) {
-                  item.displayObject.unloadTexture();
-                }
-              }
+              const cx = ix + iw / 2;
+              const cy = iy + ih / 2;
+              const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
+              imageItems.push({ item, sprite: item.displayObject, dist, near });
             }
 
             if (item.type === 'video' && 'onVisibilityChange' in item.displayObject) {
@@ -214,6 +208,32 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
                 iy + ih > bounds.y - loadMargin &&
                 iy < bounds.y + bounds.height + loadMargin;
               (item.displayObject as any).onVisibilityChange(inView);
+            }
+          }
+
+          // Sort by distance — closest to viewport center first
+          imageItems.sort((a, b) => a.dist - b.dist);
+
+          // Determine which should be loaded: nearest items up to budget
+          const nearItems = imageItems.filter(i => i.near);
+          const shouldBeLoaded = new Set(
+            nearItems.slice(0, MAX_LOADED_TEXTURES).map(i => i.item.id)
+          );
+
+          // Load nearest unloaded items (cap at 5 per tick to avoid spike)
+          let loadsThisTick = 0;
+          for (const { item, sprite } of imageItems) {
+            if (shouldBeLoaded.has(item.id) && !sprite.loaded && loadsThisTick < 5) {
+              sprite.loadTexture();
+              loadsThisTick++;
+            }
+          }
+
+          // Unload items that are either far away or over budget
+          for (const { item, sprite, near } of imageItems) {
+            if (!sprite.loaded) continue;
+            if (!near || !shouldBeLoaded.has(item.id)) {
+              sprite.unloadTexture();
             }
           }
         });
