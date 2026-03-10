@@ -184,9 +184,17 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
         // Media processing pipeline: upgrade videos when poster/metadata arrives
         socket.on('media:job:update', (data: any) => {
-          if (!data || data.status !== 'done') return;
-          const { imageId, posterAssetKey, nativeWidth, nativeHeight, duration } = data;
+          if (!data) return;
+          const { imageId, status } = data;
           if (!imageId) return;
+
+          // Surface processing failures to upload manager
+          if (status === 'failed') {
+            uploadManager.processingFailed(imageId, data.error || 'Video processing failed');
+            return;
+          }
+          if (status !== 'done') return;
+          const { posterAssetKey, nativeWidth, nativeHeight, duration } = data;
 
           // Update upload manager — transitions video jobs from "processing" to "done"
           uploadManager.processingComplete(imageId);

@@ -85,14 +85,14 @@ async function processJob(job) {
     const image = getImage(imageId);
     if (!image) {
       updateMediaJob(jobId, { status: 'failed', error: 'Image record not found' });
-      emitJobUpdate(boardId, jobId, imageId, 'failed');
+      emitJobFailed(boardId, jobId, imageId, 'Image record not found');
       return;
     }
 
     const videoBuffer = await fetchFromMinio(image.minio_path);
     if (!videoBuffer) {
       updateMediaJob(jobId, { status: 'failed', error: 'Failed to fetch video from storage' });
-      emitJobUpdate(boardId, jobId, imageId, 'failed');
+      emitJobFailed(boardId, jobId, imageId, 'Failed to fetch video from storage');
       return;
     }
 
@@ -131,13 +131,23 @@ async function processJob(job) {
   } catch (err) {
     console.error('[media-worker] Job %s failed:', jobId, err.message);
 
+    // Classify error for user-facing message
+    let userError = 'Video processing failed';
+    if (err.killed || err.signal === 'SIGTERM') {
+      userError = 'Video processing timed out — file may be too large or corrupt';
+    } else if (err.message?.includes('ENOMEM') || err.message?.includes('Cannot allocate')) {
+      userError = 'Out of memory — video file is too large to process';
+    } else if (err.message?.includes('Invalid data')) {
+      userError = 'Invalid or corrupt video file';
+    }
+
     const attempts = (job.attempts || 0) + 1;
     if (attempts < 3) {
       updateMediaJob(jobId, { status: 'retry', attempts, error: err.message });
       emitJobUpdate(boardId, jobId, imageId, 'retry');
     } else {
       updateMediaJob(jobId, { status: 'failed', attempts, error: err.message });
-      emitJobUpdate(boardId, jobId, imageId, 'failed');
+      emitJobFailed(boardId, jobId, imageId, userError);
     }
   }
 }
@@ -171,6 +181,13 @@ function emitJobUpdate(boardId, jobId, imageId, status, result) {
     status,
     ...(result || {}),
   });
+}
+
+/**
+ * Emit a job failure with error details to the board room.
+ */
+function emitJobFailed(boardId, jobId, imageId, error) {
+  emitJobUpdate(boardId, jobId, imageId, 'failed', { error });
 }
 
 module.exports = { startMediaWorker, stopMediaWorker };

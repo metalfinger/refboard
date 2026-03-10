@@ -88,6 +88,18 @@ export class UploadManager {
     }
   }
 
+  /** Video processing failed (from media:job:update socket event with status='failed'). */
+  processingFailed(imageId: string, error: string) {
+    for (const job of this.jobs.values()) {
+      if (job.imageId === imageId && (job.status === 'processing' || job.status === 'uploading')) {
+        job.status = 'failed';
+        job.error = error;
+        this._notify();
+        return;
+      }
+    }
+  }
+
   /** Mark a job as failed. */
   setFailed(jobId: string, error: string) {
     const job = this.jobs.get(jobId);

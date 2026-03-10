@@ -7,6 +7,10 @@ import { uploadImage, uploadImageFromUrl } from '../api';
 
 type OnChange = () => void;
 
+/** Client-side file size limit (matches backend MAX_FILE_SIZE_MB default) */
+const MAX_FILE_SIZE_MB = 200;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 /* ------------------------------------------------------------------ */
 /*  Placeholder helper                                                 */
 /* ------------------------------------------------------------------ */
@@ -153,6 +157,15 @@ export function setupDragDrop(
       let cursorX = world.x;
       for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
 
+      // Client-side size validation
+      if (file.size > MAX_FILE_SIZE) {
+        const jobId = uploads?.addJob(file, boardId);
+        if (jobId) uploads?.setFailed(jobId, `File too large (${(file.size / 1024 / 1024).toFixed(0)}MB, max ${MAX_FILE_SIZE_MB}MB)`);
+        col++;
+        if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
+        continue;
+      }
+
       const placeholder = createPlaceholder(viewport, cursorX, cursorY);
       const jobId = uploads?.addJob(file, boardId);
 
@@ -240,6 +253,13 @@ export function setupPaste(
       e.preventDefault();
       const file = item.getAsFile();
       if (!file) continue;
+
+      // Client-side size validation
+      if (file.size > MAX_FILE_SIZE) {
+        const jobId = uploads?.addJob(file, boardId);
+        if (jobId) uploads?.setFailed(jobId, `File too large (${(file.size / 1024 / 1024).toFixed(0)}MB, max ${MAX_FILE_SIZE_MB}MB)`);
+        continue;
+      }
 
       // Place at viewport center (world coords)
       const center = viewport.center;

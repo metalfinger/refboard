@@ -34,7 +34,7 @@ function probeVideo(buffer) {
       '-show_format',
       '-show_streams',
       tmpFile,
-    ], { timeout: 15000 }, (err, stdout) => {
+    ], { timeout: 60000 }, (err, stdout) => {
       cleanup(tmpFile, tmpDir);
       if (err) {
         console.warn('[video-utils] ffprobe failed:', err.message);
@@ -91,7 +91,7 @@ function extractPoster(buffer) {
       '-q:v', '3',           // JPEG quality (2=best, 31=worst)
       '-y',                  // overwrite
       tmpOutput,
-    ], { timeout: 15000 }, (err) => {
+    ], { timeout: 60000 }, (err) => {
       if (err) {
         console.warn('[video-utils] ffmpeg poster extraction failed:', err.message);
         cleanup(tmpInput, tmpDir);
