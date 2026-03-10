@@ -242,8 +242,17 @@ export function setupDragDrop(
         continue;
       }
 
-      const placeholder = createPlaceholder(viewport, cursorX, cursorY);
       const jobId = uploads?.addJob(file, boardId);
+
+      // Check if job was cancelled while queued (user clicked cancel)
+      if (jobId && uploads?.isCancelled(jobId)) {
+        col++;
+        if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
+        continue;
+      }
+
+      const placeholder = createPlaceholder(viewport, cursorX, cursorY);
+      if (jobId) uploads?.startUpload(jobId);
 
       try {
         const res = await uploadImage(boardId, file, (p) => {

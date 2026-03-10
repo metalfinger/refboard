@@ -12,6 +12,7 @@ function formatSize(bytes: number): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
   uploading: 'Uploading',
   processing: 'Processing',
   done: 'Done',
@@ -19,13 +20,14 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
+  queued: '#888',
   uploading: '#4a9eff',
   processing: '#ffa94d',
   done: '#4ade80',
   failed: '#f87171',
 };
 
-function JobRow({ job, onDismiss }: { job: UploadJob; onDismiss: () => void }) {
+function JobRow({ job, onDismiss, onCancel }: { job: UploadJob; onDismiss: () => void; onCancel?: () => void }) {
   const pct = Math.round(job.progress * 100);
   const color = STATUS_COLORS[job.status];
 
@@ -48,6 +50,12 @@ function JobRow({ job, onDismiss }: { job: UploadJob; onDismiss: () => void }) {
         <span style={{ fontSize: '10px', color: '#555', flexShrink: 0 }}>
           {formatSize(job.fileSize)}
         </span>
+        {job.status === 'queued' && onCancel && (
+          <button onClick={onCancel} style={{
+            background: 'none', border: 'none', color: '#f87171', cursor: 'pointer',
+            fontSize: '10px', padding: '0 2px', flexShrink: 0,
+          }}>cancel</button>
+        )}
         {(job.status === 'done' || job.status === 'failed') && (
           <button onClick={onDismiss} style={{
             background: 'none', border: 'none', color: '#444', cursor: 'pointer',
@@ -116,7 +124,12 @@ export default function UploadPanel({ uploadManager }: UploadPanelProps) {
       {/* Job list — max 4 visible, scroll */}
       <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
         {jobs.map((job) => (
-          <JobRow key={job.id} job={job} onDismiss={() => uploadManager.dismiss(job.id)} />
+          <JobRow
+            key={job.id}
+            job={job}
+            onDismiss={() => uploadManager.dismiss(job.id)}
+            onCancel={job.status === 'queued' ? () => uploadManager.cancel(job.id) : undefined}
+          />
         ))}
       </div>
 

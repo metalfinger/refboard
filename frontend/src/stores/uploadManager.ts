@@ -1,4 +1,4 @@
-export type UploadStatus = 'uploading' | 'processing' | 'done' | 'failed';
+export type UploadStatus = 'queued' | 'uploading' | 'processing' | 'done' | 'failed';
 
 export interface UploadJob {
   id: string;
@@ -41,7 +41,7 @@ export class UploadManager {
       fileName: file.name || (isVideo ? 'video' : 'image'),
       fileSize: file.size,
       mediaType: isVideo ? 'video' : 'image',
-      status: 'uploading',
+      status: 'queued',
       progress: 0,
       file,
       boardId,
@@ -49,6 +49,29 @@ export class UploadManager {
     });
     this._notify();
     return id;
+  }
+
+  /** Mark a queued job as actively uploading. */
+  startUpload(jobId: string) {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== 'queued') return;
+    job.status = 'uploading';
+    this._notify();
+  }
+
+  /** Cancel a queued job (before upload starts). Returns true if cancelled. */
+  cancel(jobId: string): boolean {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== 'queued') return false;
+    this._clearDismissTimer(jobId);
+    this.jobs.delete(jobId);
+    this._notify();
+    return true;
+  }
+
+  /** Check if a job has been cancelled (removed from map). */
+  isCancelled(jobId: string): boolean {
+    return !this.jobs.has(jobId);
   }
 
   /** Create a job for a URL-based import (no File object, unknown size). */
@@ -167,11 +190,11 @@ export class UploadManager {
     this._notify();
   }
 
-  /** Get active (uploading or processing) job count. */
+  /** Get active (queued, uploading, or processing) job count. */
   get activeCount(): number {
     let count = 0;
     for (const job of this.jobs.values()) {
-      if (job.status === 'uploading' || job.status === 'processing') count++;
+      if (job.status === 'queued' || job.status === 'uploading' || job.status === 'processing') count++;
     }
     return count;
   }
