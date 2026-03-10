@@ -23,6 +23,25 @@ const ALLOWED_MIME_TYPES = new Set([
   'video/quicktime',
 ]);
 
+/** Fallback: accepted file extensions (for when browser reports empty/wrong MIME). */
+const ALLOWED_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov)$/i;
+
+/** Check if a file should be accepted (MIME or extension fallback). */
+function isFileAllowed(file: File): boolean {
+  if (ALLOWED_MIME_TYPES.has(file.type)) return true;
+  // Fallback to extension when MIME is empty or non-standard
+  if (file.name && ALLOWED_EXTENSIONS.test(file.name)) return true;
+  return false;
+}
+
+/** Check if a file is media-like but unsupported (for rejection feedback). */
+function isUnsupportedMedia(file: File): boolean {
+  if (!file.type && !file.name) return false;
+  if (file.type.startsWith('image/') || file.type.startsWith('video/')) return true;
+  if (file.name && /\.(bmp|tiff?|avif|heic|heif|psd|raw|dng|ico|apng)$/i.test(file.name)) return true;
+  return false;
+}
+
 /** Human-readable extension from MIME type, for error messages. */
 function extFromMime(mime: string): string {
   const map: Record<string, string> = {
@@ -185,7 +204,7 @@ export function setupDragDrop(
     // Count valid media files to determine grid columns
     let mediaCount = 0;
     for (let i = 0; i < files.length; i++) {
-      if (ALLOWED_MIME_TYPES.has(files[i].type)) mediaCount++;
+      if (isFileAllowed(files[i])) mediaCount++;
     }
     const cols = Math.ceil(Math.sqrt(mediaCount)); // square-ish grid
     let col = 0;
@@ -199,11 +218,12 @@ export function setupDragDrop(
       const file = files[i];
 
       // Reject unsupported file types with immediate feedback
-      if (!ALLOWED_MIME_TYPES.has(file.type)) {
-        if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type) {
+      if (!isFileAllowed(file)) {
+        if (isUnsupportedMedia(file)) {
+          const ext = file.name?.match(/\.(\w+)$/)?.[1] || file.type.split('/')[1] || 'unknown';
           uploads?.addRejected(
             file.name || 'unknown',
-            `Unsupported format: ${extFromMime(file.type)}`,
+            `Unsupported format: .${ext}`,
           );
         }
         continue;
