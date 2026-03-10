@@ -688,4 +688,14 @@ export const shortcuts: ShortcutDef[] = [
     category: 'view', description: 'Show shortcuts help',
     handler: (ctx) => ctx.toggleShowHelp(),
   },
+  {
+    id: 'toggle-review',
+    keys: { key: '.' },
+    category: 'view',
+    description: 'Toggle review mode',
+    needsSelection: false,
+    handler: (ctx: ShortcutContext) => {
+      ctx.toggleReviewMode?.();
+    },
+  },
 ];

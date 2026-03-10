@@ -315,7 +315,7 @@ export default function Toolbar({
 
       {/* Review / Feedback */}
       {onToggleReview && (
-        <ActionBtn onClick={onToggleReview} title="Review Mode (R)" active={reviewMode}>
+        <ActionBtn onClick={onToggleReview} title="Review Mode (.)" active={reviewMode}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
             <path d="M2 2.5A1.5 1.5 0 013.5 1h7A1.5 1.5 0 0112 2.5v6A1.5 1.5 0 0110.5 10H6l-3 3v-3H3.5A1.5 1.5 0 012 8.5v-6z" />
           </svg>

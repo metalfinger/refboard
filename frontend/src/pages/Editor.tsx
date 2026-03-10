@@ -26,7 +26,7 @@ import MattermostImport from '../components/MattermostImport';
 import Minimap from '../components/Minimap';
 import UploadPanel from '../components/UploadPanel';
 import ExportDialog from '../components/ExportDialog';
-import FeedbackPanel from '../components/FeedbackPanel';
+import FeedbackPanel from '../components/feedback/FeedbackPanel';
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
@@ -92,6 +92,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showMmImport, setShowMmImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -175,12 +176,27 @@ export default function Editor({ isPublicView }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
 
-  // Toggle pin overlay visibility with review mode
+  // Toggle pin overlay visibility with review mode + wire pin clicks
   useEffect(() => {
-    if (pinOverlay) {
-      pinOverlay.visible = reviewMode;
-      if (reviewMode) pinOverlay.refresh();
-    }
+    if (!pinOverlay) return;
+    pinOverlay.visible = reviewMode;
+    if (reviewMode) pinOverlay.refresh();
+
+    // Pin click → expand thread in panel
+    const onClick = (e: any) => {
+      const vp = canvasRef.current?.getViewport();
+      if (!vp) return;
+      const worldPos = vp.toWorld(e.global);
+      const threadId = pinOverlay.getThreadIdAtPoint(worldPos.x, worldPos.y);
+      if (threadId) {
+        setFocusedThreadId(threadId);
+        // Reset so it can be triggered again for the same pin
+        requestAnimationFrame(() => setFocusedThreadId(null));
+      }
+    };
+    pinOverlay.eventMode = 'static';
+    pinOverlay.on('pointerdown', onClick);
+    return () => { pinOverlay.off('pointerdown', onClick); };
   }, [reviewMode, pinOverlay]);
 
   // Tool activation
@@ -264,7 +280,7 @@ export default function Editor({ isPublicView }: EditorProps) {
     onCanvasChange, showToast, refreshLayers,
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
-    setShowGrid, setShowHelp, setFocusMode,
+    setShowGrid, setShowHelp, setFocusMode, setReviewMode,
   });
 
   // Context menu
@@ -369,7 +385,10 @@ export default function Editor({ isPublicView }: EditorProps) {
         contentBounds: { x: cMinX, y: cMinY, w: cMaxX - cMinX, h: cMaxY - cMinY },
       });
     }
-  }, []);
+
+    // Refresh annotation pins so they follow transforms
+    if (pinOverlay?.visible) pinOverlay.refresh();
+  }, [pinOverlay]);
 
   // Listen to viewport moved event for overlay updates (throttled)
   // Depends on objectCount so it re-runs after canvas init (viewport becomes available)
@@ -678,6 +697,7 @@ export default function Editor({ isPublicView }: EditorProps) {
             token={localStorage.getItem('refboard_token') || ''}
             canvasObjects={canvasObjectMap}
             onError={(msg) => showToast(msg)}
+            expandThreadId={focusedThreadId}
             onJumpToObject={(objectId) => {
               const scene = canvasRef.current?.getScene();
               const vp = canvasRef.current?.getViewport();

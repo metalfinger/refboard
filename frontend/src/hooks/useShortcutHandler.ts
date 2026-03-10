@@ -30,6 +30,7 @@ interface ShortcutHandlerDeps {
   setShowGrid: React.Dispatch<React.SetStateAction<boolean>>;
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>;
   setFocusMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setReviewMode: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 /**
@@ -41,7 +42,7 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
     onCanvasChange, showToast, refreshLayers,
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
-    setShowGrid, setShowHelp, setFocusMode,
+    setShowGrid, setShowHelp, setFocusMode, setReviewMode,
   } = deps;
 
   useEffect(() => {
@@ -89,6 +90,7 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
         toggleGrid: () => setShowGrid((v) => !v),
         toggleShowHelp: () => setShowHelp((v) => !v),
         toggleFocusMode: () => setFocusMode((v) => !v),
+        toggleReviewMode: () => setReviewMode((v) => !v),
         pasteFromSystemClipboard: async (): Promise<string> => {
           if (!resolvedBoardId) return 'No board';
           const msg = await pasteFromSystemClipboard(scene, viewport, resolvedBoardId, onCanvasChange);
@@ -148,6 +150,6 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
     onCanvasChange, showToast, refreshLayers,
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
-    setShowGrid, setShowHelp, setFocusMode,
+    setShowGrid, setShowHelp, setFocusMode, setReviewMode,
   ]);
 }

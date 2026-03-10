@@ -47,6 +47,7 @@ export interface ShortcutContext {
   fitSelection: () => void;
   writeCanvasToClipboard: (items?: SceneItem[]) => Promise<void>;
   pasteFromSystemClipboard: () => Promise<string>;
+  toggleReviewMode?: () => void;
 }
 
 /**

@@ -2,14 +2,60 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { AnnotationStore } from '../stores/annotationStore';
 import type { SceneManager } from './SceneManager';
+import { getAuthorColorHex, getAuthorInitial } from '../utils/authorColors';
 
-const PIN_RADIUS = 10;
-const PIN_COLOR_OPEN = 0xee4444;
-const PIN_COLOR_RESOLVED = 0x666666;
+const PIN_RADIUS = 12;
+const PIN_COLOR_RESOLVED = 0x555555;
+
+// Tail direction: 225° (down-left) in standard math coords.
+// In PixiJS screen coords (+y down), 225° maps to:
+//   cos(225°) = -√2/2  (left)
+//   sin(225°) = +√2/2  (down, because +y is down in screen space)
+// So the circle center is offset UP-RIGHT from the anchor tip:
+//   cx_offset = +r * √2/2,  cy_offset = -r * √2/2
+const SIN45 = Math.SQRT1_2; // √2/2 ≈ 0.7071
+
+/**
+ * Draws a Figma-style teardrop pin whose tip lands at (0, 0).
+ * The circle body is offset up-right; the tail points down-left to (0,0).
+ *
+ * @param gfx     Graphics object (drawn in its own local space, tip = origin)
+ * @param r       Pin radius (already scaled to world space)
+ * @param color   Fill color (0xRRGGBB)
+ * @param alpha   Fill alpha
+ */
+function drawTeardrop(gfx: Graphics, r: number, color: number, alpha: number): void {
+  // Circle center relative to tip
+  const cx = r * SIN45;
+  const cy = -r * SIN45;
+
+  // Half-angle of the tail aperture from the tip (in radians).
+  // Controls how wide/sharp the tail looks. ~20° gives a nice taper.
+  const tailHalfAngle = (20 * Math.PI) / 180;
+
+  // Angle from circle center toward tip = 225° in screen coords
+  const tipAngle = (225 * Math.PI) / 180;
+
+  // The two "wing" angles on the circle where the tail edges start
+  const wingAngle1 = tipAngle - tailHalfAngle;
+  const wingAngle2 = tipAngle + tailHalfAngle;
+
+  // Build the teardrop as a single filled path:
+  // start at wing1 on circle → arc around (the "long way" CCW past top) → wing2 → line to tip → close
+  gfx.moveTo(cx + r * Math.cos(wingAngle1), cy + r * Math.sin(wingAngle1));
+  // Arc from wingAngle1 to wingAngle2 going CCW (counterclockwise = increasing angle in screen space)
+  // "long way" means going through the top of the circle (not through 225°).
+  // In PixiJS, arc() takes (cx, cy, r, startAngle, endAngle, anticlockwise).
+  // We want the arc that does NOT pass through 225°, so go anticlockwise from wingAngle1 to wingAngle2.
+  gfx.arc(cx, cy, r, wingAngle1, wingAngle2, true);
+  gfx.lineTo(0, 0); // tip at anchor
+  gfx.closePath();
+  gfx.fill({ color, alpha });
+}
 
 export class PinOverlay extends Container {
-  private _pins = new Map<string, Graphics>();
-  private _pool: Graphics[] = [];
+  private _pins = new Map<string, Container>();
+  private _pool: Container[] = [];
   private _viewport: Viewport;
   private _scene: SceneManager;
   private _store: AnnotationStore;
@@ -21,19 +67,18 @@ export class PinOverlay extends Container {
     this._store = store;
   }
 
-  private _acquire(): Graphics {
-    const gfx = this._pool.pop() || new Graphics();
-    gfx.clear();
-    gfx.removeChildren();
-    gfx.visible = true;
-    gfx.eventMode = 'none';
-    gfx.cursor = 'default';
-    return gfx;
+  private _acquire(): Container {
+    const c = this._pool.pop() || new Container();
+    c.removeChildren();
+    c.visible = true;
+    c.eventMode = 'none';
+    c.cursor = 'default';
+    return c;
   }
 
-  private _release(gfx: Graphics) {
-    gfx.visible = false;
-    this._pool.push(gfx);
+  private _release(c: Container) {
+    c.visible = false;
+    this._pool.push(c);
   }
 
   /** Call on every viewport moved/zoomed event and on store change */
@@ -41,10 +86,11 @@ export class PinOverlay extends Container {
     const scale = 1 / this._viewport.scale.x;
 
     // Return current pins to pool
-    for (const gfx of this._pins.values()) this._release(gfx);
+    for (const c of this._pins.values()) this._release(c);
     this._pins.clear();
 
-    // ── Thread pins ──
+    const r = PIN_RADIUS * scale;
+
     for (const thread of this._store.threads.values()) {
       if (thread.status === 'resolved' && !showResolved) continue;
 
@@ -58,42 +104,87 @@ export class PinOverlay extends Container {
         wx = bounds.x + thread.pin_x * bounds.width;
         wy = bounds.y + thread.pin_y * bounds.height;
       } else {
+        // Default: top-right corner of object bounds
         wx = bounds.x + bounds.width;
         wy = bounds.y;
       }
 
-      const gfx = this._acquire();
-      const r = PIN_RADIUS * scale;
-      const color = thread.status === 'open' ? PIN_COLOR_OPEN : PIN_COLOR_RESOLVED;
+      const isResolved = thread.status === 'resolved';
+      const fillColor = isResolved ? PIN_COLOR_RESOLVED : getAuthorColorHex(thread.created_by);
+      const fillAlpha = isResolved ? 0.5 : 1.0;
 
-      gfx.circle(0, 0, r);
-      gfx.fill({ color, alpha: 0.9 });
-      gfx.stroke({ color: 0xffffff, width: 1.5 * scale, alpha: 0.8 });
-      gfx.position.set(wx, wy);
-      gfx.eventMode = 'static';
-      gfx.cursor = 'pointer';
-      (gfx as any)._threadId = thread.id;
+      // Container whose origin = anchor tip
+      const pin = this._acquire();
+      pin.position.set(wx, wy);
+      pin.eventMode = 'static';
+      pin.cursor = 'pointer';
+      (pin as any)._threadId = thread.id;
 
-      if (thread.comment_count > 1) {
-        const label = new Text({
-          text: String(thread.comment_count),
-          style: new TextStyle({ fontSize: 9 * scale, fill: '#ffffff', fontWeight: 'bold' }),
-        });
-        label.anchor.set(0.5);
-        gfx.addChild(label);
-      }
+      // ── Teardrop body ──
+      const gfx = new Graphics();
+      drawTeardrop(gfx, r, fillColor, fillAlpha);
+      // White stroke around the circle part only (drawn as a separate circle stroke)
+      gfx.circle(r * SIN45, -r * SIN45, r);
+      gfx.stroke({ color: 0xffffff, width: 1.5 * scale, alpha: isResolved ? 0.4 : 0.85 });
+      pin.addChild(gfx);
 
-      if (!gfx.parent) this.addChild(gfx);
-      this._pins.set(thread.id, gfx);
+      // ── Author initial ──
+      const authorName = thread.comments[0]?.author_name ?? '';
+      const initial = getAuthorInitial(authorName);
+      const initialText = new Text({
+        text: initial,
+        style: new TextStyle({
+          fontSize: r * 1.1,
+          fill: '#ffffff',
+          fontWeight: 'bold',
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }),
+      });
+      initialText.anchor.set(0.5);
+      // Center on the circle body
+      initialText.position.set(r * SIN45, -r * SIN45);
+      pin.addChild(initialText);
+
+      // ── Pin number label (#N) ──
+      const pinNum = this._store.getPinNumber(thread.id);
+      const numLabel = new Text({
+        text: `#${pinNum}`,
+        style: new TextStyle({
+          fontSize: r * 0.75,
+          fill: '#ffffff',
+          fontWeight: 'bold',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          dropShadow: {
+            color: '#000000',
+            blur: 2 * scale,
+            distance: 0,
+            alpha: 0.6,
+          },
+        }),
+      });
+      numLabel.anchor.set(0, 1);
+      // Place just to the right of the circle top
+      numLabel.position.set(r * SIN45 + r * 1.1, -r * SIN45 - r * 0.9);
+      pin.addChild(numLabel);
+
+      if (!pin.parent) this.addChild(pin);
+      this._pins.set(thread.id, pin);
     }
   }
 
   getThreadIdAtPoint(worldX: number, worldY: number): string | null {
-    for (const [threadId, gfx] of this._pins) {
-      const dx = gfx.position.x - worldX;
-      const dy = gfx.position.y - worldY;
-      const hitRadius = PIN_RADIUS / this._viewport.scale.x;
-      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+    const scale = 1 / this._viewport.scale.x;
+    const r = PIN_RADIUS * scale;
+    // Hit-test against the circle body of each pin (not the tail tip)
+    const cx_off = r * SIN45;
+    const cy_off = -r * SIN45;
+
+    for (const [threadId, pin] of this._pins) {
+      const circleCx = pin.position.x + cx_off;
+      const circleCy = pin.position.y + cy_off;
+      const dx = circleCx - worldX;
+      const dy = circleCy - worldY;
+      if (dx * dx + dy * dy <= r * r) {
         return threadId;
       }
     }
@@ -101,8 +192,8 @@ export class PinOverlay extends Container {
   }
 
   override destroy(options?: any) {
-    for (const gfx of this._pins.values()) gfx.destroy();
-    for (const gfx of this._pool) gfx.destroy();
+    for (const c of this._pins.values()) c.destroy({ children: true });
+    for (const c of this._pool) c.destroy({ children: true });
     this._pins.clear();
     this._pool = [];
     super.destroy(options);
