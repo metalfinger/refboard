@@ -111,6 +111,14 @@ export default function Editor({ isPublicView }: EditorProps) {
     if (changedIds && changedIds.length > 0) {
       // Incremental: broadcast only changed elements
       syncRef.current?.broadcastElements(changedIds);
+      // Keep spatial index in sync for all local mutations (align/flip/arrange/etc.)
+      const scene = canvasRef.current?.getScene();
+      if (scene) {
+        for (const id of changedIds) {
+          const item = scene.items.get(id);
+          if (item) scene.updateSpatialEntry(item);
+        }
+      }
     }
     // Full scene sync happens via debounced SceneManager.onChange chain in sync.ts
     if (undoRef.current && !undoRef.current.isLocked()) {

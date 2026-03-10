@@ -7,6 +7,7 @@ import { setupDragDrop, setupPaste } from '../canvas/image-drop';
 import { UndoManager } from '../canvas/history';
 import { InboxZone } from '../canvas/InboxZone';
 import { LaserPointer } from '../canvas/LaserPointer';
+import { VideoSprite } from '../canvas/sprites/VideoSprite';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 
@@ -137,8 +138,11 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         selection.transformBox.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
         };
+        selection.onObjectDragEnd = (itemIds) => {
+          onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
+        };
         selection.transformBox.onDragEnd = (itemIds) => {
-          onCanvasChange(itemIds); // broadcasts elements + saves + undo
+          onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
         };
 
         socket.on('user:joined', (data: any) => {
@@ -173,6 +177,39 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           if (Array.isArray(assets) && assets.length > 0 && inboxZoneRef.current) {
             inboxZoneRef.current.addMedia(assets);
             showToast(`${assets.length} image${assets.length !== 1 ? 's' : ''} arrived in Inbox`);
+          }
+        });
+
+        // Media processing pipeline: upgrade videos when poster/metadata arrives
+        socket.on('media:job:update', (data: any) => {
+          if (!data || data.status !== 'done') return;
+          const { imageId, posterAssetKey, nativeWidth, nativeHeight, duration } = data;
+          if (!imageId) return;
+
+          // Find the video item by matching its DB image ID stored in scene data
+          for (const item of scene.items.values()) {
+            if (item.data.type !== 'video') continue;
+            // The asset key contains the imageId (e.g. boards/{boardId}/{imageId}.mp4)
+            if (!item.data.asset?.includes(imageId)) continue;
+
+            // Update scene data model
+            const vidData = item.data as any;
+            if (posterAssetKey) vidData.poster = posterAssetKey;
+            if (nativeWidth) { vidData.nativeW = nativeWidth; vidData.w = nativeWidth; }
+            if (nativeHeight) { vidData.nativeH = nativeHeight; vidData.h = nativeHeight; }
+            if (duration) vidData.duration = duration;
+
+            // Update rendered VideoSprite (dimensions, shadow, overlay, poster key)
+            if (item.displayObject instanceof VideoSprite) {
+              item.displayObject.applyProcessedMedia({ posterAssetKey, nativeWidth, nativeHeight });
+            }
+
+            // Update spatial index for changed dimensions
+            scene.updateSpatialEntry(item);
+
+            // No broadcastElements here — all clients receive the same
+            // media:job:update from the server. Echoing would cause fanout churn.
+            break;
           }
         });
 

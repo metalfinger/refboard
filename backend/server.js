@@ -174,6 +174,14 @@ async function start() {
     console.error('[server] MM watcher failed to start:', err.message);
   }
 
+  // Start media processing worker
+  try {
+    const { startMediaWorker } = require('./services/media-worker');
+    startMediaWorker(io);
+  } catch (err) {
+    console.error('[server] Media worker failed to start:', err.message);
+  }
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] RefBoard backend listening on port ${PORT}`);
   });
@@ -186,6 +194,11 @@ function shutdown(signal) {
   try {
     const { stopWatcher } = require('./services/mm-watcher');
     stopWatcher();
+  } catch {}
+
+  try {
+    const { stopMediaWorker } = require('./services/media-worker');
+    stopMediaWorker();
   } catch {}
 
   io.close(() => {

@@ -14,6 +14,7 @@ import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
+import { SpatialGrid } from './SpatialGrid';
 import type {
   SceneData,
   AnySceneObject,
@@ -140,6 +141,7 @@ export class SceneManager {
   readonly viewport: Viewport;
   readonly textures: TextureManager;
   readonly springs: SpringManager;
+  readonly spatialGrid: SpatialGrid<SceneItem> = new SpatialGrid<SceneItem>(512);
 
   private _onChange: (() => void) | null = null;
   private _onItemDimensionsChanged: ((itemId: string) => void) | null = null;
@@ -149,6 +151,17 @@ export class SceneManager {
     this.viewport = viewport;
     this.textures = textures;
     this.springs = springs;
+  }
+
+  /** Update an item's spatial index entry from its current data. */
+  updateSpatialEntry(item: SceneItem): void {
+    const { x, y, w, h } = getItemWorldBounds(item);
+    this.spatialGrid.upsert(item.id, item, x, y, w, h);
+  }
+
+  /** Query items overlapping the given world rectangle. */
+  queryRegion(rx: number, ry: number, rw: number, rh: number): SceneItem[] {
+    return this.spatialGrid.query(rx, ry, rw, rh).map(e => e.data);
   }
 
   // -- onChange callback ----------------------------------------------------
@@ -220,6 +233,7 @@ export class SceneManager {
       }
 
       item.displayObject.destroy({ children: true });
+      this.spatialGrid.remove(id);
       this.items.delete(id);
     }
 
@@ -332,6 +346,7 @@ export class SceneManager {
     };
 
     this.items.set(data.id, item);
+    this.updateSpatialEntry(item);
 
     // Wire video dimension auto-correction to the STORED item.data (not the original param)
     if (data.type === 'video' && displayObject instanceof VideoSprite) {
@@ -429,6 +444,7 @@ export class SceneManager {
     // Update stored data
     item.data = { ...data };
     item.type = data.type;
+    this.updateSpatialEntry(item);
   }
 
   // -- Z-Ordering ----------------------------------------------------------
@@ -505,12 +521,14 @@ export class SceneManager {
     if (item.data.type === 'group') {
       const groupData = item.data as import('./scene-format').GroupObject;
       for (const childId of groupData.children) {
+        this.spatialGrid.remove(childId);
         this.items.delete(childId);
       }
     }
 
     if (!animate) {
       item.displayObject.destroy({ children: true });
+      this.spatialGrid.remove(id);
       this.items.delete(id);
       this._onChange?.();
       return;
@@ -519,6 +537,7 @@ export class SceneManager {
     const obj = item.displayObject;
 
     // Remove from map immediately to prevent double-remove
+    this.spatialGrid.remove(id);
     this.items.delete(id);
 
     // Scale toward center on removal
@@ -710,6 +729,7 @@ export class SceneManager {
       data: groupData,
     };
     this.items.set(groupData.id, groupItem);
+    this.updateSpatialEntry(groupItem);
 
     // Animate each child ~25px toward center, then reparent into container
     const CONVERGE_PX = 25;
@@ -842,6 +862,7 @@ export class SceneManager {
     if (!container.destroyed) {
       container.destroy();
     }
+    this.spatialGrid.remove(groupId);
     this.items.delete(groupId);
 
     this._applyZOrder();

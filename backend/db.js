@@ -95,6 +95,24 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_board_channel_links_board ON board_channel_links(board_id);
+
+  CREATE TABLE IF NOT EXISTS media_jobs (
+    id TEXT PRIMARY KEY,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'poster',
+    status TEXT NOT NULL DEFAULT 'queued',
+    progress REAL DEFAULT 0,
+    error TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    result_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_media_jobs_status ON media_jobs(status);
+  CREATE INDEX IF NOT EXISTS idx_media_jobs_image ON media_jobs(image_id);
 `);
 
 // Migrations — add columns to existing tables
@@ -122,6 +140,22 @@ try {
   db.prepare("SELECT mm_file_id FROM images LIMIT 0").get();
 } catch {
   db.exec("ALTER TABLE images ADD COLUMN mm_file_id TEXT");
+}
+try {
+  db.prepare("SELECT poster_asset_key FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN poster_asset_key TEXT");
+}
+try {
+  db.prepare("SELECT duration FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN duration REAL");
+}
+try {
+  db.prepare("SELECT native_width FROM images LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE images ADD COLUMN native_width INTEGER");
+  db.exec("ALTER TABLE images ADD COLUMN native_height INTEGER");
 }
 
 // ---------------------
@@ -406,6 +440,46 @@ function getImageByMmFileId(boardId, mmFileId) {
   return db.prepare('SELECT * FROM images WHERE board_id = ? AND mm_file_id = ?').get(boardId, mmFileId);
 }
 
+// ---------------------
+// Media Jobs
+// ---------------------
+function createMediaJob({ id, imageId, boardId, type }) {
+  db.prepare(`
+    INSERT INTO media_jobs (id, image_id, board_id, type, status)
+    VALUES (?, ?, ?, ?, 'queued')
+  `).run(id, imageId, boardId, type || 'poster');
+  return db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id);
+}
+
+function updateMediaJob(id, updates) {
+  const sets = [];
+  const values = [];
+  for (const [key, val] of Object.entries(updates)) {
+    const col = key.replace(/([A-Z])/g, '_$1').toLowerCase(); // camelCase → snake_case
+    sets.push(`${col} = ?`);
+    values.push(val);
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE media_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+function getMediaJob(id) {
+  return db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id);
+}
+
+function getPendingMediaJobs(limit = 10) {
+  return db.prepare('SELECT * FROM media_jobs WHERE status IN (?, ?) ORDER BY created_at ASC LIMIT ?')
+    .all('queued', 'retry', limit);
+}
+
+function updateImageMedia(imageId, { posterAssetKey, duration, nativeWidth, nativeHeight }) {
+  db.prepare(`
+    UPDATE images SET poster_asset_key = ?, duration = ?, native_width = ?, native_height = ?
+    WHERE id = ?
+  `).run(posterAssetKey || null, duration || null, nativeWidth || null, nativeHeight || null, imageId);
+}
+
 module.exports = {
   db,
   // Users
@@ -423,4 +497,6 @@ module.exports = {
   // Board–Channel Links
   createBoardChannelLink, getBoardChannelLinks, getBoardChannelLink, deleteBoardChannelLink,
   getAllBoardChannelLinks, getImageByMmFileId,
+  // Media Jobs
+  createMediaJob, updateMediaJob, getMediaJob, getPendingMediaJobs, updateImageMedia,
 };

@@ -11,8 +11,10 @@ import { TextureManager } from '../TextureManager';
  *   Tier 2 — client-captured poster from video frame (fallback if no server poster)
  *   Tier 3 — actively playing with live video texture (user-initiated)
  *
- * If the server provides a poster asset key at upload time, the video renders
- * as a plain image until explicitly played. No <video> element needed for thumbnails.
+ * Playback uses a canvas intermediary: video frames are drawn to an offscreen
+ * canvas, then uploaded to GPU via a standard image texture. This avoids
+ * GL_INVALID_OPERATION errors from PixiJS's VideoSource auto-update mechanism
+ * which tries to copy video frames before the GPU texture is allocated.
  */
 
 const MAX_PLAYING_VIDEOS = 1;
@@ -24,7 +26,7 @@ const SHADOW_LIFT = { offsetX: 6, offsetY: 8, alpha: 0.3 };
 export class VideoSprite extends Container {
   readonly assetKey: string;
   readonly videoUrl: string;
-  readonly posterAssetKey: string | null;
+  posterAssetKey: string | null;
 
   private textures: TextureManager | null;
   private videoEl: HTMLVideoElement | null = null;
@@ -41,6 +43,11 @@ export class VideoSprite extends Container {
   private _isPlaying = false;
   private _videoInitialized = false;
   private _hasPoster = false;
+  // Canvas-based video rendering (avoids VideoSource GL errors)
+  private _frameCanvas: HTMLCanvasElement | null = null;
+  private _frameCtx: CanvasRenderingContext2D | null = null;
+  private _rafId: number | null = null;
+  private _useRVFC = false; // true if requestVideoFrameCallback is available
   muted = true;
   loop = true;
 
@@ -66,6 +73,7 @@ export class VideoSprite extends Container {
     this.textures = textures ?? null;
     this._naturalWidth = w;
     this._naturalHeight = h;
+    this._useRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
     // Shadow
     this._shadow = new Graphics();
@@ -96,6 +104,50 @@ export class VideoSprite extends Container {
   /** Whether this video has a server-generated poster available (not yet loaded). */
   get hasServerPoster(): boolean { return !!this.posterAssetKey && !!this.textures; }
 
+  /** Whether the server-generated poster has been loaded (vs client-captured). */
+  get isServerPosterLoaded(): boolean { return this._serverPosterLoaded; }
+
+  // ---- Tier 0: Apply processed media from background worker ---------------
+
+  /** Update dimensions + poster key from the media worker result.
+   *  Resizes all internal visuals and loads poster immediately if not playing. */
+  applyProcessedMedia(opts: {
+    posterAssetKey?: string | null;
+    nativeWidth?: number | null;
+    nativeHeight?: number | null;
+  }): void {
+    if (this.destroyed) return;
+
+    if (opts.posterAssetKey) {
+      this.posterAssetKey = opts.posterAssetKey;
+    }
+
+    const nw = opts.nativeWidth;
+    const nh = opts.nativeHeight;
+    if (nw && nh && nw > 0 && nh > 0 && (nw !== this._naturalWidth || nh !== this._naturalHeight)) {
+      this._naturalWidth = nw;
+      this._naturalHeight = nh;
+
+      if (this._sprite) {
+        this._sprite.width = nw;
+        this._sprite.height = nh;
+      }
+      if (this._placeholder) {
+        this._placeholder.clear();
+        this._placeholder.rect(0, 0, nw, nh).fill(0x2a2a2a);
+      }
+      this._drawShadow(SHADOW_REST);
+      this._drawPlayIcon();
+      this.onDimensionsKnown?.(nw, nh);
+    }
+
+    // Load server poster if not playing and server poster not yet loaded.
+    // This upgrades a client-captured poster (possibly black) to the real one.
+    if (!this._isPlaying && !this._serverPosterLoaded && this.hasServerPoster) {
+      this.loadServerPoster();
+    }
+  }
+
   // ---- Tier 0.5: Server-generated poster (loaded like an image) -----------
 
   /** Load server poster. Called by culling system when within poster budget. */
@@ -109,6 +161,11 @@ export class VideoSprite extends Container {
         return;
       }
 
+      // Clean up any existing client-captured poster before replacing
+      if (this._hasPoster && this.posterTexture && !this._serverPosterLoaded) {
+        this.posterTexture.destroy(true);
+      }
+
       this.posterTexture = tex;
       this._hasPoster = true;
       this._serverPosterLoaded = true;
@@ -116,7 +173,6 @@ export class VideoSprite extends Container {
       this._ensureSprite(tex);
       this._removePlaceholder();
     } catch {
-      // Server poster failed — will fall back to client capture if needed
     } finally {
       this._serverPosterLoading = false;
     }
@@ -214,31 +270,67 @@ export class VideoSprite extends Container {
     this.videoEl.muted = this.muted;
     this.videoEl.loop = this.loop;
 
-    if (!this.videoTexture) {
-      this.videoTexture = Texture.from(this.videoEl);
-    }
-
-    // Drop poster while playing — don't keep both resident
-    if (this._hasPoster && this.posterTexture) {
-      if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
-        this.textures.release(this.posterAssetKey);
-      } else {
-        this.posterTexture.destroy(true);
-      }
-      this.posterTexture = null;
-      this._hasPoster = false;
-      this._serverPosterLoaded = false;
-    }
-
-    this._ensureSprite(this.videoTexture);
-    this._removePlaceholder();
-
     this._isPlaying = true;
-    this._overlay.visible = false;
     activeVideos.add(this);
     this.onStateChange?.();
 
-    this.videoEl.play().catch(() => {
+    const videoEl = this.videoEl!;
+
+    // Once a decoded frame is available, create a canvas-backed texture.
+    // Drawing video → canvas → GPU avoids all VideoSource GL errors.
+    const swapToVideoTexture = () => {
+      if (this.destroyed || !this._isPlaying || !this.videoEl) return;
+
+      const vw = this.videoEl.videoWidth || this._naturalWidth;
+      const vh = this.videoEl.videoHeight || this._naturalHeight;
+
+      if (!this.videoTexture) {
+        // Create offscreen canvas and draw the first frame
+        this._frameCanvas = document.createElement('canvas');
+        this._frameCanvas.width = vw;
+        this._frameCanvas.height = vh;
+        this._frameCtx = this._frameCanvas.getContext('2d');
+        if (this._frameCtx) {
+          this._frameCtx.drawImage(this.videoEl, 0, 0, vw, vh);
+        }
+        // Create texture from canvas — always has valid pixel data
+        this.videoTexture = Texture.from(this._frameCanvas);
+      }
+
+      // Drop poster while playing — don't keep both resident
+      if (this._hasPoster && this.posterTexture) {
+        if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
+          this.textures.release(this.posterAssetKey);
+        } else {
+          this.posterTexture.destroy(true);
+        }
+        this.posterTexture = null;
+        this._hasPoster = false;
+        this._serverPosterLoaded = false;
+      }
+
+      this._ensureSprite(this.videoTexture);
+      this._removePlaceholder();
+      this._overlay.visible = false;
+
+      // Start manual frame update loop
+      this._startFrameLoop();
+    };
+
+    // Wait for a decoded frame before creating the GPU texture.
+    let swapped = false;
+    const safeSwap = () => { if (!swapped) { swapped = true; swapToVideoTexture(); } };
+
+    if (videoEl.readyState >= 4) {
+      safeSwap();
+    } else if (this._useRVFC) {
+      (videoEl as any).requestVideoFrameCallback(safeSwap);
+    } else {
+      videoEl.addEventListener('playing', safeSwap, { once: true });
+    }
+
+    videoEl.play().catch(() => {
+      videoEl.removeEventListener('playing', safeSwap);
       this._isPlaying = false;
       this._overlay.visible = true;
       activeVideos.delete(this);
@@ -252,6 +344,15 @@ export class VideoSprite extends Container {
     this._isPlaying = false;
     this._overlay.visible = true;
     activeVideos.delete(this);
+    this._stopFrameLoop();
+
+    // Restore server poster — paused video behaves like an image.
+    // Drop the live video texture to free GPU memory.
+    if (this.hasServerPoster && !this._hasPoster) {
+      this._destroyVideoTexture();
+      this.loadServerPoster();
+    }
+
     this.onStateChange?.();
   }
 
@@ -440,7 +541,49 @@ export class VideoSprite extends Container {
     this.videoEl = null;
   }
 
+  /** Draw current video frame to offscreen canvas, then tell PixiJS to re-upload. */
+  private _drawFrame(): void {
+    if (!this._frameCtx || !this._frameCanvas || !this.videoEl || !this.videoTexture) return;
+    this._frameCtx.drawImage(this.videoEl, 0, 0, this._frameCanvas.width, this._frameCanvas.height);
+    this.videoTexture.source.update();
+  }
+
+  private _startFrameLoop(): void {
+    if (this._rafId !== null) return;
+    const videoEl = this.videoEl;
+    if (!videoEl) return;
+
+    if (this._useRVFC) {
+      // requestVideoFrameCallback — fires only when a new decoded frame is ready
+      const onFrame = () => {
+        if (!this._isPlaying || this.destroyed) { this._rafId = null; return; }
+        this._drawFrame();
+        this._rafId = (videoEl as any).requestVideoFrameCallback(onFrame);
+      };
+      this._rafId = (videoEl as any).requestVideoFrameCallback(onFrame);
+    } else {
+      // Fallback: requestAnimationFrame
+      const onFrame = () => {
+        if (!this._isPlaying || this.destroyed) { this._rafId = null; return; }
+        this._drawFrame();
+        this._rafId = requestAnimationFrame(onFrame);
+      };
+      this._rafId = requestAnimationFrame(onFrame);
+    }
+  }
+
+  private _stopFrameLoop(): void {
+    if (this._rafId === null) return;
+    if (this._useRVFC && this.videoEl) {
+      (this.videoEl as any).cancelVideoFrameCallback(this._rafId);
+    } else {
+      cancelAnimationFrame(this._rafId);
+    }
+    this._rafId = null;
+  }
+
   private _destroyVideoTexture(): void {
+    this._stopFrameLoop();
     if (this.videoTexture) {
       if (this._sprite && this._sprite.texture === this.videoTexture) {
         this._removeSpriteFromTree();
@@ -449,12 +592,17 @@ export class VideoSprite extends Container {
       this.videoTexture.destroy(true);
       this.videoTexture = null;
     }
+    this._frameCanvas = null;
+    this._frameCtx = null;
   }
 
   destroy(options?: Parameters<Container['destroy']>[0]): void {
+    this._stopFrameLoop();
     this.pause();
     this._destroyVideoEl();
     if (this.videoTexture) { this.videoTexture.destroy(true); this.videoTexture = null; }
+    this._frameCanvas = null;
+    this._frameCtx = null;
     if (this._hasPoster && this.posterTexture) {
       if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
         this.textures.release(this.posterAssetKey);

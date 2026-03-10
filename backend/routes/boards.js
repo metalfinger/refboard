@@ -120,10 +120,33 @@ router.get('/:boardId', (req, res) => {
 
     const images = getBoardImages(board.id);
 
+    // Hydrate video objects with poster/dimensions from DB
+    // (worker may have finished after canvas was last saved)
+    let canvasState = board.canvas_state ? JSON.parse(board.canvas_state) : {};
+    if (canvasState.objects && Array.isArray(canvasState.objects)) {
+      const videoImages = new Map();
+      for (const img of images) {
+        if (img.media_type === 'video' && img.poster_asset_key) {
+          videoImages.set(img.asset_key, img);
+        }
+      }
+      if (videoImages.size > 0) {
+        for (const obj of canvasState.objects) {
+          if (obj.type !== 'video') continue;
+          const dbImg = videoImages.get(obj.asset);
+          if (!dbImg) continue;
+          if (!obj.poster && dbImg.poster_asset_key) obj.poster = dbImg.poster_asset_key;
+          if (!obj.nativeW && dbImg.native_width) { obj.nativeW = dbImg.native_width; obj.w = dbImg.native_width; }
+          if (!obj.nativeH && dbImg.native_height) { obj.nativeH = dbImg.native_height; obj.h = dbImg.native_height; }
+          if (!obj.duration && dbImg.duration) obj.duration = dbImg.duration;
+        }
+      }
+    }
+
     return res.json({
       board: {
         ...board,
-        canvas_state: board.canvas_state ? JSON.parse(board.canvas_state) : {},
+        canvas_state: canvasState,
       },
       collection: {
         id: collection.id,

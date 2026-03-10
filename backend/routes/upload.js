@@ -6,9 +6,8 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const { authMiddleware } = require('../auth');
-const { getBoard, getCollectionMember, createImage } = require('../db');
+const { getBoard, getCollectionMember, createImage, createMediaJob } = require('../db');
 const { putBuffer, getImageUrl, MIME_TO_EXT, MAX_FILE_SIZE } = require('../minio');
-const { probeVideo, extractPoster } = require('../video-utils');
 
 const router = Router();
 
@@ -91,8 +90,8 @@ function classifyMedia(mimeType) {
 
 /**
  * Upload a media file (image or video) to MinIO.
- * For videos: extracts poster frame + metadata via ffmpeg at upload time
- * so the board never needs a <video> element for thumbnails.
+ * Videos: stored immediately, poster/metadata extracted async by media-worker.
+ * Images: dimensions extracted inline (fast, no ffmpeg).
  */
 async function uploadMedia(boardId, imageId, buffer, mimetype) {
   const ext = MIME_TO_EXT[mimetype] || '.bin';
@@ -100,33 +99,15 @@ async function uploadMedia(boardId, imageId, buffer, mimetype) {
   await putBuffer(minioPath, buffer, mimetype);
 
   const isVideo = VIDEO_MIME_TYPES.includes(mimetype);
-  let width = null, height = null, duration = null, posterAssetKey = null;
+  let width = null, height = null;
 
-  if (isVideo) {
-    // Extract metadata and poster frame server-side
-    const [meta, posterBuf] = await Promise.all([
-      probeVideo(buffer),
-      extractPoster(buffer),
-    ]);
-
-    if (meta) {
-      width = meta.width;
-      height = meta.height;
-      duration = meta.duration;
-    }
-
-    if (posterBuf) {
-      const posterPath = `boards/${boardId}/${imageId}_poster.jpg`;
-      await putBuffer(posterPath, posterBuf, 'image/jpeg');
-      posterAssetKey = posterPath;
-    }
-  } else {
+  if (!isVideo) {
     const dims = await getImageDimensions(buffer, mimetype);
     width = dims.width;
     height = dims.height;
   }
 
-  return { assetKey: minioPath, minioPath, width, height, duration, posterAssetKey };
+  return { assetKey: minioPath, minioPath, width, height, isVideo };
 }
 
 /**
@@ -146,10 +127,10 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
     const { buffer, originalname, mimetype, size } = req.file;
     const mediaType = classifyMedia(mimetype);
 
-    const { assetKey, minioPath, width, height, duration, posterAssetKey } = await uploadMedia(board.id, imageId, buffer, mimetype);
+    const { assetKey, minioPath, width, height, isVideo } = await uploadMedia(board.id, imageId, buffer, mimetype);
     const publicUrl = getImageUrl(minioPath);
 
-    // Save record
+    // Save image record first (media_jobs FK references images)
     const image = createImage({
       id: imageId,
       boardId: board.id,
@@ -165,6 +146,13 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       mediaType,
     });
 
+    // Enqueue background processing after image record exists
+    let jobId = null;
+    if (isVideo) {
+      jobId = uuidv4();
+      createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
+    }
+
     return res.status(201).json({
       id: image.id,
       url: publicUrl,
@@ -175,8 +163,8 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       mime_type: image.mime_type,
       asset_key: image.asset_key,
       media_type: image.media_type,
-      duration: duration || undefined,
-      poster_asset_key: posterAssetKey || undefined,
+      processing: jobId ? 'queued' : undefined,
+      job_id: jobId || undefined,
     });
   } catch (err) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -253,10 +241,10 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
     const imageId = uuidv4();
     const mediaType = classifyMedia(mimeType);
 
-    const { assetKey, minioPath, width, height, duration, posterAssetKey } = await uploadMedia(board.id, imageId, buffer, mimeType);
+    const { assetKey, minioPath, width, height, isVideo } = await uploadMedia(board.id, imageId, buffer, mimeType);
     const publicUrl = getImageUrl(minioPath);
 
-    // Save record
+    // Save image record first (media_jobs FK references images)
     const image = createImage({
       id: imageId,
       boardId: board.id,
@@ -272,6 +260,13 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
       mediaType,
     });
 
+    // Enqueue background processing after image record exists
+    let jobId = null;
+    if (isVideo) {
+      jobId = uuidv4();
+      createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
+    }
+
     return res.status(201).json({
       id: image.id,
       url: publicUrl,
@@ -282,8 +277,8 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
       mime_type: image.mime_type,
       asset_key: image.asset_key,
       media_type: image.media_type,
-      duration: duration || undefined,
-      poster_asset_key: posterAssetKey || undefined,
+      processing: jobId ? 'queued' : undefined,
+      job_id: jobId || undefined,
     });
   } catch (err) {
     console.error('[upload] from-url error:', err);

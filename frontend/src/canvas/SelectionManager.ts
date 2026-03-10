@@ -41,6 +41,7 @@ export class SelectionManager {
   private _onSelectionChange: ((ids: string[]) => void) | null = null;
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
   private _onItemsTransform: ((items: SceneItem[]) => void) | null = null;
+  private _onObjectDragEnd: ((ids: string[]) => void) | null = null;
 
   // Pointer state
   private _pointerDown = false;
@@ -120,6 +121,11 @@ export class SelectionManager {
   /** Called during drag with ALL moved items for batched sync broadcast. */
   set onItemsTransform(fn: (items: SceneItem[]) => void) {
     this._onItemsTransform = fn;
+  }
+
+  /** Called when object drag ends (for persist/save/spatial refresh). */
+  set onObjectDragEnd(fn: (ids: string[]) => void) {
+    this._onObjectDragEnd = fn;
   }
 
   /** Called on double-click of a text item (for inline editing). */
@@ -313,6 +319,7 @@ export class SelectionManager {
 
       // Notify change (positions updated)
       this._emitChange();
+      this._onObjectDragEnd?.(Array.from(this.selectedIds));
     } else if (this._rubberBanding) {
       // Finish rubber band selection
       const currentWorld = this._viewport.toWorld(e.global.x, e.global.y);
