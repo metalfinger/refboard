@@ -13,7 +13,7 @@ interface TextureEntry {
  */
 export class TextureManager {
   private cache = new Map<string, TextureEntry>();
-  private budget = 512 * 1024 * 1024; // 512 MB
+  private budget = 256 * 1024 * 1024; // 256 MB — keeps headroom for GPU ops
   private currentUsage = 0;
 
   /** Build the URL for a given asset. */

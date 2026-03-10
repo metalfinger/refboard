@@ -224,6 +224,24 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         // Store observer for cleanup
         (container as any).__pixiRO = ro;
 
+        // -- WebGL context loss recovery ------------------------------------
+        const canvas = app.canvas as HTMLCanvasElement;
+        const onContextLost = (e: Event) => {
+          e.preventDefault(); // allows context to be restored
+          console.warn('[PixiCanvas] WebGL context lost — waiting for restore');
+        };
+        const onContextRestored = () => {
+          console.warn('[PixiCanvas] WebGL context restored — reloading scene');
+          // Re-load scene data so textures get re-uploaded to GPU
+          if (sceneRef.current && initialLoadDone.current) {
+            const data = sceneRef.current.serialize();
+            sceneRef.current.loadScene(data, false);
+          }
+        };
+        canvas.addEventListener('webglcontextlost', onContextLost);
+        canvas.addEventListener('webglcontextrestored', onContextRestored);
+        (container as any).__pixiContextHandlers = { onContextLost, onContextRestored, canvas };
+
         // Signal that PixiJS is ready for scene loading
         setPixiReady(true);
 
@@ -252,6 +270,13 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
         if (wheelHandler) {
           container.removeEventListener('wheel', wheelHandler);
           delete (container as any).__pixiWheelHandler;
+        }
+
+        const ctxHandlers = (container as any).__pixiContextHandlers;
+        if (ctxHandlers) {
+          ctxHandlers.canvas.removeEventListener('webglcontextlost', ctxHandlers.onContextLost);
+          ctxHandlers.canvas.removeEventListener('webglcontextrestored', ctxHandlers.onContextRestored);
+          delete (container as any).__pixiContextHandlers;
         }
 
         textures.clear();

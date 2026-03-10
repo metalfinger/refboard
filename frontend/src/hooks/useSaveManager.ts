@@ -27,12 +27,15 @@ export function useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSa
       try {
         const state = JSON.stringify(scene.serialize());
 
-        // Generate thumbnail from PixiJS renderer
+        // Generate thumbnail — skip for large scenes to avoid GPU OOM
         let thumbnail: string | undefined;
         try {
           const app = canvasRef.current?.getApp();
           const viewport = canvasRef.current?.getViewport();
-          if (app?.renderer?.extract && viewport) {
+          const itemCount = scene.getAllItems().length;
+          // Skip thumbnail extraction when >50 items — extract.canvas on
+          // the full viewport with many textures causes WebGL OOM.
+          if (app?.renderer?.extract && viewport && itemCount <= 50) {
             const fullCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
             const thumbMax = 400;
             const sw = fullCanvas.width;
