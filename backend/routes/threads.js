@@ -5,6 +5,7 @@ const {
   getThreadsByBoard,
   getThread,
   createThread,
+  createThreadWithComment,
   updateThreadStatus,
   deleteThread,
   getCommentsByBoard,
@@ -82,19 +83,15 @@ router.post('/:boardId/threads', (req, res) => {
     const commentId = uuidv4();
     const userId = req.user.id;
 
-    const thread = createThread({
-      id: threadId,
+    const { thread, comment } = createThreadWithComment({
+      threadId,
       boardId: req.params.boardId,
       objectId: object_id,
       anchorType: anchor_type || 'object',
       pinX: pin_x,
       pinY: pin_y,
       createdBy: userId,
-    });
-
-    const comment = createComment({
-      id: commentId,
-      threadId,
+      commentId,
       userId,
       authorName: resolveAuthorName(req.user),
       authorColor: null,

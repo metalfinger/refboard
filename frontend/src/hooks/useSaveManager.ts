@@ -6,6 +6,7 @@ import type { SaveStatus } from '../components/StatusBar';
 interface SaveManagerOptions {
   resolvedBoardId: string | undefined;
   isPublicView?: boolean;
+  readOnly?: boolean;
   canvasRef: React.RefObject<PixiCanvasHandle | null>;
   setSaveStatus: (s: SaveStatus) => void;
 }
@@ -13,11 +14,11 @@ interface SaveManagerOptions {
 /**
  * Debounced save with thumbnail generation from PixiJS renderer.
  */
-export function useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSaveStatus }: SaveManagerOptions) {
+export function useSaveManager({ resolvedBoardId, isPublicView, readOnly, canvasRef, setSaveStatus }: SaveManagerOptions) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleSave = useCallback(() => {
-    if (!resolvedBoardId || isPublicView) return;
+    if (!resolvedBoardId || isPublicView || readOnly) return;
     setSaveStatus('unsaved');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
@@ -59,11 +60,15 @@ export function useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSa
         }
         await saveCanvas(resolvedBoardId, state, thumbnail);
         setSaveStatus('saved');
-      } catch {
-        setSaveStatus('unsaved');
+      } catch (err: any) {
+        if (err?.response?.status === 403) {
+          setSaveStatus('readonly');
+        } else {
+          setSaveStatus('unsaved');
+        }
       }
     }, 2000);
-  }, [resolvedBoardId, isPublicView, canvasRef, setSaveStatus]);
+  }, [resolvedBoardId, isPublicView, readOnly, canvasRef, setSaveStatus]);
 
   return { scheduleSave, saveTimerRef };
 }

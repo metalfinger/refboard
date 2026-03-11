@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type SaveStatus = 'saved' | 'saving' | 'unsaved';
+export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'readonly';
 
 interface StatusBarProps {
   boardName: string;
@@ -47,10 +47,11 @@ const statusConfig: Record<SaveStatus, { label: string; color: string }> = {
   saved: { label: 'Saved', color: '#69db7c' },
   saving: { label: 'Saving...', color: '#ffd43b' },
   unsaved: { label: 'Unsaved changes', color: '#ff6b6b' },
+  readonly: { label: 'Read-only', color: '#4dabf7' },
 };
 
 export default function StatusBar({ boardName, imageCount, saveStatus }: StatusBarProps) {
-  const status = statusConfig[saveStatus];
+  const status = statusConfig[saveStatus] || statusConfig.saved;
 
   return (
     <div style={styles.bar}>

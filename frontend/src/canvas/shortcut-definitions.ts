@@ -17,6 +17,7 @@ import { ShortcutDef, ShortcutContext } from './shortcuts';
 import type { SceneItem, SceneManager } from './SceneManager';
 import type { GroupObject } from './scene-format';
 import * as ops from './operations';
+import { onArrangeAnimationDone } from './operations';
 
 // Tracks when the last internal copy happened so paste can decide
 // whether to use internal clipboard (just copied) vs system clipboard (external app).
@@ -121,7 +122,6 @@ function _opUpdate(ctx: ShortcutContext, op: (items: SceneItem[]) => void): void
 /** Like _opUpdate but defers transformBox update until animation completes */
 function _opUpdateAnimated(ctx: ShortcutContext, op: (items: SceneItem[]) => void): void {
   const items = ctx.selection.getSelectedItems();
-  const { onArrangeAnimationDone } = require('./operations');
   onArrangeAnimationDone(() => ctx.selection.transformBox.update(items));
   op(items);
   ctx.onChange(items.map(i => i.id));

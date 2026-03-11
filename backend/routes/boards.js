@@ -153,6 +153,7 @@ router.get('/:boardId', (req, res) => {
         name: collection.name,
       },
       images,
+      role: result.member?.role || 'viewer',
     });
   } catch (err) {
     console.error('[boards] get error:', err);

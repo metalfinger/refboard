@@ -150,15 +150,12 @@ function setupBoardRoom(io, socket) {
 
   // ---- Disconnect cleanup ----
 
-  socket.on('disconnect', () => {
-    for (const room of socket.rooms) {
+  socket.on('disconnecting', () => {
+    const rooms = [...socket.rooms];
+    for (const room of rooms) {
       if (room.startsWith('board:')) {
         leaveRoom(io, socket, room);
       }
-    }
-    if (socket.currentBoardId) {
-      const roomName = getRoomName(socket.currentBoardId);
-      leaveRoom(io, socket, roomName);
     }
   });
 }

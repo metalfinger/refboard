@@ -106,6 +106,15 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Derived
   const { boardData, loading, error } = useBoardLoader(boardId);
   const resolvedBoardId = boardId || boardData?.board?.id;
+  const userRole = boardData?.role || 'viewer';
+  const readOnly = !isPublicView && userRole === 'viewer';
+
+  // Set read-only status when board data loads
+  useEffect(() => {
+    if (boardData && readOnly) {
+      setSaveStatus('readonly');
+    }
+  }, [boardData, readOnly]);
 
   // Toast helper
   const showToast = useCallback((text: string) => {
@@ -115,7 +124,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   }, []);
 
   // Save manager
-  const { scheduleSave } = useSaveManager({ resolvedBoardId, isPublicView, canvasRef, setSaveStatus });
+  const { scheduleSave } = useSaveManager({ resolvedBoardId, isPublicView, readOnly, canvasRef, setSaveStatus });
 
   // Canvas change handler.
   // Pass changedIds for incremental sync (fast, lightweight).
@@ -303,18 +312,26 @@ export default function Editor({ isPublicView }: EditorProps) {
     });
   }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers]);
 
-  // Save on page unload
+  // Save on page unload (only for users with edit access)
   useEffect(() => {
+    if (readOnly || isPublicView) return;
     function onBeforeUnload() {
       const scene = canvasRef.current?.getScene();
       if (!scene || !resolvedBoardId) return;
+      const token = localStorage.getItem('refboard_token');
+      if (!token) return;
       const state = JSON.stringify(scene.serialize());
-      const blob = new Blob([JSON.stringify({ canvas_state: state })], { type: 'application/json' });
-      navigator.sendBeacon(`/api/boards/${resolvedBoardId}/save`, blob);
+      // Use fetch with keepalive to include auth header (sendBeacon can't set headers)
+      fetch(`/api/boards/${resolvedBoardId}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ canvas_state: state }),
+        keepalive: true,
+      }).catch(() => {});
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [resolvedBoardId]);
+  }, [resolvedBoardId, readOnly, isPublicView]);
 
   // Update UI overlays (selection toolbar, video controls, minimap) on demand
   const updateOverlays = useCallback(() => {
@@ -782,12 +799,13 @@ export default function Editor({ isPublicView }: EditorProps) {
 }
 
 function StatusIndicator({ status }: { status: SaveStatus }) {
-  const cfg = {
+  const cfg: Record<SaveStatus, { color: string; label: string }> = {
     saved: { color: '#4ade80', label: 'Saved' },
     saving: { color: '#facc15', label: 'Saving...' },
     unsaved: { color: '#f87171', label: 'Unsaved' },
+    readonly: { color: '#4dabf7', label: 'Read-only' },
   };
-  const s = cfg[status];
+  const s = cfg[status] || cfg.saved;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
       <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: s.color }} />

@@ -259,13 +259,24 @@ export function setupSync(
   socket.on('element:remove', onElementRemove);
   socket.on('object:transform', onTransformReceived);
 
-  // ---- Join room ------------------------------------------------------------
+  // ---- Join room (and rejoin on reconnect) ----------------------------------
 
-  socket.emit('board:join', { boardId }, (response: any) => {
-    if (response?.users) {
-      socket.emit('room:users', { users: response.users });
-    }
-  });
+  function joinRoom() {
+    socket.emit('board:join', { boardId }, (response: any) => {
+      if (response?.users) {
+        socket.emit('room:users', { users: response.users });
+      }
+    });
+  }
+
+  // 'connect' fires on both the initial connection and every reconnect,
+  // ensuring the server always has this client in the board room.
+  socket.on('connect', joinRoom);
+
+  // Emit immediately if already connected (socket was connected before setupSync ran).
+  if (socket.connected) {
+    joinRoom();
+  }
 
   // ---- Return handle --------------------------------------------------------
 
@@ -278,6 +289,7 @@ export function setupSync(
     },
     cleanup: () => {
       sceneManager.onChange = prevOnChange;
+      socket.off('connect', joinRoom);
       socket.off('scene:update', onSceneReceived);
       socket.off('element:update', onElementUpdate);
       socket.off('element:remove', onElementRemove);

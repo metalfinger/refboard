@@ -178,15 +178,18 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
 /**
  * Download an image from a URL. Returns { buffer, mimeType, filename }.
  */
-function downloadImage(imageUrl) {
+function downloadImage(imageUrl, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(imageUrl);
     const client = parsed.protocol === 'https:' ? https : http;
 
     client.get(imageUrl, { timeout: 30000 }, (response) => {
-      // Follow redirects (up to 5)
+      // Follow redirects up to maxRedirects times
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
-        return downloadImage(response.headers.location).then(resolve).catch(reject);
+        if (maxRedirects <= 0) {
+          return reject(new Error('Too many redirects'));
+        }
+        return downloadImage(response.headers.location, maxRedirects - 1).then(resolve).catch(reject);
       }
 
       if (response.statusCode !== 200) {

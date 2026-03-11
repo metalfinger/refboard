@@ -263,6 +263,11 @@ router.post('/:collectionId/members', (req, res) => {
       return res.status(400).json({ error: 'Cannot add yourself' });
     }
 
+    const existingMember = getCollectionMember(collection.id, targetUser.id);
+    if (existingMember) {
+      return res.status(400).json({ error: 'User is already a member' });
+    }
+
     addCollectionMember(collection.id, targetUser.id, memberRole);
 
     return res.status(201).json({

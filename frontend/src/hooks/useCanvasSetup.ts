@@ -13,6 +13,7 @@ import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
+import api from '../api';
 
 interface OnlineUser {
   userId: string;
@@ -73,10 +74,20 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
 
-    const timer = setTimeout(() => {
+    let attempts = 0;
+    const maxAttempts = 100; // 5 seconds max (100 × 50ms)
+    const poll = setInterval(() => {
+      attempts++;
       const scene = canvasRef.current?.getScene();
       const viewport = canvasRef.current?.getViewport();
-      if (!scene || !viewport) return;
+      if (!scene || !viewport) {
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          console.error('[canvas-setup] Canvas not ready after 5s, giving up');
+        }
+        return;
+      }
+      clearInterval(poll);
 
       // Create SelectionManager
       const selection = new SelectionManager(viewport, scene);
@@ -309,17 +320,11 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         });
 
         // ── Annotations: load threads, wire socket events ──
-        const token = localStorage.getItem('refboard_token');
-        if (token) {
-          fetch(`/api/boards/${resolvedBoardId}/threads`, {
-            headers: { Authorization: `Bearer ${token}` },
+        api.get(`/api/boards/${resolvedBoardId}/threads`)
+          .then((res) => {
+            if (res.data.threads) annotationStoreRef.current?.loadThreads(res.data.threads);
           })
-            .then((r) => r.json())
-            .then((data) => {
-              if (data.threads) annotationStoreRef.current?.loadThreads(data.threads);
-            })
-            .catch((err) => console.error('[annotations] load threads error:', err));
-        }
+          .catch((err) => console.error('[annotations] load threads error:', err));
 
         socket.on('thread:add', (data: any) => {
           annotationStoreRef.current?.onThreadAdd(data.thread, data.comment);
@@ -372,10 +377,10 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         }
         pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
       }
-    }, 200);
+    }, 50);
 
     return () => {
-      clearTimeout(timer);
+      clearInterval(poll);
       selectionRef.current?.destroy();
       selectionRef.current = null;
       if (inboxZoneRef.current) {

@@ -552,6 +552,14 @@ function createThread({ id, boardId, objectId, anchorType, pinX, pinY, createdBy
   return getThread(id);
 }
 
+function createThreadWithComment({ threadId, boardId, objectId, anchorType, pinX, pinY, createdBy, commentId, userId, authorName, authorColor, content }) {
+  return db.transaction(() => {
+    const thread = createThread({ id: threadId, boardId, objectId, anchorType, pinX, pinY, createdBy });
+    const comment = createComment({ id: commentId, threadId, userId, authorName, authorColor, content });
+    return { thread, comment };
+  })();
+}
+
 function updateThreadStatus(threadId, status, resolvedBy) {
   if (status === 'resolved') {
     db.prepare(`
@@ -650,7 +658,7 @@ module.exports = {
   // Media Jobs
   createMediaJob, updateMediaJob, getMediaJob, getPendingMediaJobs, updateImageMedia,
   // Threads
-  getThreadsByBoard, getThread, createThread, updateThreadStatus, deleteThread,
+  getThreadsByBoard, getThread, createThread, createThreadWithComment, updateThreadStatus, deleteThread,
   incrementThreadCommentCount, decrementThreadCommentCount,
   // Comments
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,

@@ -135,15 +135,15 @@ export function alignBottom(objects: SceneItem[]) {
 /** Distribute horizontally: normalize all to same height, then space evenly in a row. */
 export function distributeHorizontal(objects: SceneItem[]) {
   if (objects.length < 2) return;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   // Normalize heights first (uniform row)
   normalizeHeight(objects);
   // Then arrange as row with even spacing
   const gap = 20;
   const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
-  const startY = sorted[0].data.y;
-  let x = sorted[0].data.x;
+  let x = 0;
   sorted.forEach((item) => {
-    item.data.x = x;
+    item.data.x = startX + x;
     item.data.y = startY;
     syncPosition(item);
     x += scaledW(item) + gap;
@@ -153,16 +153,16 @@ export function distributeHorizontal(objects: SceneItem[]) {
 /** Distribute vertically: normalize all to same width, then space evenly in a column. */
 export function distributeVertical(objects: SceneItem[]) {
   if (objects.length < 2) return;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   // Normalize widths first (uniform column)
   normalizeWidth(objects);
   // Then arrange as column with even spacing
   const gap = 20;
   const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
-  const startX = sorted[0].data.x;
-  let y = sorted[0].data.y;
+  let y = 0;
   sorted.forEach((item) => {
     item.data.x = startX;
-    item.data.y = y;
+    item.data.y = startY + y;
     syncPosition(item);
     y += scaledH(item) + gap;
   });
@@ -223,15 +223,22 @@ export function normalizeWidth(objects: SceneItem[]) {
 
 // ─── Arrangement ───
 
+/** Get the top-left corner of the bounding box of all items. */
+function anchorTopLeft(objects: SceneItem[]): { x: number; y: number } {
+  return {
+    x: Math.min(...objects.map((item) => item.data.x)),
+    y: Math.min(...objects.map((item) => item.data.y)),
+  };
+}
+
 export function arrangeOptimal(objects: SceneItem[]) {
   if (objects.length < 2) return;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   // Shelf-based bin packing, sorted by height descending
   const sorted = [...objects].sort((a, b) => scaledH(b) - scaledH(a));
   const gap = 10;
   const totalArea = sorted.reduce((s, item) => s + scaledW(item) * scaledH(item), 0);
   const shelfWidth = Math.sqrt(totalArea) * 1.3;
-  const startX = sorted[0].data.x;
-  const startY = sorted[0].data.y;
   let x = 0, y = 0, shelfHeight = 0;
   sorted.forEach((item) => {
     const w = scaledW(item);
@@ -251,10 +258,9 @@ export function arrangeOptimal(objects: SceneItem[]) {
 
 export function arrangeGrid(objects: SceneItem[]) {
   if (objects.length < 2) return;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   const gap = 20;
   const cols = Math.ceil(Math.sqrt(objects.length));
-  const startX = objects[0].data.x;
-  const startY = objects[0].data.y;
   const maxW = Math.max(...objects.map(scaledW));
   const maxH = Math.max(...objects.map(scaledH));
   objects.forEach((item, i) => {
@@ -268,12 +274,12 @@ export function arrangeGrid(objects: SceneItem[]) {
 
 export function arrangeRow(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const gap = 20;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
-  const startY = sorted[0].data.y;
-  let x = sorted[0].data.x;
+  const gap = 20;
+  let x = 0;
   sorted.forEach((item) => {
-    item.data.x = x;
+    item.data.x = startX + x;
     item.data.y = startY;
     syncPosition(item);
     x += scaledW(item) + gap;
@@ -282,13 +288,13 @@ export function arrangeRow(objects: SceneItem[]) {
 
 export function arrangeColumn(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const gap = 20;
+  const { x: startX, y: startY } = anchorTopLeft(objects);
   const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
-  const startX = sorted[0].data.x;
-  let y = sorted[0].data.y;
+  const gap = 20;
+  let y = 0;
   sorted.forEach((item) => {
     item.data.x = startX;
-    item.data.y = y;
+    item.data.y = startY + y;
     syncPosition(item);
     y += scaledH(item) + gap;
   });
@@ -309,41 +315,40 @@ export function arrangeByName(objects: SceneItem[]) {
   const sorted = [...objects].sort((a, b) =>
     (a.data.name || '').localeCompare(b.data.name || '')
   );
-  layoutAsGrid(sorted);
+  layoutAsGrid(sorted, anchorTopLeft(objects));
 }
 
 export function arrangeByZOrder(objects: SceneItem[]) {
-  // Sort by z-order stored in item.data.z
   const sorted = [...objects].sort((a, b) => a.data.z - b.data.z);
-  layoutAsGrid(sorted);
+  layoutAsGrid(sorted, anchorTopLeft(objects));
 }
 
 export function arrangeRandomly(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const minX = Math.min(...objects.map((item) => item.data.x));
-  const minY = Math.min(...objects.map((item) => item.data.y));
-  const maxX = Math.max(...objects.map((item) => item.data.x + scaledW(item)));
-  const maxY = Math.max(...objects.map((item) => item.data.y + scaledH(item)));
+  const { x: startX, y: startY } = anchorTopLeft(objects);
+  // Compute spread area based on total content size
+  const totalW = objects.reduce((s, item) => s + scaledW(item), 0);
+  const totalH = objects.reduce((s, item) => s + scaledH(item), 0);
+  const spreadW = Math.sqrt(totalW * totalH) * 1.5;
+  const spreadH = spreadW;
   objects.forEach((item) => {
-    item.data.x = minX + Math.random() * (maxX - minX - scaledW(item));
-    item.data.y = minY + Math.random() * (maxY - minY - scaledH(item));
+    item.data.x = startX + Math.random() * spreadW;
+    item.data.y = startY + Math.random() * spreadH;
     syncPosition(item);
   });
 }
 
-function layoutAsGrid(sorted: SceneItem[]) {
+function layoutAsGrid(sorted: SceneItem[], anchor: { x: number; y: number }) {
   if (sorted.length < 2) return;
   const gap = 20;
   const cols = Math.ceil(Math.sqrt(sorted.length));
-  const startX = sorted[0].data.x;
-  const startY = sorted[0].data.y;
   const maxW = Math.max(...sorted.map(scaledW));
   const maxH = Math.max(...sorted.map(scaledH));
   sorted.forEach((item, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    item.data.x = startX + col * (maxW + gap);
-    item.data.y = startY + row * (maxH + gap);
+    item.data.x = anchor.x + col * (maxW + gap);
+    item.data.y = anchor.y + row * (maxH + gap);
     syncPosition(item);
   });
 }
