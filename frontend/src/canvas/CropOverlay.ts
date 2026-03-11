@@ -78,6 +78,10 @@ export class CropOverlay extends Container {
     const imgData = item.data as ImageObject;
     this._crop = imgData.crop ? { ...imgData.crop } : { x: 0, y: 0, w: 1, h: 1 };
     this.visible = true;
+    // Ensure overlay renders on top of all scene items
+    if (this.parent) {
+      this.parent.setChildIndex(this, this.parent.children.length - 1);
+    }
     this._draw();
 
     // Key bindings
