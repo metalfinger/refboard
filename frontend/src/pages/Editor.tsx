@@ -169,7 +169,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   });
 
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
-  const { annotationStore, pinOverlay, textEditor, cropOverlay } = useCanvasSetup({
+  const { annotationStore, pinOverlay, textEditor, cropOverlayRef } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
@@ -296,14 +296,14 @@ export default function Editor({ isPublicView }: EditorProps) {
     setShowGrid, setShowHelp, setFocusMode, setReviewMode,
     startCrop: () => {
       const selection = selectionRef.current;
-      if (!selection || !cropOverlay) return;
+      if (!selection || !cropOverlayRef.current) return;
       const items = selection.getSelectedItems();
       if (items.length !== 1 || items[0].type !== 'image') {
         showToast('Select a single image to crop');
         return;
       }
       selection.setEnabled(false);
-      cropOverlay.start(items[0]);
+      cropOverlayRef.current.start(items[0]);
     },
   });
 
@@ -327,14 +327,14 @@ export default function Editor({ isPublicView }: EditorProps) {
       fitAll: () => canvasRef.current?.fitAll(),
       startCrop: () => {
         const selection = selectionRef.current;
-        if (!selection || !cropOverlay) return;
+        if (!selection || !cropOverlayRef.current) return;
         const items = selection.getSelectedItems();
         if (items.length !== 1 || items[0].type !== 'image') return;
         selection.setEnabled(false);
-        cropOverlay.start(items[0]);
+        cropOverlayRef.current.start(items[0]);
       },
     });
-  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers, cropOverlay]);
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers]);
 
   // Save on page unload (only for users with edit access)
   useEffect(() => {

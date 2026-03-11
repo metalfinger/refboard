@@ -458,5 +458,5 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     };
   }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
 
-  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlay: cropOverlayRef.current };
+  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlayRef };
 }
