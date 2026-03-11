@@ -95,6 +95,7 @@ app.get('/api/users/search', (req, res) => {
 
 // ---- API routes ----
 const authRoutes = require('./routes/auth');
+const oauthRoutes = require('./routes/oauth');
 const collectionRoutes = require('./routes/collections');
 const boardRoutes = require('./routes/boards');
 const uploadRoutes = require('./routes/upload');
@@ -103,6 +104,7 @@ const mmBridgeRoutes = require('./routes/mattermost-bridge');
 const threadRoutes = require('./routes/threads');
 
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', oauthRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/upload', uploadRoutes);

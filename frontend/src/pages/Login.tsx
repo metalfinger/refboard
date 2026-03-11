@@ -1,39 +1,46 @@
-import React, { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth';
-import { login as apiLogin, register as apiRegister } from '../api';
 
 export default function Login() {
-  const [isRegister, setIsRegister] = useState(false);
-  const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
+  const [searchParams] = useSearchParams();
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    setSubmitting(true);
+  // Handle OAuth callback — token + user in URL params
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const userParam = searchParams.get('user');
+    const errorParam = searchParams.get('error');
 
-    try {
-      if (isRegister) {
-        const res = await apiRegister(email, username || email.split('@')[0], password, displayName || username || email.split('@')[0]);
-        login(res.data.token, res.data.user);
-      } else {
-        const res = await apiLogin(email, password);
-        login(res.data.token, res.data.user);
-      }
-      navigate('/', { replace: true });
-    } catch (err: any) {
-      const msg = err.response?.data?.error || err.response?.data?.message || 'Something went wrong';
-      setError(msg);
-    } finally {
-      setSubmitting(false);
+    if (errorParam) {
+      setError(errorParam);
+      window.history.replaceState({}, '', '/login');
+      return;
     }
+
+    if (token && userParam) {
+      try {
+        const userData = JSON.parse(userParam);
+        login(token, userData);
+        navigate('/', { replace: true });
+      } catch {
+        setError('Failed to complete login. Please try again.');
+        window.history.replaceState({}, '', '/login');
+      }
+    }
+  }, [searchParams, login, navigate]);
+
+  // If already logged in, redirect
+  useEffect(() => {
+    if (user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, navigate]);
+
+  function handleMattermostLogin() {
+    window.location.href = '/api/auth/mattermost';
   }
 
   return (
@@ -66,7 +73,7 @@ export default function Login() {
             RefBoard
           </h1>
           <p style={{ margin: 0, fontSize: '13px', color: '#555', letterSpacing: '0.2px' }}>
-            {isRegister ? 'Create your account' : 'Sign in to continue'}
+            Sign in with your team account
           </p>
         </div>
 
@@ -80,84 +87,25 @@ export default function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          {isRegister && (
-            <>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                Username
-              </label>
-              <input
-                style={inputStyle}
-                type="text" value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="username" required autoComplete="username"
-              />
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                Display Name
-              </label>
-              <input
-                style={inputStyle}
-                type="text" value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Your name" autoComplete="name"
-              />
-            </>
-          )}
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-            Email
-          </label>
-          <input
-            style={inputStyle}
-            type="email" value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com" required autoComplete="email"
-          />
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-            Password
-          </label>
-          <input
-            style={inputStyle}
-            type="password" value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password" required
-            autoComplete={isRegister ? 'new-password' : 'current-password'}
-            minLength={6}
-          />
-          <button
-            type="submit" disabled={submitting}
-            style={{
-              width: '100%', padding: '12px', marginTop: '4px',
-              background: submitting ? '#333' : 'linear-gradient(135deg, #4a9eff, #3d7dd8)',
-              color: '#fff', border: 'none', borderRadius: '8px',
-              fontSize: '14px', fontWeight: 600, cursor: submitting ? 'default' : 'pointer',
-              transition: 'opacity 0.2s', opacity: submitting ? 0.6 : 1,
-              boxShadow: submitting ? 'none' : '0 2px 12px rgba(74,158,255,0.3)',
-            }}
-          >
-            {submitting ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
-          </button>
-        </form>
-
-        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: '#555' }}>
-          {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
-          <button
-            onClick={() => { setIsRegister(!isRegister); setError(''); }}
-            style={{
-              color: '#4a9eff', cursor: 'pointer', background: 'none',
-              border: 'none', fontSize: '13px', fontWeight: 500,
-            }}
-          >
-            {isRegister ? 'Sign In' : 'Register'}
-          </button>
-        </div>
+        <button
+          onClick={handleMattermostLogin}
+          style={{
+            width: '100%', padding: '14px', marginBottom: '0',
+            background: '#386fe5', color: '#fff', border: 'none', borderRadius: '8px',
+            fontSize: '15px', fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+            transition: 'background 0.2s',
+            boxShadow: '0 2px 12px rgba(56,111,229,0.3)',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = '#2f5fc4')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = '#386fe5')}
+        >
+          <svg width="18" height="18" viewBox="0 0 500 500" fill="currentColor">
+            <path d="M250 0C111.93 0 0 111.93 0 250s111.93 250 250 250 250-111.93 250-250S388.07 0 250 0zm127.55 354.07c-2.93 5.77-9.18 8.85-15.57 8.85-2.68 0-5.4-.59-7.97-1.85l-72.76-35.72c-19.7 14.88-43.19 22.66-67.58 22.66-6.2 0-12.5-.5-18.73-1.53-24.83-4.07-47.17-16.41-63.38-34.95-16.63-19.03-25.78-43.42-25.78-68.68 0-12.07 2.1-23.86 6.15-35.12.58-1.62 1.54-3.07 2.79-4.22L250.07 91.53c3.08-2.62 7.51-2.62 10.59 0l135.28 112c1.56 1.29 2.65 3.04 3.13 5-.04 11.84-2.08 23.56-6.02 34.7l-72.76-35.72c-7.72-3.79-17.03-.59-20.82 7.13-3.79 7.72-.59 17.03 7.13 20.82l72.76 35.72c-9.28 21.84-26.16 39.95-47.98 50.72l.01-.01 72.76 35.72c7.72 3.79 10.92 13.1 7.13 20.82l.27-.36z"/>
+          </svg>
+          Sign in with Mattermost
+        </button>
       </div>
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 14px', marginBottom: '16px',
-  background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: '8px',
-  color: '#e0e0e0', fontSize: '14px', outline: 'none',
-  boxSizing: 'border-box', transition: 'border-color 0.2s',
-};

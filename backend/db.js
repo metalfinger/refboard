@@ -204,6 +204,12 @@ try {
   db.exec("ALTER TABLE images ADD COLUMN native_width INTEGER");
   db.exec("ALTER TABLE images ADD COLUMN native_height INTEGER");
 }
+try {
+  db.prepare("SELECT mattermost_id FROM users LIMIT 0").get();
+} catch {
+  db.exec("ALTER TABLE users ADD COLUMN mattermost_id TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_mattermost_id ON users(mattermost_id)");
+}
 
 // ---------------------
 // User helpers
@@ -218,6 +224,14 @@ function getUserById(id) {
 
 function getUserByUsername(username) {
   return db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username);
+}
+
+function getUserByMattermostId(mmId) {
+  return db.prepare('SELECT * FROM users WHERE mattermost_id = ? AND is_active = 1').get(mmId);
+}
+
+function updateUserMattermostId(userId, mmId) {
+  db.prepare("UPDATE users SET mattermost_id = ?, updated_at = datetime('now') WHERE id = ?").run(mmId, userId);
 }
 
 function createUser({ id, email, username, passwordHash, displayName, role }) {
@@ -641,7 +655,8 @@ function deleteComment(commentId) {
 module.exports = {
   db,
   // Users
-  getUserByEmail, getUserById, getUserByUsername, createUser,
+  getUserByEmail, getUserById, getUserByUsername, getUserByMattermostId,
+  createUser, updateUserMattermostId,
   getAllUsers, updateUserPassword, deactivateUser, getUserCount,
   // Collections
   getCollections, getCollection, getCollectionByShareToken,
