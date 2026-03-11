@@ -700,20 +700,33 @@ export default function Editor({ isPublicView }: EditorProps) {
             fill={textToolbar.fill}
             position={textToolbar.items.length >= 2 ? 'below' : 'above'}
             onFontSizeChange={(size) => {
+              const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
                 (item.data as TextObject).fontSize = size;
                 const s = (item.displayObject as any)?.style;
                 if (s) s.fontSize = size;
+                // Re-measure text bounds
+                const bounds = item.displayObject.getLocalBounds();
+                item.data.w = bounds.width;
+                item.data.h = bounds.height;
+                if (scene) scene.updateSpatialEntry(item);
               }
+              selectionRef.current?.transformBox.update(textToolbar.items);
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             }}
             onFontFamilyChange={(family) => {
+              const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
                 (item.data as TextObject).fontFamily = family;
                 const s = (item.displayObject as any)?.style;
                 if (s) s.fontFamily = family;
+                const bounds = item.displayObject.getLocalBounds();
+                item.data.w = bounds.width;
+                item.data.h = bounds.height;
+                if (scene) scene.updateSpatialEntry(item);
               }
+              selectionRef.current?.transformBox.update(textToolbar.items);
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             }}

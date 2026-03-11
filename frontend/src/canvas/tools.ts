@@ -130,8 +130,7 @@ export function activateTool(
               ctx.onChange();
             });
             // Clear placeholder so user types from scratch
-            const ta = document.querySelector('textarea');
-            if (ta) { ta.value = ''; }
+            ctx.textEditor!.clearText();
           }, 50);
         }
 

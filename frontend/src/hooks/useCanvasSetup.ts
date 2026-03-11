@@ -132,15 +132,16 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
       // Double-click image: zoom-to-fit (PureRef-style focus)
       selection.onDoubleClickImage = (item) => {
-        const bounds = item.displayObject.getBounds();
         const padding = 80; // screen pixels of padding around the image
         const screenW = viewport.screenWidth;
         const screenH = viewport.screenHeight;
-        const scaleX = (screenW - padding * 2) / bounds.width;
-        const scaleY = (screenH - padding * 2) / bounds.height;
+        const bw = item.data.w * Math.abs(item.data.sx);
+        const bh = item.data.h * Math.abs(item.data.sy);
+        const scaleX = (screenW - padding * 2) / bw;
+        const scaleY = (screenH - padding * 2) / bh;
         const targetScale = Math.min(scaleX, scaleY, 3); // cap at 3x
-        const cx = item.data.x + (item.data.w * item.data.sx) / 2;
-        const cy = item.data.y + (item.data.h * item.data.sy) / 2;
+        const cx = item.data.x + bw / 2;
+        const cy = item.data.y + bh / 2;
         viewport.animate({
           time: 300,
           position: { x: cx, y: cy },
@@ -442,6 +443,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       laserCleanupRef.current = null;
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
+      textEditorRef.current?.stopEditing(false);
       if (cropOverlayRef.current) {
         cropOverlayRef.current.destroy();
         cropOverlayRef.current = null;

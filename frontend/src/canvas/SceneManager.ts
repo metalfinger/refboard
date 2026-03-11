@@ -421,6 +421,10 @@ export class SceneManager {
     if (data.type === 'group' && obj instanceof FrameSprite) {
       obj.updateFromData(data as GroupObject);
     }
+    if (data.type === 'image' && obj instanceof ImageSprite) {
+      const imgData = data as ImageObject;
+      obj.applyCrop(imgData.crop);
+    }
 
     // Update stored data
     item.data = { ...data };

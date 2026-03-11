@@ -24,6 +24,14 @@ export class TextEditor {
     return this._textarea !== null;
   }
 
+  /** Clear the current textarea content (for new text items). */
+  clearText(): void {
+    if (this._textarea) {
+      this._textarea.value = '';
+      this._textarea.dispatchEvent(new Event('input')); // trigger autoSize
+    }
+  }
+
   /**
    * Open an inline textarea over the given text item.
    */
