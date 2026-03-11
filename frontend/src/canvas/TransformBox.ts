@@ -169,11 +169,12 @@ export class TransformBox extends Container {
 
   private _draw(): void {
     const { x, y, w, h } = this._bounds;
+    const zoom = this._viewport?.scale.x ?? 1;
 
-    // Border
+    // Border — constant screen-width stroke
     this._border.clear();
     this._border.rect(x, y, w, h);
-    this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH });
+    this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH / zoom });
 
     // Position handles
     const cx = x + w / 2;
@@ -190,14 +191,17 @@ export class TransformBox extends Container {
       br: { px: x + w, py: y + h },
     };
 
+    // Counter-scale handles so they stay the same screen size at any zoom
+    const s = HANDLE_SIZE / zoom;
+    const half = s / 2;
+
     for (const [id, handle] of this._handles) {
       const pos = positions[id];
       handle.clear();
 
-      const half = HANDLE_SIZE / 2;
-      handle.rect(-half, -half, HANDLE_SIZE, HANDLE_SIZE);
+      handle.rect(-half, -half, s, s);
       handle.fill(HANDLE_FILL);
-      handle.stroke({ color: HANDLE_STROKE, width: 1 });
+      handle.stroke({ color: HANDLE_STROKE, width: 1 / zoom });
 
       handle.position.set(pos.px, pos.py);
     }
@@ -309,6 +313,18 @@ export class TransformBox extends Container {
       }
     }
 
+    // Compute the anchor point (fixed edge of bounding box)
+    let anchorX = ob.x; // default: top-left is fixed (br, mr, bc handles)
+    let anchorY = ob.y;
+    switch (handleId) {
+      case 'tl': anchorX = ob.x + ob.w; anchorY = ob.y + ob.h; break;
+      case 'tc': anchorY = ob.y + ob.h; break;
+      case 'tr': anchorX = ob.x; anchorY = ob.y + ob.h; break;
+      case 'ml': anchorX = ob.x + ob.w; break;
+      case 'bl': anchorX = ob.x + ob.w; anchorY = ob.y; break;
+      // br, mr, bc: anchor is top-left (default)
+    }
+
     for (const item of this._items) {
       const orig = origTransforms.get(item.id);
       if (!orig) continue;
@@ -317,26 +333,9 @@ export class TransformBox extends Container {
       item.data.sx = orig.sx * fx;
       item.data.sy = orig.sy * fy;
 
-      // Reposition to keep fixed edge in place
-      switch (handleId) {
-        case 'tl':
-          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
-          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
-          break;
-        case 'tc':
-          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
-          break;
-        case 'tr':
-          item.data.y = orig.y + (orig.sy - item.data.sy) * item.data.h;
-          break;
-        case 'ml':
-          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
-          break;
-        case 'bl':
-          item.data.x = orig.x + (orig.sx - item.data.sx) * item.data.w;
-          break;
-        // br, mr, bc: top-left is fixed, no reposition needed
-      }
+      // Reposition as a unit: scale each item's offset from the anchor point
+      item.data.x = anchorX + (orig.x - anchorX) * fx;
+      item.data.y = anchorY + (orig.y - anchorY) * fy;
 
       item.displayObject.scale.set(item.data.sx, item.data.sy);
       item.displayObject.position.set(item.data.x, item.data.y);

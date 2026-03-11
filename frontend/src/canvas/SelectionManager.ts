@@ -42,6 +42,7 @@ export class SelectionManager {
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
   private _onItemsTransform: ((items: SceneItem[]) => void) | null = null;
   private _onObjectDragEnd: ((ids: string[]) => void) | null = null;
+  private _onViewportMoved: (() => void) | null = null;
 
   // Pointer state
   private _pointerDown = false;
@@ -95,6 +96,14 @@ export class SelectionManager {
     viewport.on('globalpointermove', this._onPointerMove, this);
     viewport.on('pointerup', this._onPointerUp, this);
     viewport.on('pointerupoutside', this._onPointerUp, this);
+
+    // Redraw transform box on zoom so handles stay constant screen size
+    this._onViewportMoved = () => {
+      if (this.selectedIds.size > 0) {
+        this.transformBox.update(this.getSelectedItems());
+      }
+    };
+    viewport.on('moved', this._onViewportMoved);
   }
 
   /** Enable/disable selection interaction (disable during draw/text/eraser tools). */
@@ -464,6 +473,7 @@ export class SelectionManager {
     this._viewport.off('globalpointermove', this._onPointerMove, this);
     this._viewport.off('pointerup', this._onPointerUp, this);
     this._viewport.off('pointerupoutside', this._onPointerUp, this);
+    if (this._onViewportMoved) this._viewport.off('moved', this._onViewportMoved);
     this._overlay.destroy({ children: true });
   }
 }
