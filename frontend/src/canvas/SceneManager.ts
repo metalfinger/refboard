@@ -291,7 +291,9 @@ export class SceneManager {
         if (isGifAsset(imgData.asset)) {
           displayObject = new AnimatedGifSprite(imgData.asset, imgData.w, imgData.h, this.textures);
         } else {
-          displayObject = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);
+          const imgSprite = new ImageSprite(imgData.asset, imgData.w, imgData.h, this.textures);
+          if (imgData.crop) imgSprite.applyCrop(imgData.crop);
+          displayObject = imgSprite;
         }
         break;
       }
@@ -378,49 +380,11 @@ export class SceneManager {
       };
     }
 
-    // Animate entrance: spring scale from center 0 → 1.05 → 1.0 with fade-in
+    // Animate entrance: quick fade-in (no bounce — items are immediately interactive)
     if (animate) {
-      displayObject.scale.set(0, 0);
       displayObject.alpha = 0;
 
-      // Scale from center by adjusting position to keep center point fixed
-      const halfW = data.w * data.sx / 2;
-      const halfH = data.h * data.sy / 2;
-      const finalX = data.x;
-      const finalY = data.y;
-
-      const scaleSpring = new Spring(0, 1.05, PRESETS.bounce);
-      scaleSpring.onUpdate = (v) => {
-        if (!displayObject.destroyed) {
-          displayObject.scale.set(v * data.sx, v * data.sy);
-          displayObject.position.set(
-            finalX + halfW * (1 - v),
-            finalY + halfH * (1 - v),
-          );
-        }
-      };
-      scaleSpring.onComplete = () => {
-        const settleSpring = new Spring(1.05, 1.0, PRESETS.snappy);
-        settleSpring.onUpdate = (v) => {
-          if (!displayObject.destroyed) {
-            displayObject.scale.set(v * data.sx, v * data.sy);
-            displayObject.position.set(
-              finalX + halfW * (1 - v),
-              finalY + halfH * (1 - v),
-            );
-          }
-        };
-        settleSpring.onComplete = () => {
-          if (!displayObject.destroyed) {
-            displayObject.position.set(finalX, finalY);
-            displayObject.scale.set(data.sx, data.sy);
-          }
-        };
-        this.springs.add(settleSpring);
-      };
-      this.springs.add(scaleSpring);
-
-      const alphaSpring = new Spring(0, data.opacity, PRESETS.gentle);
+      const alphaSpring = new Spring(0, data.opacity, PRESETS.snappy);
       alphaSpring.onUpdate = (v) => {
         if (!displayObject.destroyed) {
           displayObject.alpha = v;

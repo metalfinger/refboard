@@ -715,4 +715,14 @@ export const shortcuts: ShortcutDef[] = [
       ctx.toggleReviewMode?.();
     },
   },
+  {
+    id: 'crop',
+    keys: { key: 'c' },
+    category: 'image',
+    description: 'Crop image',
+    needsSelection: true,
+    handler: (ctx: ShortcutContext) => {
+      ctx.startCrop?.();
+    },
+  },
 ];

@@ -31,6 +31,7 @@ interface ShortcutHandlerDeps {
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>;
   setFocusMode: React.Dispatch<React.SetStateAction<boolean>>;
   setReviewMode: React.Dispatch<React.SetStateAction<boolean>>;
+  startCrop?: () => void;
 }
 
 /**
@@ -43,6 +44,7 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
     setShowGrid, setShowHelp, setFocusMode, setReviewMode,
+    startCrop,
   } = deps;
 
   useEffect(() => {
@@ -91,6 +93,7 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
         toggleShowHelp: () => setShowHelp((v) => !v),
         toggleFocusMode: () => setFocusMode((v) => !v),
         toggleReviewMode: () => setReviewMode((v) => !v),
+        startCrop,
         pasteFromSystemClipboard: async (): Promise<string> => {
           if (!resolvedBoardId) return 'No board';
           const msg = await pasteFromSystemClipboard(scene, viewport, resolvedBoardId, onCanvasChange);

@@ -20,6 +20,8 @@ export interface MenuItem {
   danger?: boolean;
 }
 
+export type StartCropFn = (() => void) | null;
+
 interface MenuContext {
   scene: SceneManager | null;
   selection: SelectionManager | null;
@@ -31,6 +33,7 @@ interface MenuContext {
   handleGroup: () => void;
   handleUngroup: () => void;
   fitAll: () => void;
+  startCrop?: () => void;
 }
 
 export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
@@ -152,6 +155,7 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     // -- Image --
     { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
+    { label: 'Crop', shortcut: 'C', onClick: () => ctx.startCrop?.(), disabled: selected.length !== 1 || selected[0]?.data.type !== 'image' },
     { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },
 

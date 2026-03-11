@@ -13,6 +13,7 @@ import type { SelectionManager } from './SelectionManager';
 import { Text, TextStyle } from 'pixi.js';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
+import { TextEditor } from './TextEditor';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -44,6 +45,10 @@ export interface ToolContext {
   onChange: () => void;
   /** Broadcast only specific changed elements (lightweight, for live drawing). */
   broadcastElements?: (ids: string[]) => void;
+  /** Text editor instance for inline editing. */
+  textEditor?: TextEditor;
+  /** Switch back to select tool after placing text. */
+  switchToSelect?: () => void;
 }
 
 export function activateTool(
@@ -95,7 +100,7 @@ export function activateTool(
           locked: false,
           name: '',
           visible: true,
-          text: 'Type here',
+          text: ' ', // placeholder — will be replaced by user input
           fontSize: opts.fontSize!,
           fill: opts.color!,
           fontFamily: 'sans-serif',
@@ -105,6 +110,33 @@ export function activateTool(
         scene._applyZOrder();
         ctx.broadcastElements?.([textData.id]);
         ctx.onChange();
+
+        // Immediately open inline editor on the new text item
+        const item = scene.getById(textData.id);
+        if (item && ctx.textEditor) {
+          // Find the canvas DOM container
+          const canvasEl = container.querySelector('canvas');
+          const domContainer = canvasEl?.parentElement ?? container;
+
+          // Small delay to let PixiJS render the text sprite
+          setTimeout(() => {
+            ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
+              // If user saved empty text, remove the item
+              const text = (item.data as any).text?.trim();
+              if (!text) {
+                scene.removeItem(item.id, true);
+              }
+              ctx.broadcastElements?.([item.id]);
+              ctx.onChange();
+            });
+            // Clear placeholder so user types from scratch
+            const ta = document.querySelector('textarea');
+            if (ta) { ta.value = ''; }
+          }, 50);
+        }
+
+        // Switch back to select tool after placing
+        ctx.switchToSelect?.();
 
         // Remove handler after placing text
         container.removeEventListener('pointerdown', onClick);

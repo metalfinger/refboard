@@ -64,6 +64,7 @@ export class SelectionManager {
   private static readonly DOUBLE_CLICK_MS = 400;
 
   private _onDoubleClickText: ((item: SceneItem) => void) | null = null;
+  private _onDoubleClickImage: ((item: SceneItem) => void) | null = null;
 
   private _enabled = true;
 
@@ -140,6 +141,11 @@ export class SelectionManager {
   /** Called on double-click of a text item (for inline editing). */
   set onDoubleClickText(fn: (item: SceneItem) => void) {
     this._onDoubleClickText = fn;
+  }
+
+  /** Called on double-click of an image item (zoom-to-fit). */
+  set onDoubleClickImage(fn: (item: SceneItem) => void) {
+    this._onDoubleClickImage = fn;
   }
 
   /** Select only this item, deselecting everything else. */
@@ -357,6 +363,8 @@ export class SelectionManager {
           item.displayObject.togglePlayPause();
         } else if (item.type === 'text') {
           this._onDoubleClickText?.(item);
+        } else if (item.type === 'image' || item.type === 'drawing') {
+          this._onDoubleClickImage?.(item);
         }
         this._lastClickTime = 0;
         this._lastClickItemId = null;

@@ -1,0 +1,232 @@
+import React, { useState, useRef, useEffect } from 'react';
+
+interface TextFormatToolbarProps {
+  x: number;
+  y: number;
+  fontSize: number;
+  fontFamily: string;
+  fill: string;
+  position?: 'above' | 'below';
+  onFontSizeChange: (size: number) => void;
+  onFontFamilyChange: (family: string) => void;
+  onFillChange: (color: string) => void;
+}
+
+const FONT_FAMILIES = [
+  'sans-serif',
+  'serif',
+  'monospace',
+  'Arial',
+  'Georgia',
+  'Courier New',
+  'Impact',
+  'Comic Sans MS',
+];
+
+const PRESET_COLORS = [
+  '#ffffff', '#000000', '#ff6b6b', '#ffa94d', '#ffd43b',
+  '#69db7c', '#4dabf7', '#7950f2', '#e64980', '#868e96',
+];
+
+export default function TextFormatToolbar(props: TextFormatToolbarProps) {
+  const { x, y, fontSize, fontFamily, fill, position = 'above', onFontSizeChange, onFontFamilyChange, onFillChange } = props;
+  const [showFontMenu, setShowFontMenu] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const colorInputRef = useRef<HTMLInputElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const onDown = () => { setShowFontMenu(false); setShowColorPicker(false); };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, []);
+
+  const btnStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '26px',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '5px',
+    color: '#999',
+    cursor: 'pointer',
+    padding: '0 6px',
+    fontSize: '11px',
+    fontFamily: 'system-ui, sans-serif',
+    whiteSpace: 'nowrap',
+    transition: 'all 0.1s',
+  };
+
+  const hoverHandlers = {
+    onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.background = '#333';
+      e.currentTarget.style.color = '#fff';
+    },
+    onMouseLeave: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.background = 'transparent';
+      e.currentTarget.style.color = '#999';
+    },
+  };
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y - 8,
+        transform: position === 'below' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1px',
+        padding: '3px',
+        background: 'rgba(22, 22, 22, 0.96)',
+        border: '1px solid #333',
+        borderRadius: '10px',
+        backdropFilter: 'blur(12px)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+        zIndex: 100,
+        pointerEvents: 'auto',
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {/* Font size: decrease / value / increase */}
+      <button
+        style={{ ...btnStyle, width: '26px', padding: 0 }}
+        onClick={() => onFontSizeChange(Math.max(8, fontSize - 2))}
+        title="Decrease font size"
+        {...hoverHandlers}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="2" y1="6" x2="10" y2="6" /></svg>
+      </button>
+      <span style={{ color: '#ccc', fontSize: '11px', minWidth: '24px', textAlign: 'center', userSelect: 'none' }}>
+        {fontSize}
+      </span>
+      <button
+        style={{ ...btnStyle, width: '26px', padding: 0 }}
+        onClick={() => onFontSizeChange(Math.min(200, fontSize + 2))}
+        title="Increase font size"
+        {...hoverHandlers}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="2" y1="6" x2="10" y2="6" /><line x1="6" y1="2" x2="6" y2="10" /></svg>
+      </button>
+
+      {/* Divider */}
+      <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
+
+      {/* Font family dropdown */}
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{ ...btnStyle, maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          onClick={(e) => { e.stopPropagation(); setShowFontMenu((v) => !v); setShowColorPicker(false); }}
+          title="Font family"
+          {...hoverHandlers}
+        >
+          {fontFamily}
+        </button>
+        {showFontMenu && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              marginTop: '4px',
+              background: 'rgba(22, 22, 22, 0.98)',
+              border: '1px solid #333',
+              borderRadius: '8px',
+              padding: '4px',
+              minWidth: '120px',
+              zIndex: 200,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {FONT_FAMILIES.map((f) => (
+              <button
+                key={f}
+                onClick={() => { onFontFamilyChange(f); setShowFontMenu(false); }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '4px 8px',
+                  background: f === fontFamily ? '#333' : 'transparent',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: f === fontFamily ? '#fff' : '#999',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontFamily: f,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#333'; e.currentTarget.style.color = '#fff'; }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = f === fontFamily ? '#333' : 'transparent';
+                  e.currentTarget.style.color = f === fontFamily ? '#fff' : '#999';
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
+
+      {/* Color */}
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{ ...btnStyle, width: '26px', padding: 0 }}
+          onClick={(e) => { e.stopPropagation(); setShowColorPicker((v) => !v); setShowFontMenu(false); }}
+          title="Text color"
+          {...hoverHandlers}
+        >
+          <div style={{ width: '14px', height: '14px', borderRadius: '3px', background: fill, border: '1px solid #555' }} />
+        </button>
+        {showColorPicker && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              right: 0,
+              marginTop: '4px',
+              background: 'rgba(22, 22, 22, 0.98)',
+              border: '1px solid #333',
+              borderRadius: '8px',
+              padding: '8px',
+              zIndex: 200,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px', marginBottom: '8px' }}>
+              {PRESET_COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => { onFillChange(c); setShowColorPicker(false); }}
+                  style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '4px',
+                    background: c,
+                    border: c === fill ? '2px solid #4a90d9' : '1px solid #444',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                />
+              ))}
+            </div>
+            <input
+              ref={colorInputRef}
+              type="color"
+              value={fill}
+              onChange={(e) => { onFillChange(e.target.value); }}
+              style={{ width: '100%', height: '24px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -150,7 +150,7 @@ export class TextEditor {
     const data = item.data as TextObject;
 
     if (save) {
-      const newText = ta.value || this._originalText; // Don't allow empty
+      const newText = ta.value; // Allow empty — caller handles cleanup
       data.text = newText;
       pixiText.text = newText;
 

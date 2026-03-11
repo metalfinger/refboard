@@ -21,10 +21,19 @@ export interface SceneObject {
   flipY?: boolean;
 }
 
+export interface CropRect {
+  /** Normalized 0-1 values relative to original image dimensions */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface ImageObject extends SceneObject {
   type: 'image';
   asset: string;
   filters: string[];
+  crop?: CropRect;
 }
 
 export interface VideoObject extends SceneObject {

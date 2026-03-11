@@ -8,9 +8,11 @@ import { UndoManager } from '../canvas/history';
 import { InboxZone } from '../canvas/InboxZone';
 import { LaserPointer } from '../canvas/LaserPointer';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
+import { ImageSprite } from '../canvas/sprites/ImageSprite';
 import { UploadManager } from '../stores/uploadManager';
 import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
+import { CropOverlay } from '../canvas/CropOverlay';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -70,6 +72,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   const annotationStoreRef = useRef<AnnotationStore | null>(null);
   if (!annotationStoreRef.current) annotationStoreRef.current = new AnnotationStore();
   const pinOverlayRef = useRef<PinOverlay | null>(null);
+  const textEditorRef = useRef<TextEditor | null>(null);
+  if (!textEditorRef.current) textEditorRef.current = new TextEditor();
+  const cropOverlayRef = useRef<CropOverlay | null>(null);
 
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
@@ -102,7 +107,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       };
 
       // Inline text editing on double-click
-      const textEditor = new TextEditor();
+      const textEditor = textEditorRef.current!;
       // Find the DOM container for the canvas (parent of the <canvas> element)
       const canvasElements = document.querySelectorAll('canvas');
       let domContainer: HTMLElement | null = null;
@@ -115,8 +120,32 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       selection.onDoubleClickText = (item) => {
         if (!domContainer) return;
         textEditor.startEditing(item, viewport, domContainer, () => {
+          // If user saved empty text, remove the item
+          const text = (item.data as any).text?.trim();
+          if (!text) {
+            scene.removeItem(item.id, true);
+          }
           syncRef.current?.broadcastElements([item.id]);
           onCanvasChange();
+        });
+      };
+
+      // Double-click image: zoom-to-fit (PureRef-style focus)
+      selection.onDoubleClickImage = (item) => {
+        const bounds = item.displayObject.getBounds();
+        const padding = 80; // screen pixels of padding around the image
+        const screenW = viewport.screenWidth;
+        const screenH = viewport.screenHeight;
+        const scaleX = (screenW - padding * 2) / bounds.width;
+        const scaleY = (screenH - padding * 2) / bounds.height;
+        const targetScale = Math.min(scaleX, scaleY, 3); // cap at 3x
+        const cx = item.data.x + (item.data.w * item.data.sx) / 2;
+        const cy = item.data.y + (item.data.h * item.data.sy) / 2;
+        viewport.animate({
+          time: 300,
+          position: { x: cx, y: cy },
+          scale: targetScale,
+          ease: 'easeOutQuad',
         });
       };
 
@@ -364,6 +393,26 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         };
       }
 
+      // Crop overlay
+      const cropOverlay = new CropOverlay(viewport);
+      viewport.addChild(cropOverlay);
+      cropOverlayRef.current = cropOverlay;
+
+      cropOverlay.onConfirm = (item, crop) => {
+        const imgData = item.data as any;
+        const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
+        imgData.crop = isFullImage ? undefined : crop;
+        if (item.displayObject instanceof ImageSprite) {
+          item.displayObject.applyCrop(imgData.crop);
+        }
+        selection.setEnabled(true);
+        onCanvasChange([item.id]);
+      };
+
+      cropOverlay.onCancel = () => {
+        selection.setEnabled(true);
+      };
+
       // Setup drag/drop and paste
       if (!isPublicView || user) {
         // Use the ref first, fall back to DOM query for the canvas parent
@@ -393,6 +442,10 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       laserCleanupRef.current = null;
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
+      if (cropOverlayRef.current) {
+        cropOverlayRef.current.destroy();
+        cropOverlayRef.current = null;
+      }
       if (pinOverlayRef.current) {
         (pinOverlayRef.current as any)._cleanup?.();
         pinOverlayRef.current.destroy();
@@ -403,5 +456,5 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     };
   }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
 
-  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current };
+  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlay: cropOverlayRef.current };
 }

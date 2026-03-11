@@ -20,6 +20,7 @@ import UserCursors from '../components/UserCursors';
 import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
 import SelectionToolbar from '../components/SelectionToolbar';
+import TextFormatToolbar from '../components/TextFormatToolbar';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
@@ -30,6 +31,7 @@ import FeedbackPanel from '../components/feedback/FeedbackPanel';
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
+import type { TextObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import * as ops from '../canvas/operations';
 
@@ -97,6 +99,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
+  const [textToolbar, setTextToolbar] = useState<{ x: number; y: number; fontSize: number; fontFamily: string; fill: string; items: SceneItem[] } | null>(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
   const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
@@ -166,7 +169,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   });
 
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
-  const { annotationStore, pinOverlay } = useCanvasSetup({
+  const { annotationStore, pinOverlay, textEditor, cropOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
@@ -229,9 +232,11 @@ export default function Editor({ isPublicView }: EditorProps) {
       viewport, scene, selection, container: domContainer,
       onChange: onCanvasChange,
       broadcastElements: (ids) => syncRef.current?.broadcastElements(ids),
+      textEditor: textEditor ?? undefined,
+      switchToSelect: () => setActiveTool(ToolType.SELECT),
     };
     toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth, fontSize });
-  }, [activeTool, color, strokeWidth, fontSize, onCanvasChange]);
+  }, [activeTool, color, strokeWidth, fontSize, onCanvasChange, textEditor]);
 
   // Layer panel
   const { refreshLayers: refreshLayerData, layerHandlers } = useLayerPanel({ canvasRef, selectionRef, onCanvasChange });
@@ -289,6 +294,17 @@ export default function Editor({ isPublicView }: EditorProps) {
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
     setShowGrid, setShowHelp, setFocusMode, setReviewMode,
+    startCrop: () => {
+      const selection = selectionRef.current;
+      if (!selection || !cropOverlay) return;
+      const items = selection.getSelectedItems();
+      if (items.length !== 1 || items[0].type !== 'image') {
+        showToast('Select a single image to crop');
+        return;
+      }
+      selection.setEnabled(false);
+      cropOverlay.start(items[0]);
+    },
   });
 
   // Context menu
@@ -309,8 +325,16 @@ export default function Editor({ isPublicView }: EditorProps) {
       handleGroup,
       handleUngroup,
       fitAll: () => canvasRef.current?.fitAll(),
+      startCrop: () => {
+        const selection = selectionRef.current;
+        if (!selection || !cropOverlay) return;
+        const items = selection.getSelectedItems();
+        if (items.length !== 1 || items[0].type !== 'image') return;
+        selection.setEnabled(false);
+        cropOverlay.start(items[0]);
+      },
     });
-  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers]);
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers, cropOverlay]);
 
   // Save on page unload (only for users with edit access)
   useEffect(() => {
@@ -360,6 +384,37 @@ export default function Editor({ isPublicView }: EditorProps) {
       });
     } else {
       setVideoCtrl(null);
+    }
+
+    // Text format toolbar: show when all selected items are text (1 or more)
+    const textItems = items.filter((it) => it.type === 'text');
+    if (textItems.length > 0 && textItems.length === items.length) {
+      // Use first item's properties as representative
+      const td = textItems[0].data as TextObject;
+      let minX2 = Infinity, minY2 = Infinity, maxX2 = -Infinity, maxY2 = -Infinity;
+      for (const item of textItems) {
+        const b = getItemWorldBounds(item);
+        if (b.x < minX2) minX2 = b.x;
+        if (b.y < minY2) minY2 = b.y;
+        if (b.x + b.w > maxX2) maxX2 = b.x + b.w;
+        if (b.y + b.h > maxY2) maxY2 = b.y + b.h;
+      }
+      const screenTL2 = vp.toScreen(minX2, minY2);
+      const screenTR2 = vp.toScreen(maxX2, minY2);
+      const screenBL2 = vp.toScreen(minX2, maxY2);
+      const screenBR2 = vp.toScreen(maxX2, maxY2);
+      // Single text: show above; multiple: show below (selection toolbar is above)
+      const useBottom = textItems.length >= 2;
+      setTextToolbar({
+        x: useBottom ? (screenBL2.x + screenBR2.x) / 2 : (screenTL2.x + screenTR2.x) / 2,
+        y: useBottom ? (screenBL2.y + screenBR2.y) / 2 + 8 : screenTL2.y,
+        fontSize: td.fontSize,
+        fontFamily: td.fontFamily,
+        fill: td.fill,
+        items: textItems,
+      });
+    } else {
+      setTextToolbar(null);
     }
 
     if (items.length < 2) { setSelToolbar(null); } else {
@@ -632,6 +687,45 @@ export default function Editor({ isPublicView }: EditorProps) {
             onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onGroup={handleGroup}
             onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+          />
+        )}
+
+        {/* Text format toolbar (floating, above selected text items) */}
+        {textToolbar && activeTool === ToolType.SELECT && !contextMenu && (
+          <TextFormatToolbar
+            x={textToolbar.x}
+            y={textToolbar.y}
+            fontSize={textToolbar.fontSize}
+            fontFamily={textToolbar.fontFamily}
+            fill={textToolbar.fill}
+            position={textToolbar.items.length >= 2 ? 'below' : 'above'}
+            onFontSizeChange={(size) => {
+              for (const item of textToolbar.items) {
+                (item.data as TextObject).fontSize = size;
+                const s = (item.displayObject as any)?.style;
+                if (s) s.fontSize = size;
+              }
+              onCanvasChange(textToolbar.items.map(i => i.id));
+              updateOverlays();
+            }}
+            onFontFamilyChange={(family) => {
+              for (const item of textToolbar.items) {
+                (item.data as TextObject).fontFamily = family;
+                const s = (item.displayObject as any)?.style;
+                if (s) s.fontFamily = family;
+              }
+              onCanvasChange(textToolbar.items.map(i => i.id));
+              updateOverlays();
+            }}
+            onFillChange={(color) => {
+              for (const item of textToolbar.items) {
+                (item.data as TextObject).fill = color;
+                const s = (item.displayObject as any)?.style;
+                if (s) s.fill = color;
+              }
+              onCanvasChange(textToolbar.items.map(i => i.id));
+              updateOverlays();
+            }}
           />
         )}
 
