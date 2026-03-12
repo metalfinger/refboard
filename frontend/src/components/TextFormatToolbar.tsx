@@ -4,14 +4,12 @@ interface TextFormatToolbarProps {
   kind: 'text' | 'sticky';
   x: number;
   y: number;
-  fontSize: number;
   fontFamily: string;
   /** Text color (both text and sticky). */
   fill: string;
   /** Note background color (sticky only). */
   noteFill?: string;
   position?: 'above' | 'below';
-  onFontSizeChange: (size: number) => void;
   onFontFamilyChange: (family: string) => void;
   onFillChange: (color: string) => void;
   /** Called when sticky note background color changes. */
@@ -35,7 +33,7 @@ const PRESET_COLORS = [
 ];
 
 export default function TextFormatToolbar(props: TextFormatToolbarProps) {
-  const { kind, x, y, fontSize, fontFamily, fill, noteFill, position = 'above', onFontSizeChange, onFontFamilyChange, onFillChange, onNoteFillChange } = props;
+  const { kind, x, y, fontFamily, fill, noteFill, position = 'above', onFontFamilyChange, onFillChange, onNoteFillChange } = props;
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showNoteFillPicker, setShowNoteFillPicker] = useState(false);
@@ -97,30 +95,6 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {/* Font size: decrease / value / increase */}
-      <button
-        style={{ ...btnStyle, width: '26px', padding: 0 }}
-        onClick={() => onFontSizeChange(Math.max(8, fontSize - 2))}
-        title="Decrease font size"
-        {...hoverHandlers}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="2" y1="6" x2="10" y2="6" /></svg>
-      </button>
-      <span style={{ color: '#ccc', fontSize: '11px', minWidth: '24px', textAlign: 'center', userSelect: 'none' }}>
-        {fontSize}
-      </span>
-      <button
-        style={{ ...btnStyle, width: '26px', padding: 0 }}
-        onClick={() => onFontSizeChange(Math.min(200, fontSize + 2))}
-        title="Increase font size"
-        {...hoverHandlers}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="2" y1="6" x2="10" y2="6" /><line x1="6" y1="2" x2="6" y2="10" /></svg>
-      </button>
-
-      {/* Divider */}
-      <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
-
       {/* Font family dropdown */}
       <div style={{ position: 'relative' }}>
         <button

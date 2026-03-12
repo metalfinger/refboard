@@ -23,6 +23,7 @@ export class TextSprite extends Container {
   private _lastFontSize = 24;
   private _lastFontFamily = 'sans-serif';
   private _lastFill = '#ffffff';
+  private _zoomBucket = 1;
 
   /** Measured width after last text change. */
   get measuredWidth(): number {
@@ -37,6 +38,16 @@ export class TextSprite extends Container {
   /** Show/hide the text (used by TextEditor during editing). */
   showText(visible: boolean): void {
     this._text.visible = visible;
+  }
+
+  /**
+   * Update text rasterization resolution for zoom-bucket crisp rendering.
+   * Only re-rasterizes when the bucket actually changes.
+   */
+  setZoomBucket(bucket: number): void {
+    if (bucket === this._zoomBucket) return;
+    this._zoomBucket = bucket;
+    this._text.resolution = bucket;
   }
 
   constructor(data: TextObject) {

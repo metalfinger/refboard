@@ -161,6 +161,7 @@ export class SceneManager {
 
   private _onChange: (() => void) | null = null;
   private _onItemDimensionsChanged: ((itemId: string) => void) | null = null;
+  private _onItemCreated: ((item: SceneItem) => void) | null = null;
   private _zCounter: number = 0;
 
   constructor(viewport: Viewport, textures: TextureManager, springs: SpringManager) {
@@ -188,6 +189,10 @@ export class SceneManager {
 
   set onItemDimensionsChanged(fn: ((itemId: string) => void) | null) {
     this._onItemDimensionsChanged = fn;
+  }
+
+  set onItemCreated(fn: ((item: SceneItem) => void) | null) {
+    this._onItemCreated = fn;
   }
 
   get onChange(): (() => void) | null {
@@ -387,6 +392,7 @@ export class SceneManager {
     }
 
     // No entrance animation — items must be visible and draggable immediately.
+    this._onItemCreated?.(item);
   }
 
   // -- Item Update ---------------------------------------------------------

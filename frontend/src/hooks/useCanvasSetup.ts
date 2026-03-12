@@ -14,6 +14,7 @@ import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
+import { TextSharpnessManager } from '../canvas/textSharpness';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -70,6 +71,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   const dropCleanupRef = useRef<(() => void) | null>(null);
   const pasteCleanupRef = useRef<(() => void) | null>(null);
   const laserCleanupRef = useRef<(() => void) | null>(null);
+  const sharpnessCleanupRef = useRef<(() => void) | null>(null);
   const annotationStoreRef = useRef<AnnotationStore | null>(null);
   if (!annotationStoreRef.current) annotationStoreRef.current = new AnnotationStore();
   const pinOverlayRef = useRef<PinOverlay | null>(null);
@@ -160,6 +162,17 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
       // Create UndoManager
       undoRef.current = new UndoManager(scene);
+
+      // Zoom-bucket text sharpness — re-rasterize visible text when zoom crosses bucket boundary
+      const sharpness = new TextSharpnessManager(viewport, scene);
+      const onZoomBucketCheck = () => { sharpness.check(); };
+      viewport.on('zoomed', onZoomBucketCheck);
+      scene.onItemCreated = (item) => { sharpness.applyToItem(item); };
+      sharpnessCleanupRef.current = () => {
+        viewport.off('zoomed', onZoomBucketCheck);
+        scene.onItemCreated = null;
+        sharpness.destroy();
+      };
 
       // Create InboxZone and add to viewport
       const inboxZone = new InboxZone(scene.textures, scene.springs);
@@ -475,6 +488,8 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         pinOverlayRef.current = null;
       }
       annotationStoreRef.current?.clear();
+      sharpnessCleanupRef.current?.();
+      sharpnessCleanupRef.current = null;
       disconnectSocket();
     };
   }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
