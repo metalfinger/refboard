@@ -41,7 +41,9 @@ function resolveGroupChild(
   group: SceneItem,
   worldX: number,
   worldY: number,
+  depth = 0,
 ): SceneItem | null {
+  if (depth > 10) return null; // Guard against circular group references
   const groupData = group.data as GroupObject;
 
   // Collect children that exist in the scene, sorted front-to-back (highest z first)
@@ -59,7 +61,7 @@ function resolveGroupChild(
 
     // Nested group — recurse
     if (child.data.type === 'group') {
-      const nested = resolveGroupChild(scene, child, worldX, worldY);
+      const nested = resolveGroupChild(scene, child, worldX, worldY, depth + 1);
       if (nested) return nested;
       // No valid child inside nested group under this point — skip
       continue;
