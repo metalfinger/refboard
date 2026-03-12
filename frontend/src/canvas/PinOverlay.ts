@@ -2,8 +2,8 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { AnnotationStore } from '../stores/annotationStore';
 import type { SceneManager } from './SceneManager';
-import { getItemWorldBounds } from './SceneManager';
 import { getAuthorColorHex, getAuthorInitial } from '../utils/authorColors';
+import { getThreadAnchorWorld, getPointAnchorWorld } from './reviewAnchors';
 
 const PIN_RADIUS = 11;
 const PIN_COLOR_RESOLVED = 0x555555;
@@ -76,13 +76,7 @@ export class PinOverlay extends Container {
   }
 
   private _getAnchorWorld(thread: { object_id: string; anchor_type: string; pin_x: number | null; pin_y: number | null }): { x: number; y: number } | null {
-    const item = this._scene.items.get(thread.object_id);
-    if (!item) return null;
-    const b = getItemWorldBounds(item);
-    if (thread.anchor_type === 'point' && thread.pin_x != null && thread.pin_y != null) {
-      return { x: b.x + thread.pin_x * b.w, y: b.y + thread.pin_y * b.h };
-    }
-    return { x: b.x + b.w * 0.9, y: b.y };
+    return getThreadAnchorWorld(this._scene, thread);
   }
 
   /**
@@ -257,12 +251,10 @@ export class PinOverlay extends Container {
 
     if (!this._ghostPin) return;
 
-    const item = this._scene.items.get(this._ghostPin.objectId);
-    if (!item) return;
-
-    const b = getItemWorldBounds(item);
-    const wx = b.x + this._ghostPin.pinX * b.w;
-    const wy = b.y + this._ghostPin.pinY * b.h;
+    const pos = getPointAnchorWorld(this._scene, this._ghostPin.objectId, this._ghostPin.pinX, this._ghostPin.pinY);
+    if (!pos) return;
+    const wx = pos.x;
+    const wy = pos.y;
     const scale = 1 / this._viewport.scale.x;
     const r = PIN_RADIUS * scale;
 
