@@ -361,7 +361,7 @@ export class SelectionManager {
         // Double-click detected
         if (item.displayObject instanceof VideoSprite) {
           item.displayObject.togglePlayPause();
-        } else if (item.type === 'text') {
+        } else if (item.type === 'text' || item.type === 'sticky') {
           this._onDoubleClickText?.(item);
         } else if (item.type === 'image' || item.type === 'drawing') {
           this._onDoubleClickImage?.(item);
