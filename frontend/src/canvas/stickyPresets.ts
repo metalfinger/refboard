@@ -1,9 +1,8 @@
 /**
  * stickyPresets — sticky note size presets (shared domain module).
  *
- * Presets are defined in screen-space so they preserve the same visual intent
- * regardless of viewport zoom. Scene data still stores world-space width and
- * fontSize; callers convert through the helpers below.
+ * Presets are absolute semantic sizes. Zoom changes the camera/view only; it
+ * must not change what S/M/L/XL/XXL mean for an existing sticky.
  */
 
 export type StickyTextSize = 'S' | 'M' | 'L' | 'XL' | 'XXL';
@@ -35,38 +34,4 @@ export function nearestStickySize(fontSize: number): StickyTextSize {
 /** Get the card width for a given fontSize (snaps to nearest preset). */
 export function getStickyWidthForSize(fontSize: number): number {
   return STICKY_WIDTH_MAP[nearestStickySize(fontSize)];
-}
-
-/**
- * Convert a preset's screen-space target to world-space sticky metrics.
- * objectScale is included so old non-1 scaled stickies still respond
- * predictably when a preset is applied.
- */
-export function getStickyWorldMetricsForPreset(
-  preset: StickyTextSize,
-  zoom: number,
-  objectScale: number = 1,
-): { fontSize: number; width: number } {
-  const safeZoom = Math.max(zoom, 0.001);
-  const safeScale = Math.max(Math.abs(objectScale), 0.001);
-  return {
-    fontSize: STICKY_FONT_MAP[preset] / (safeZoom * safeScale),
-    width: STICKY_WIDTH_MAP[preset] / (safeZoom * safeScale),
-  };
-}
-
-/**
- * Convert a desired on-screen font size into world-space sticky metrics by
- * snapping to the nearest preset first.
- */
-export function getStickyWorldMetricsForScreenFont(
-  screenFontSize: number,
-  zoom: number,
-  objectScale: number = 1,
-): { fontSize: number; width: number; preset: StickyTextSize } {
-  const preset = nearestStickySize(screenFontSize);
-  return {
-    ...getStickyWorldMetricsForPreset(preset, zoom, objectScale),
-    preset,
-  };
 }

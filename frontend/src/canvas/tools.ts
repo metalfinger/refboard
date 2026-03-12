@@ -13,7 +13,7 @@ import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
 import { TextEditor } from './TextEditor';
 import { clampTextFontSize } from './textLimits';
-import { DEFAULT_STICKY_PRESET, getStickyWorldMetricsForPreset } from './stickyPresets';
+import { DEFAULT_STICKY_PRESET, STICKY_FONT_MAP, STICKY_WIDTH_MAP } from './stickyPresets';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -323,10 +323,8 @@ export function activateTool(
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
-        const zoom = viewport.scale.x;
-        const presetMetrics = getStickyWorldMetricsForPreset(DEFAULT_STICKY_PRESET, zoom);
-        const cardW = presetMetrics.width;
-        const cardH = screenToWorld(60, zoom, 40, 200);
+        const cardW = STICKY_WIDTH_MAP[DEFAULT_STICKY_PRESET];
+        const cardH = 60; // auto-computed by StickySprite
         const stickyData = {
           id: crypto.randomUUID(),
           type: 'sticky' as const,
@@ -343,7 +341,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: presetMetrics.fontSize,
+          fontSize: STICKY_FONT_MAP[DEFAULT_STICKY_PRESET],
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',
