@@ -15,8 +15,6 @@ interface ToolbarProps {
   onColorChange: (color: string) => void;
   strokeWidth: number;
   onStrokeWidthChange: (width: number) => void;
-  fontSize: number;
-  onFontSizeChange: (size: number) => void;
   zoom: number;
   onFitAll: () => void;
   onZoomIn?: () => void;
@@ -146,8 +144,6 @@ export default function Toolbar({
   onColorChange,
   strokeWidth,
   onStrokeWidthChange,
-  fontSize,
-  onFontSizeChange,
   zoom,
   onFitAll,
   onZoomIn,
@@ -169,7 +165,6 @@ export default function Toolbar({
   reviewMode,
 }: ToolbarProps) {
   const showStroke = activeTool === ToolType.PEN;
-  const showFontSize = activeTool === ToolType.TEXT || activeTool === ToolType.STICKY;
 
   // Determine active hint
   const activeToolDef = toolButtons.find((t) => t.tool === activeTool);
@@ -271,20 +266,6 @@ export default function Toolbar({
             style={{ width: '60px', height: '3px', accentColor: '#4a9eff', cursor: 'pointer' }}
           />
           <span style={{ fontSize: '10px', color: '#666', minWidth: '18px', textAlign: 'center' }}>{strokeWidth}</span>
-        </>
-      )}
-
-      {/* Font size (text) */}
-      {showFontSize && (
-        <>
-          <Divider />
-          <span style={{ fontSize: '10px', color: '#555', marginLeft: '4px' }}>Size</span>
-          <input
-            type="range" min={12} max={72} value={fontSize}
-            onChange={(e) => onFontSizeChange(Number(e.target.value))}
-            style={{ width: '60px', height: '3px', accentColor: '#4a9eff', cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: '10px', color: '#666', minWidth: '18px', textAlign: 'center' }}>{fontSize}</span>
         </>
       )}
 

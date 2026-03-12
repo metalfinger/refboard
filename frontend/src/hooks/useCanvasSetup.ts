@@ -13,6 +13,7 @@ import { UploadManager } from '../stores/uploadManager';
 import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
+import { TextSprite } from '../canvas/sprites/TextSprite';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -194,6 +195,26 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
         };
         selection.transformBox.onDragEnd = (itemIds) => {
+          // Bake scale into fontSize for plain text items after resize
+          for (const id of itemIds) {
+            const item = scene.getById(id);
+            if (!item || item.type !== 'text') continue;
+            const absSx = Math.abs(item.data.sx);
+            const absSy = Math.abs(item.data.sy);
+            if (absSx === 1 && absSy === 1) continue;
+            // Use average scale as font multiplier
+            const scale = (absSx + absSy) / 2;
+            const d = item.data as any;
+            d.fontSize = Math.round(d.fontSize * scale);
+            d.sx = item.data.sx > 0 ? 1 : -1;
+            d.sy = item.data.sy > 0 ? 1 : -1;
+            if (item.displayObject instanceof TextSprite) {
+              item.displayObject.updateFromData(d);
+              d.w = item.displayObject.measuredWidth;
+              d.h = item.displayObject.measuredHeight;
+            }
+            item.displayObject.scale.set(d.sx, d.sy);
+          }
           onCanvasChange(itemIds);
         };
 

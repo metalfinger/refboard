@@ -1,15 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 interface TextFormatToolbarProps {
+  kind: 'text' | 'sticky';
   x: number;
   y: number;
   fontSize: number;
   fontFamily: string;
+  /** Text color (both text and sticky). */
   fill: string;
+  /** Note background color (sticky only). */
+  noteFill?: string;
   position?: 'above' | 'below';
   onFontSizeChange: (size: number) => void;
   onFontFamilyChange: (family: string) => void;
   onFillChange: (color: string) => void;
+  /** Called when sticky note background color changes. */
+  onNoteFillChange?: (color: string) => void;
 }
 
 const FONT_FAMILIES = [
@@ -29,14 +35,15 @@ const PRESET_COLORS = [
 ];
 
 export default function TextFormatToolbar(props: TextFormatToolbarProps) {
-  const { x, y, fontSize, fontFamily, fill, position = 'above', onFontSizeChange, onFontFamilyChange, onFillChange } = props;
+  const { kind, x, y, fontSize, fontFamily, fill, noteFill, position = 'above', onFontSizeChange, onFontFamilyChange, onFillChange, onNoteFillChange } = props;
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showNoteFillPicker, setShowNoteFillPicker] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
-    const onDown = () => { setShowFontMenu(false); setShowColorPicker(false); };
+    const onDown = () => { setShowFontMenu(false); setShowColorPicker(false); setShowNoteFillPicker(false); };
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
   }, []);
@@ -174,11 +181,11 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
       {/* Divider */}
       <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
 
-      {/* Color */}
+      {/* Text color */}
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...btnStyle, width: '26px', padding: 0 }}
-          onClick={(e) => { e.stopPropagation(); setShowColorPicker((v) => !v); setShowFontMenu(false); }}
+          onClick={(e) => { e.stopPropagation(); setShowColorPicker((v) => !v); setShowFontMenu(false); setShowNoteFillPicker(false); }}
           title="Text color"
           {...hoverHandlers}
         >
@@ -227,6 +234,62 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
           </div>
         )}
       </div>
+
+      {/* Note fill color (sticky only) */}
+      {kind === 'sticky' && noteFill != null && onNoteFillChange && (<>
+        <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
+        <div style={{ position: 'relative' }}>
+          <button
+            style={{ ...btnStyle, width: '26px', padding: 0 }}
+            onClick={(e) => { e.stopPropagation(); setShowNoteFillPicker((v) => !v); setShowFontMenu(false); setShowColorPicker(false); }}
+            title="Note color"
+            {...hoverHandlers}
+          >
+            <div style={{ width: '14px', height: '14px', borderRadius: '6px', background: noteFill, border: '1px solid #555' }} />
+          </button>
+          {showNoteFillPicker && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: '4px',
+                background: 'rgba(22, 22, 22, 0.98)',
+                border: '1px solid #333',
+                borderRadius: '8px',
+                padding: '8px',
+                zIndex: 200,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px', marginBottom: '8px' }}>
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => { onNoteFillChange(c); setShowNoteFillPicker(false); }}
+                    style={{
+                      width: '22px',
+                      height: '22px',
+                      borderRadius: '4px',
+                      background: c,
+                      border: c === noteFill ? '2px solid #4a90d9' : '1px solid #444',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  />
+                ))}
+              </div>
+              <input
+                type="color"
+                value={noteFill}
+                onChange={(e) => { onNoteFillChange(e.target.value); }}
+                style={{ width: '100%', height: '24px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+              />
+            </div>
+          )}
+        </div>
+      </>)}
     </div>
   );
 }

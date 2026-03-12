@@ -35,9 +35,10 @@ import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
 import { getPointAnchorWorld } from '../canvas/reviewAnchors';
 import { resolveReviewTargetAtPoint } from '../canvas/reviewTargeting';
-import type { TextObject } from '../canvas/scene-format';
+import type { TextObject, StickyObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import { TextSprite } from '../canvas/sprites/TextSprite';
+import { StickySprite } from '../canvas/sprites/StickySprite';
 import * as ops from '../canvas/operations';
 
 // Hooks
@@ -91,7 +92,6 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.SELECT);
   const [color, setColor] = useState('#ffffff');
   const [strokeWidth, setStrokeWidth] = useState(4);
-  const [fontSize, setFontSize] = useState(24);
   const [zoom, setZoom] = useState(1);
   const [objectCount, setObjectCount] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
@@ -121,7 +121,11 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
-  const [textToolbar, setTextToolbar] = useState<{ x: number; y: number; fontSize: number; fontFamily: string; fill: string; items: SceneItem[] } | null>(null);
+  const [textToolbar, setTextToolbar] = useState<
+    | { kind: 'text'; x: number; y: number; fontSize: number; fontFamily: string; fill: string; items: SceneItem[] }
+    | { kind: 'sticky'; x: number; y: number; fontSize: number; fontFamily: string; textColor: string; fill: string; items: SceneItem[] }
+    | null
+  >(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
   const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
@@ -436,8 +440,8 @@ export default function Editor({ isPublicView }: EditorProps) {
     };
     // reviewMode is read at click time via getter so it stays current
     Object.defineProperty(ctx, 'reviewMode', { get: () => reviewModeRef.current });
-    toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth, fontSize });
-  }, [activeTool, color, strokeWidth, fontSize, onCanvasChange, textEditor]);
+    toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth });
+  }, [activeTool, color, strokeWidth, onCanvasChange, textEditor]);
 
   // Layer panel
   const { refreshLayers: refreshLayerData, layerHandlers } = useLayerPanel({ canvasRef, selectionRef, onCanvasChange });
@@ -587,13 +591,16 @@ export default function Editor({ isPublicView }: EditorProps) {
       setVideoCtrl(null);
     }
 
-    // Text format toolbar: show when all selected items are text (1 or more)
+    // Contextual format toolbar: show when all selected items are the same text-like type
     const textItems = items.filter((it) => it.type === 'text');
-    if (textItems.length > 0 && textItems.length === items.length) {
-      // Use first item's properties as representative
-      const td = textItems[0].data as TextObject;
+    const stickyItems = items.filter((it) => it.type === 'sticky');
+    const formatItems = textItems.length === items.length ? textItems
+      : stickyItems.length === items.length ? stickyItems
+      : null; // mixed or non-text selection → hide
+
+    if (formatItems && formatItems.length > 0) {
       let minX2 = Infinity, minY2 = Infinity, maxX2 = -Infinity, maxY2 = -Infinity;
-      for (const item of textItems) {
+      for (const item of formatItems) {
         const b = getItemWorldBounds(item);
         if (b.x < minX2) minX2 = b.x;
         if (b.y < minY2) minY2 = b.y;
@@ -604,16 +611,26 @@ export default function Editor({ isPublicView }: EditorProps) {
       const screenTR2 = vp.toScreen(maxX2, minY2);
       const screenBL2 = vp.toScreen(minX2, maxY2);
       const screenBR2 = vp.toScreen(maxX2, maxY2);
-      // Single text: show above; multiple: show below (selection toolbar is above)
-      const useBottom = textItems.length >= 2;
-      setTextToolbar({
-        x: useBottom ? (screenBL2.x + screenBR2.x) / 2 : (screenTL2.x + screenTR2.x) / 2,
-        y: useBottom ? (screenBL2.y + screenBR2.y) / 2 + 8 : screenTL2.y,
-        fontSize: td.fontSize,
-        fontFamily: td.fontFamily,
-        fill: td.fill,
-        items: textItems,
-      });
+      const useBottom = formatItems.length >= 2;
+      const posX = useBottom ? (screenBL2.x + screenBR2.x) / 2 : (screenTL2.x + screenTR2.x) / 2;
+      const posY = useBottom ? (screenBL2.y + screenBR2.y) / 2 + 8 : screenTL2.y;
+
+      if (formatItems === textItems) {
+        const td = textItems[0].data as TextObject;
+        setTextToolbar({
+          kind: 'text', x: posX, y: posY,
+          fontSize: td.fontSize, fontFamily: td.fontFamily, fill: td.fill,
+          items: textItems,
+        });
+      } else {
+        const sd = stickyItems[0].data as StickyObject;
+        setTextToolbar({
+          kind: 'sticky', x: posX, y: posY,
+          fontSize: sd.fontSize || 14, fontFamily: sd.fontFamily || 'Inter, system-ui, sans-serif',
+          textColor: sd.textColor || '#1a1a1a', fill: sd.fill || '#ffd43b',
+          items: stickyItems,
+        });
+      }
     } else {
       setTextToolbar(null);
     }
@@ -767,8 +784,6 @@ export default function Editor({ isPublicView }: EditorProps) {
         onColorChange={setColor}
         strokeWidth={strokeWidth}
         onStrokeWidthChange={setStrokeWidth}
-        fontSize={fontSize}
-        onFontSizeChange={setFontSize}
         zoom={zoom}
         onFitAll={() => canvasRef.current?.fitAll()}
         canUndo={canUndo}
@@ -891,24 +906,35 @@ export default function Editor({ isPublicView }: EditorProps) {
           />
         )}
 
-        {/* Text format toolbar (floating, above selected text items) */}
+        {/* Contextual format toolbar (floating, above selected text/sticky items) */}
         {textToolbar && activeTool === ToolType.SELECT && !contextMenu && (
           <TextFormatToolbar
+            kind={textToolbar.kind}
             x={textToolbar.x}
             y={textToolbar.y}
             fontSize={textToolbar.fontSize}
             fontFamily={textToolbar.fontFamily}
-            fill={textToolbar.fill}
+            fill={textToolbar.kind === 'sticky' ? textToolbar.textColor : textToolbar.fill}
+            noteFill={textToolbar.kind === 'sticky' ? textToolbar.fill : undefined}
             position={textToolbar.items.length >= 2 ? 'below' : 'above'}
             onFontSizeChange={(size) => {
               const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
-                const d = item.data as TextObject;
-                d.fontSize = size;
-                if (item.displayObject instanceof TextSprite) {
-                  item.displayObject.updateFromData(d);
-                  d.w = item.displayObject.measuredWidth;
-                  d.h = item.displayObject.measuredHeight;
+                if (textToolbar.kind === 'text') {
+                  const d = item.data as TextObject;
+                  d.fontSize = size;
+                  if (item.displayObject instanceof TextSprite) {
+                    item.displayObject.updateFromData(d);
+                    d.w = item.displayObject.measuredWidth;
+                    d.h = item.displayObject.measuredHeight;
+                  }
+                } else {
+                  const d = item.data as StickyObject;
+                  d.fontSize = size;
+                  if (item.displayObject instanceof StickySprite) {
+                    item.displayObject.updateFromData(d);
+                    d.h = item.displayObject.computedHeight;
+                  }
                 }
                 if (scene) scene.updateSpatialEntry(item);
               }
@@ -919,12 +945,21 @@ export default function Editor({ isPublicView }: EditorProps) {
             onFontFamilyChange={(family) => {
               const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
-                const d = item.data as TextObject;
-                d.fontFamily = family;
-                if (item.displayObject instanceof TextSprite) {
-                  item.displayObject.updateFromData(d);
-                  d.w = item.displayObject.measuredWidth;
-                  d.h = item.displayObject.measuredHeight;
+                if (textToolbar.kind === 'text') {
+                  const d = item.data as TextObject;
+                  d.fontFamily = family;
+                  if (item.displayObject instanceof TextSprite) {
+                    item.displayObject.updateFromData(d);
+                    d.w = item.displayObject.measuredWidth;
+                    d.h = item.displayObject.measuredHeight;
+                  }
+                } else {
+                  const d = item.data as StickyObject;
+                  d.fontFamily = family;
+                  if (item.displayObject instanceof StickySprite) {
+                    item.displayObject.updateFromData(d);
+                    d.h = item.displayObject.computedHeight;
+                  }
                 }
                 if (scene) scene.updateSpatialEntry(item);
               }
@@ -932,17 +967,36 @@ export default function Editor({ isPublicView }: EditorProps) {
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             }}
-            onFillChange={(color) => {
+            onFillChange={(textColor) => {
               for (const item of textToolbar.items) {
-                const d = item.data as TextObject;
-                d.fill = color;
-                if (item.displayObject instanceof TextSprite) {
-                  item.displayObject.updateFromData(d);
+                if (textToolbar.kind === 'text') {
+                  const d = item.data as TextObject;
+                  d.fill = textColor;
+                  if (item.displayObject instanceof TextSprite) {
+                    item.displayObject.updateFromData(d);
+                  }
+                } else {
+                  const d = item.data as StickyObject;
+                  d.textColor = textColor;
+                  if (item.displayObject instanceof StickySprite) {
+                    item.displayObject.updateFromData(d);
+                  }
                 }
               }
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             }}
+            onNoteFillChange={textToolbar.kind === 'sticky' ? (fillColor) => {
+              for (const item of textToolbar.items) {
+                const d = item.data as StickyObject;
+                d.fill = fillColor;
+                if (item.displayObject instanceof StickySprite) {
+                  item.displayObject.updateFromData(d);
+                }
+              }
+              onCanvasChange(textToolbar.items.map(i => i.id));
+              updateOverlays();
+            } : undefined}
           />
         )}
 

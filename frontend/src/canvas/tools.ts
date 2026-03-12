@@ -26,14 +26,18 @@ export enum ToolType {
 export interface ToolOptions {
   color?: string;
   strokeWidth?: number;
-  fontSize?: number;
 }
 
 const defaultOptions: ToolOptions = {
   color: '#ffffff',
   strokeWidth: 4,
-  fontSize: 24,
 };
+
+// Creation defaults — zoom-aware via screenToWorld()
+const DEFAULT_TEXT_SCREEN_FONT = 24;
+const DEFAULT_STICKY_SCREEN_FONT = 14;
+const DEFAULT_STICKY_SCREEN_WIDTH = 220;
+const DEFAULT_STICKY_SCREEN_HEIGHT = 66;
 
 type CleanupFn = (() => void) | null;
 
@@ -113,7 +117,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: ' ', // placeholder — will be replaced by user input
-          fontSize: screenToWorld(opts.fontSize!, zoom, 10, 72),
+          fontSize: screenToWorld(DEFAULT_TEXT_SCREEN_FONT, zoom, 10, 72),
           fill: opts.color!,
           fontFamily: 'sans-serif',
         };
@@ -322,8 +326,8 @@ export function activateTool(
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
         const zoom = viewport.scale.x;
-        const cardW = screenToWorld(220, zoom, 120, 400);
-        const cardH = screenToWorld(66, zoom, 40, 200);
+        const cardW = screenToWorld(DEFAULT_STICKY_SCREEN_WIDTH, zoom, 120, 400);
+        const cardH = screenToWorld(DEFAULT_STICKY_SCREEN_HEIGHT, zoom, 40, 200);
         const stickyData = {
           id: crypto.randomUUID(),
           type: 'sticky' as const,
@@ -340,7 +344,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: screenToWorld(opts.fontSize!, zoom, 10, 48),
+          fontSize: screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 10, 48),
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',
