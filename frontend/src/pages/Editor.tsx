@@ -37,6 +37,7 @@ import { getPointAnchorWorld } from '../canvas/reviewAnchors';
 import { resolveReviewTargetAtPoint } from '../canvas/reviewTargeting';
 import type { TextObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
+import { TextSprite } from '../canvas/sprites/TextSprite';
 import * as ops from '../canvas/operations';
 
 // Hooks
@@ -902,13 +903,13 @@ export default function Editor({ isPublicView }: EditorProps) {
             onFontSizeChange={(size) => {
               const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
-                (item.data as TextObject).fontSize = size;
-                const s = (item.displayObject as any)?.style;
-                if (s) s.fontSize = size;
-                // Re-measure text bounds
-                const bounds = item.displayObject.getLocalBounds();
-                item.data.w = bounds.width;
-                item.data.h = bounds.height;
+                const d = item.data as TextObject;
+                d.fontSize = size;
+                if (item.displayObject instanceof TextSprite) {
+                  item.displayObject.updateFromData(d);
+                  d.w = item.displayObject.measuredWidth;
+                  d.h = item.displayObject.measuredHeight;
+                }
                 if (scene) scene.updateSpatialEntry(item);
               }
               selectionRef.current?.transformBox.update(textToolbar.items);
@@ -918,12 +919,13 @@ export default function Editor({ isPublicView }: EditorProps) {
             onFontFamilyChange={(family) => {
               const scene = canvasRef.current?.getScene();
               for (const item of textToolbar.items) {
-                (item.data as TextObject).fontFamily = family;
-                const s = (item.displayObject as any)?.style;
-                if (s) s.fontFamily = family;
-                const bounds = item.displayObject.getLocalBounds();
-                item.data.w = bounds.width;
-                item.data.h = bounds.height;
+                const d = item.data as TextObject;
+                d.fontFamily = family;
+                if (item.displayObject instanceof TextSprite) {
+                  item.displayObject.updateFromData(d);
+                  d.w = item.displayObject.measuredWidth;
+                  d.h = item.displayObject.measuredHeight;
+                }
                 if (scene) scene.updateSpatialEntry(item);
               }
               selectionRef.current?.transformBox.update(textToolbar.items);
@@ -932,9 +934,11 @@ export default function Editor({ isPublicView }: EditorProps) {
             }}
             onFillChange={(color) => {
               for (const item of textToolbar.items) {
-                (item.data as TextObject).fill = color;
-                const s = (item.displayObject as any)?.style;
-                if (s) s.fill = color;
+                const d = item.data as TextObject;
+                d.fill = color;
+                if (item.displayObject instanceof TextSprite) {
+                  item.displayObject.updateFromData(d);
+                }
               }
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
