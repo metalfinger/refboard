@@ -13,7 +13,8 @@ import type { SelectionManager } from './SelectionManager';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
 import { TextEditor } from './TextEditor';
-import { clampTextFontSize, clampStickyFontSize } from './textLimits';
+import { clampTextFontSize } from './textLimits';
+import { snapToStickyPreset } from '../components/TextFormatToolbar';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -345,7 +346,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: clampStickyFontSize(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 8, 96)),
+          fontSize: snapToStickyPreset(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 8, 40)),
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',

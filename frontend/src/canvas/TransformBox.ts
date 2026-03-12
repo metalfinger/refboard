@@ -9,7 +9,6 @@
 import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import { type SceneItem, getItemWorldBounds } from './SceneManager';
-import { StickySprite } from './sprites/StickySprite';
 import type { SnapGuides } from './SnapGuides';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +20,6 @@ const BORDER_WIDTH = 1.5;
 const HANDLE_SIZE = 8;
 const HANDLE_FILL = 0xffffff;
 const HANDLE_STROKE = 0x4a90d9;
-const MIN_STICKY_WIDTH = 80;
 
 type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
 
@@ -199,11 +197,9 @@ export class TransformBox extends Container {
     const s = HANDLE_SIZE / zoom;
     const half = s / 2;
 
-    // Vertical-only handles hidden for sticky-only selections (width-only resize)
-    const hideVertical = this._stickyOnly;
-
     for (const [id, handle] of this._handles) {
-      if (hideVertical && (id === 'tc' || id === 'bc')) {
+      // No resize handles for sticky-only selections (fixed width, auto height)
+      if (this._stickyOnly) {
         handle.visible = false;
         handle.eventMode = 'none';
         continue;
@@ -329,11 +325,6 @@ export class TransformBox extends Container {
       }
     }
 
-    // Sticky-only: horizontal resize only — fy stays 1
-    if (this._stickyOnly) {
-      fy = 1;
-    }
-
     // Compute the anchor point (fixed edge of bounding box)
     let anchorX = ob.x; // default: top-left is fixed (br, mr, bc handles)
     let anchorY = ob.y;
@@ -354,22 +345,9 @@ export class TransformBox extends Container {
       item.data.x = anchorX + (orig.x - anchorX) * fx;
       item.data.y = anchorY + (orig.y - anchorY) * fy;
 
-      if (this._stickyOnly && item.type === 'sticky') {
-        // Live reflow: bake width directly so text re-wraps every frame
-        item.data.w = Math.max(MIN_STICKY_WIDTH, Math.round(orig.w * fx));
-        item.data.sx = orig.sx > 0 ? 1 : -1;
-        item.data.sy = orig.sy > 0 ? 1 : -1;
-        if (item.displayObject instanceof StickySprite) {
-          item.displayObject.updateFromData(item.data as any);
-          item.data.h = item.displayObject.computedHeight;
-        }
-        item.displayObject.scale.set(item.data.sx, item.data.sy);
-      } else {
-        // Normal proportional scale
-        item.data.sx = orig.sx * fx;
-        item.data.sy = orig.sy * fy;
-        item.displayObject.scale.set(item.data.sx, item.data.sy);
-      }
+      item.data.sx = orig.sx * fx;
+      item.data.sy = orig.sy * fy;
+      item.displayObject.scale.set(item.data.sx, item.data.sy);
 
       item.displayObject.position.set(item.data.x, item.data.y);
       this._onItemTransform?.(item);

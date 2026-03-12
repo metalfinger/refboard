@@ -14,7 +14,6 @@ import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
-import { StickySprite } from '../canvas/sprites/StickySprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
@@ -227,18 +226,6 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
                 item.displayObject.updateFromData(d);
                 d.w = item.displayObject.measuredWidth;
                 d.h = item.displayObject.measuredHeight;
-              }
-              item.displayObject.scale.set(d.sx, d.sy);
-            } else if (item.type === 'sticky') {
-              const d = item.data as any;
-              // Bake width only — text re-wraps and height auto-adjusts.
-              // fontSize stays stable so the card acts like a resizable text box.
-              d.w = Math.max(80, Math.round(d.w * absSx));
-              d.sx = item.data.sx > 0 ? 1 : -1;
-              d.sy = item.data.sy > 0 ? 1 : -1;
-              if (item.displayObject instanceof StickySprite) {
-                item.displayObject.updateFromData(d);
-                d.h = item.displayObject.computedHeight;
               }
               item.displayObject.scale.set(d.sx, d.sy);
             }

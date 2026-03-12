@@ -1,13 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-type StickyTextSize = 'S' | 'M' | 'L';
+type StickyTextSize = 'S' | 'M' | 'L' | 'XL' | 'XXL';
 
-const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 12, M: 14, L: 18 };
+const STICKY_SIZES: StickyTextSize[] = ['S', 'M', 'L', 'XL', 'XXL'];
+const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 10, M: 14, L: 18, XL: 24, XXL: 32 };
+const STICKY_SIZE_VALUES = Object.values(STICKY_SIZE_MAP);
 
 function nearestStickySize(fontSize: number): StickyTextSize {
-  if (fontSize <= 12) return 'S';
-  if (fontSize <= 15) return 'M';
-  return 'L';
+  let best: StickyTextSize = 'M';
+  let bestDist = Infinity;
+  for (const size of STICKY_SIZES) {
+    const dist = Math.abs(fontSize - STICKY_SIZE_MAP[size]);
+    if (dist < bestDist) { bestDist = dist; best = size; }
+  }
+  return best;
+}
+
+/** Snap a raw fontSize to the nearest preset value. */
+export function snapToStickyPreset(fontSize: number): number {
+  let best = STICKY_SIZE_VALUES[0];
+  let bestDist = Infinity;
+  for (const v of STICKY_SIZE_VALUES) {
+    const dist = Math.abs(fontSize - v);
+    if (dist < bestDist) { bestDist = dist; best = v; }
+  }
+  return best;
 }
 
 interface TextFormatToolbarProps {
@@ -111,7 +128,7 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
     >
       {/* S/M/L text size toggle (sticky only) */}
       {kind === 'sticky' && onStickySizeChange && (<>
-        {(['S', 'M', 'L'] as StickyTextSize[]).map((size) => {
+        {STICKY_SIZES.map((size) => {
           const active = nearestStickySize(stickyFontSize || 14) === size;
           return (
             <button
@@ -120,13 +137,13 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
                 ...btnStyle,
                 width: '26px',
                 padding: 0,
-                fontSize: size === 'S' ? '10px' : size === 'M' ? '12px' : '14px',
+                fontSize: size === 'S' ? '9px' : size === 'M' ? '10px' : size === 'L' ? '11px' : size === 'XL' ? '12px' : '13px',
                 fontWeight: active ? 700 : 400,
                 color: active ? '#fff' : '#666',
                 background: active ? '#333' : 'transparent',
               }}
               onClick={() => onStickySizeChange(STICKY_SIZE_MAP[size])}
-              title={`${size === 'S' ? 'Small' : size === 'M' ? 'Medium' : 'Large'} text`}
+              title={`${STICKY_SIZE_MAP[size]}px text`}
               onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = '#333'; e.currentTarget.style.color = '#fff'; } }}
               onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#666'; } }}
             >
