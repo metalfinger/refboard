@@ -990,15 +990,38 @@ export default function Editor({ isPublicView }: EditorProps) {
             token={localStorage.getItem('refboard_token') || ''}
             canvasObjects={canvasObjectMap}
             onError={(msg) => showToast(msg)}
-            expandThreadId={focusedThreadId}
-            onJumpToObject={(objectId) => {
+            expandRequest={expandRequest}
+            focusedThreadId={focusedThreadId}
+            draftPin={draftPin}
+            onCreatePointThread={handleCreatePointThread}
+            onThreadDetailChange={setOpenThreadDetailId}
+            onJumpToObject={(objectId, thread) => {
               const scene = canvasRef.current?.getScene();
               const vp = canvasRef.current?.getViewport();
               if (!scene || !vp) return;
               const item = scene.items.get(objectId);
-              if (!item) return;
+              if (!item) {
+                showToast('This item has been deleted');
+                return;
+              }
               const b = getItemWorldBounds(item);
-              vp.animate({ time: 300, position: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, ease: 'easeOutQuad' });
+
+              // For point-pinned threads, center on pin location
+              let centerX = b.x + b.w / 2;
+              let centerY = b.y + b.h / 2;
+              if (thread?.anchor_type === 'point' && thread.pin_x != null && thread.pin_y != null) {
+                centerX = b.x + thread.pin_x * b.w;
+                centerY = b.y + thread.pin_y * b.h;
+              }
+
+              // Pan only by default; zoom in if object is too small on screen
+              const screenW = b.w * vp.scale.x;
+              if (screenW < 50) {
+                const targetScale = Math.min((vp.screenWidth * 0.6) / b.w, 5);
+                vp.animate({ time: 300, position: { x: centerX, y: centerY }, scale: targetScale, ease: 'easeOutQuad' });
+              } else {
+                vp.animate({ time: 300, position: { x: centerX, y: centerY }, ease: 'easeOutQuad' });
+              }
               selectionRef.current?.selectOnly(objectId);
             }}
           />
