@@ -208,6 +208,18 @@ export default function Editor({ isPublicView }: EditorProps) {
     pinOverlay.refresh();
   }, [pinOverlay]);
 
+  // Sync draft pin to PinOverlay ghost pin
+  useEffect(() => {
+    if (!pinOverlay) return;
+    pinOverlay.setGhostPin(draftPin ? { objectId: draftPin.objectId, pinX: draftPin.pinX, pinY: draftPin.pinY } : null);
+  }, [draftPin, pinOverlay]);
+
+  // Sync focused thread to PinOverlay focus visuals
+  useEffect(() => {
+    if (!pinOverlay) return;
+    pinOverlay.setFocusedThread(focusedThreadId);
+  }, [focusedThreadId, pinOverlay]);
+
   // Review-mode pointer handling: pin click + draft pin placement
   useEffect(() => {
     const vp = canvasRef.current?.getViewport();
