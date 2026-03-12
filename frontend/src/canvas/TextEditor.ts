@@ -10,6 +10,8 @@ import { Text } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { TextObject } from './scene-format';
+import type { StickyObject } from './scene-format';
+import { StickySprite } from './sprites/StickySprite';
 
 export class TextEditor {
   private _textarea: HTMLTextAreaElement | null = null;
@@ -33,7 +35,7 @@ export class TextEditor {
   }
 
   /**
-   * Open an inline textarea over the given text item.
+   * Open an inline textarea over the given text or sticky item.
    */
   startEditing(
     item: SceneItem,
@@ -41,10 +43,8 @@ export class TextEditor {
     container: HTMLElement,
     onChange: () => void,
   ): void {
-    // Only text items
-    if (item.type !== 'text') return;
-    const pixiText = item.displayObject;
-    if (!(pixiText instanceof Text)) return;
+    // Accept text and sticky items
+    if (item.type !== 'text' && item.type !== 'sticky') return;
 
     // Prevent double-open
     if (this._textarea) this.stopEditing(false);
@@ -54,61 +54,112 @@ export class TextEditor {
     this._container = container;
     this._onChange = onChange;
 
-    const data = item.data as TextObject;
-    this._originalText = data.text;
-
-    // Hide the PixiJS text while editing
-    pixiText.visible = false;
-
-    // Compute screen position of the text
-    const worldPos = pixiText.getGlobalPosition();
-    const renderer = viewport.parent?.parent; // stage -> app (not reliable)
-    // Use viewport.toScreen to convert world → screen coords
-    const screen = viewport.toScreen(item.data.x, item.data.y);
     const zoom = viewport.scale.x;
 
-    // Scaled font size
-    const scaledFontSize = data.fontSize * zoom * Math.abs(item.data.sx);
+    // Type-specific config
+    let text = '';
+    let fontSize = 14;
+    let fontFamily = 'sans-serif';
+    let color = '#ffffff';
+    let bgColor = 'transparent';
+    let padding = 0;
+    let screenX = 0;
+    let screenY = 0;
+    let taWidth = 'auto';
+
+    if (item.type === 'sticky') {
+      const data = item.data as StickyObject;
+      text = data.text;
+      fontSize = data.fontSize || 14;
+      fontFamily = data.fontFamily || 'Inter, system-ui, sans-serif';
+      color = data.textColor || '#1a1a1a';
+      bgColor = data.fill || '#ffd43b';
+      padding = (data.padding ?? 16) * zoom * Math.abs(item.data.sx);
+
+      // Position at sticky's world coords
+      const screen = viewport.toScreen(item.data.x, item.data.y);
+      screenX = screen.x + padding;
+      screenY = screen.y + padding;
+
+      // Fixed width matching the sticky content area
+      const scaledW = data.w * zoom * Math.abs(item.data.sx);
+      taWidth = `${scaledW - padding * 2}px`;
+
+      // Hide the StickySprite text child (keep bg visible)
+      if (item.displayObject instanceof StickySprite) {
+        item.displayObject.showText(false);
+      }
+    } else {
+      // Original text behavior
+      const data = item.data as TextObject;
+      text = data.text;
+      fontSize = data.fontSize;
+      fontFamily = data.fontFamily;
+      color = data.fill;
+      bgColor = 'transparent';
+      padding = 0;
+
+      const screen = viewport.toScreen(item.data.x, item.data.y);
+      screenX = screen.x;
+      screenY = screen.y;
+      taWidth = 'auto';
+
+      // Hide the PixiJS text while editing
+      const pixiText = item.displayObject;
+      if (pixiText instanceof Text) {
+        pixiText.visible = false;
+      }
+    }
+
+    this._originalText = text;
+    const scaledFontSize = fontSize * zoom * Math.abs(item.data.sx);
 
     // Create textarea
     const ta = document.createElement('textarea');
-    ta.value = data.text;
+    ta.value = text;
     ta.style.position = 'absolute';
-    ta.style.left = `${screen.x}px`;
-    ta.style.top = `${screen.y}px`;
+    ta.style.left = `${screenX}px`;
+    ta.style.top = `${screenY}px`;
     ta.style.fontSize = `${scaledFontSize}px`;
-    ta.style.fontFamily = data.fontFamily;
-    ta.style.color = data.fill;
-    ta.style.background = 'transparent';
+    ta.style.fontFamily = fontFamily;
+    ta.style.color = color;
+    ta.style.background = bgColor === 'transparent' ? 'transparent' : bgColor;
     ta.style.border = 'none';
     ta.style.outline = 'none';
     ta.style.resize = 'none';
     ta.style.overflow = 'hidden';
     ta.style.padding = '0';
     ta.style.margin = '0';
-    ta.style.lineHeight = '1.2';
-    ta.style.whiteSpace = 'pre';
+    ta.style.lineHeight = item.type === 'sticky' ? '1.4' : '1.2';
+    ta.style.whiteSpace = item.type === 'sticky' ? 'pre-wrap' : 'pre';
     ta.style.zIndex = '1000';
     ta.style.minWidth = '20px';
     ta.style.minHeight = `${scaledFontSize * 1.3}px`;
     ta.style.transformOrigin = 'top left';
-    // Apply rotation if any
+    ta.style.boxSizing = 'border-box';
+
+    if (taWidth !== 'auto') {
+      ta.style.width = taWidth;
+    }
+
+    // Apply rotation
     if (item.data.angle) {
       ta.style.transform = `rotate(${item.data.angle}deg)`;
     }
 
-    // Auto-size the textarea to fit content
+    // Auto-size
     const autoSize = () => {
       ta.style.height = 'auto';
-      ta.style.width = 'auto';
-      // Use a hidden measurement trick: set to scroll dimensions
+      if (taWidth === 'auto') {
+        ta.style.width = 'auto';
+        ta.style.width = `${Math.max(ta.scrollWidth + 4, 20)}px`;
+      }
       ta.style.height = `${ta.scrollHeight}px`;
-      ta.style.width = `${Math.max(ta.scrollWidth + 4, 20)}px`;
     };
 
     // Event handlers
     const onKeyDown = (e: KeyboardEvent) => {
-      e.stopPropagation(); // Prevent canvas shortcuts
+      e.stopPropagation();
       if (e.key === 'Escape') {
         e.preventDefault();
         this.stopEditing(false);
@@ -119,7 +170,6 @@ export class TextEditor {
     };
 
     const onBlur = () => {
-      // Small delay to allow Escape to fire first
       setTimeout(() => {
         if (this._textarea === ta) {
           this.stopEditing(true);
@@ -138,7 +188,6 @@ export class TextEditor {
     container.appendChild(ta);
     this._textarea = ta;
 
-    // Initial size and focus
     autoSize();
     ta.focus();
     ta.select();
@@ -152,34 +201,53 @@ export class TextEditor {
     const item = this._item;
     if (!ta || !item) return;
 
-    const pixiText = item.displayObject;
-    if (!(pixiText instanceof Text)) return;
-
-    const data = item.data as TextObject;
-
     if (save) {
-      const newText = ta.value; // Allow empty — caller handles cleanup
-      data.text = newText;
-      pixiText.text = newText;
+      const newText = ta.value;
 
-      // Update dimensions from measured PixiJS text bounds
-      pixiText.visible = true;
-      const bounds = pixiText.getLocalBounds();
-      data.w = bounds.width;
-      data.h = bounds.height;
-
-      this._onChange?.();
+      if (item.type === 'sticky' && item.displayObject instanceof StickySprite) {
+        const data = item.data as StickyObject;
+        data.text = newText;
+        item.displayObject.updateFromData(data);
+        data.h = item.displayObject.computedHeight;
+        item.displayObject.showText(true);
+        this._onChange?.();
+      } else if (item.type === 'text') {
+        const pixiText = item.displayObject;
+        if (pixiText instanceof Text) {
+          const data = item.data as TextObject;
+          data.text = newText;
+          pixiText.text = newText;
+          pixiText.visible = true;
+          const bounds = pixiText.getLocalBounds();
+          data.w = bounds.width;
+          data.h = bounds.height;
+          this._onChange?.();
+        }
+      }
     } else {
-      // Restore original text
-      data.text = this._originalText;
-      pixiText.text = this._originalText;
-      pixiText.visible = true;
+      // Cancel — restore original
+      if (item.type === 'sticky' && item.displayObject instanceof StickySprite) {
+        const data = item.data as StickyObject;
+        data.text = this._originalText;
+        item.displayObject.updateFromData(data);
+        data.h = item.displayObject.computedHeight;
+        item.displayObject.showText(true);
+      } else if (item.type === 'text') {
+        const pixiText = item.displayObject;
+        if (pixiText instanceof Text) {
+          const data = item.data as TextObject;
+          data.text = this._originalText;
+          pixiText.text = this._originalText;
+          pixiText.visible = true;
+        }
+      }
+      // Always notify on cancel too — the tool callback needs this
+      // to clean up empty newly-created items (sticky or text).
+      this._onChange?.();
     }
 
-    // Remove textarea from DOM
+    // DOM cleanup
     ta.remove();
-
-    // Reset state
     this._textarea = null;
     this._item = null;
     this._viewport = null;
