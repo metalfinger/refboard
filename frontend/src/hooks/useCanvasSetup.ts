@@ -14,6 +14,7 @@ import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
+import { StickySprite } from '../canvas/sprites/StickySprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
@@ -208,25 +209,39 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
         };
         selection.transformBox.onDragEnd = (itemIds) => {
-          // Bake scale into fontSize for plain text items after resize
+          // Bake scale into fontSize for text/sticky items after resize
           for (const id of itemIds) {
             const item = scene.getById(id);
-            if (!item || item.type !== 'text') continue;
+            if (!item) continue;
             const absSx = Math.abs(item.data.sx);
             const absSy = Math.abs(item.data.sy);
             if (absSx === 1 && absSy === 1) continue;
-            // Use average scale as font multiplier
-            const scale = (absSx + absSy) / 2;
-            const d = item.data as any;
-            d.fontSize = Math.round(d.fontSize * scale);
-            d.sx = item.data.sx > 0 ? 1 : -1;
-            d.sy = item.data.sy > 0 ? 1 : -1;
-            if (item.displayObject instanceof TextSprite) {
-              item.displayObject.updateFromData(d);
-              d.w = item.displayObject.measuredWidth;
-              d.h = item.displayObject.measuredHeight;
+
+            if (item.type === 'text') {
+              const scale = (absSx + absSy) / 2;
+              const d = item.data as any;
+              d.fontSize = Math.round(d.fontSize * scale);
+              d.sx = item.data.sx > 0 ? 1 : -1;
+              d.sy = item.data.sy > 0 ? 1 : -1;
+              if (item.displayObject instanceof TextSprite) {
+                item.displayObject.updateFromData(d);
+                d.w = item.displayObject.measuredWidth;
+                d.h = item.displayObject.measuredHeight;
+              }
+              item.displayObject.scale.set(d.sx, d.sy);
+            } else if (item.type === 'sticky') {
+              const d = item.data as any;
+              // Scale card width and fontSize, then reset sx/sy so text re-rasterizes crisp
+              d.w = Math.round(d.w * absSx);
+              d.fontSize = Math.round((d.fontSize || 14) * ((absSx + absSy) / 2));
+              d.sx = item.data.sx > 0 ? 1 : -1;
+              d.sy = item.data.sy > 0 ? 1 : -1;
+              if (item.displayObject instanceof StickySprite) {
+                item.displayObject.updateFromData(d);
+                d.h = item.displayObject.computedHeight;
+              }
+              item.displayObject.scale.set(d.sx, d.sy);
             }
-            item.displayObject.scale.set(d.sx, d.sy);
           }
           onCanvasChange(itemIds);
         };
