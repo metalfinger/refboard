@@ -357,7 +357,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           // Re-load scene data so textures get re-uploaded to GPU
           if (sceneRef.current && initialLoadDone.current) {
             const data = sceneRef.current.serialize();
-            sceneRef.current.loadScene(data, false);
+            sceneRef.current.loadScene(data);
           }
         };
         canvas.addEventListener('webglcontextlost', onContextLost);
@@ -441,7 +441,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
       }
 
       initialLoadDone.current = true;
-      sceneRef.current.loadScene(sceneData, false);
+      sceneRef.current.loadScene(sceneData);
     }, [canvasState, pixiReady]);
 
     // ── Space key for pan mode ────────────────────────────────────────

@@ -215,7 +215,7 @@ export class SceneManager {
    * 3. Create new items
    * 4. Apply z-ordering
    */
-  async loadScene(scene: SceneData, animate = false): Promise<void> {
+  async loadScene(scene: SceneData, _animate?: boolean): Promise<void> {
     const incomingById = new Map<string, AnySceneObject>();
     for (const obj of scene.objects) {
       incomingById.set(obj.id, obj);
@@ -258,7 +258,7 @@ export class SceneManager {
       if (existing) {
         this._updateItem(existing, data);
       } else {
-        loadPromises.push(this._createItem(data, animate));
+        loadPromises.push(this._createItem(data));
       }
 
       // Track highest z for nextZ()
@@ -282,7 +282,7 @@ export class SceneManager {
   // -- Item Creation -------------------------------------------------------
 
   /** Create a PixiJS display object from scene data and add it to the viewport. */
-  async _createItem(data: AnySceneObject, animate: boolean): Promise<void> {
+  async _createItem(data: AnySceneObject, _animate?: boolean): Promise<void> {
     let displayObject: Container;
 
     switch (data.type) {
@@ -380,18 +380,7 @@ export class SceneManager {
       };
     }
 
-    // Animate entrance: quick fade-in (no bounce — items are immediately interactive)
-    if (animate) {
-      displayObject.alpha = 0;
-
-      const alphaSpring = new Spring(0, data.opacity, PRESETS.snappy);
-      alphaSpring.onUpdate = (v) => {
-        if (!displayObject.destroyed) {
-          displayObject.alpha = v;
-        }
-      };
-      this.springs.add(alphaSpring);
-    }
+    // No entrance animation — items must be visible and draggable immediately.
   }
 
   // -- Item Update ---------------------------------------------------------
@@ -596,7 +585,7 @@ export class SceneManager {
     };
 
     // Fire-and-forget the async creation (animation handles visual feedback)
-    this._createItem(data, true);
+    this._createItem(data);
 
     this._applyZOrder();
     this._onChange?.();
@@ -638,7 +627,7 @@ export class SceneManager {
       duration,
     };
 
-    this._createItem(data, true);
+    this._createItem(data);
     this._applyZOrder();
     this._onChange?.();
 

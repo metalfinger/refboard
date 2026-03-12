@@ -70,7 +70,7 @@ export class UndoManager {
 
     this.locked = true;
     const parsed = JSON.parse(state);
-    this.sceneManager.loadScene(parsed, false).then(() => {
+    this.sceneManager.loadScene(parsed).then(() => {
       this.locked = false;
     });
   }
