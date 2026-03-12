@@ -130,8 +130,8 @@ export function activateTool(
           const canvasEl = container.querySelector('canvas');
           const domContainer = canvasEl?.parentElement ?? container;
 
-          // Use microtask instead of 50ms delay — PixiJS only needs one tick
-          queueMicrotask(() => {
+          // Wait one frame so the click event settles before focusing textarea
+          requestAnimationFrame(() => {
             ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
               // If user saved empty text, remove the item
               const text = (item.data as any).text?.trim();
@@ -359,8 +359,8 @@ export function activateTool(
           const canvasEl = container.querySelector('canvas');
           const domContainer = canvasEl?.parentElement ?? container;
 
-          // Use microtask instead of 50ms delay — PixiJS only needs one tick
-          queueMicrotask(() => {
+          // Wait one frame so the click event settles before focusing textarea
+          requestAnimationFrame(() => {
             ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
               // Cleanup rule — fires on BOTH save and cancel (stopEditing always calls _onChange):
               //   - new sticky + cancel/blur with empty text => remove (no blank notes left behind)
