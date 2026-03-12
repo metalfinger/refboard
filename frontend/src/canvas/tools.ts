@@ -329,7 +329,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: 14,
+          fontSize: opts.fontSize!,
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',

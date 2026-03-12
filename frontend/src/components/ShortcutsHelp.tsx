@@ -48,7 +48,7 @@ export default function ShortcutsHelp({ shortcuts, onClose }: ShortcutsHelpProps
     { keys: 'H / 2', description: 'Pan tool' },
     { keys: 'P / 3', description: 'Draw tool' },
     { keys: 'T / 4', description: 'Text tool' },
-    { keys: 'E / 5', description: 'Eraser tool' },
+    { keys: 'S / 5', description: 'Sticky note tool' },
     { keys: 'Space + drag', description: 'Pan canvas' },
     { keys: 'Scroll', description: 'Zoom' },
     { keys: 'Middle click + drag', description: 'Pan canvas' },
