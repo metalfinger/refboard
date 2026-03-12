@@ -208,6 +208,92 @@ export default function Editor({ isPublicView }: EditorProps) {
     pinOverlay.refresh();
   }, [pinOverlay]);
 
+  // Review-mode pointer handling: pin click + draft pin placement
+  useEffect(() => {
+    const vp = canvasRef.current?.getViewport();
+    if (!vp || !pinOverlay) return;
+
+    let downX = 0;
+    let downY = 0;
+    let dragOccurred = false;
+
+    const onPointerDown = (e: any) => {
+      const screen = e.global || e.data?.global;
+      if (!screen) return;
+      downX = screen.x;
+      downY = screen.y;
+      dragOccurred = false;
+    };
+
+    const onPointerMove = (e: any) => {
+      if (dragOccurred) return;
+      const screen = e.global || e.data?.global;
+      if (!screen) return;
+      const dx = screen.x - downX;
+      const dy = screen.y - downY;
+      if (dx * dx + dy * dy > 25) { // 5px threshold
+        dragOccurred = true;
+      }
+    };
+
+    const onPointerUp = (e: any) => {
+      if (dragOccurred) return;
+      if (!reviewMode) return;
+
+      const screen = e.global || e.data?.global;
+      if (!screen) return;
+      const worldPos = vp.toWorld(screen.x, screen.y);
+
+      // Priority 1: existing pin
+      const threadId = pinOverlay.getThreadIdAtPoint(worldPos.x, worldPos.y);
+      if (threadId) {
+        setFocusedThreadId(threadId);
+        setDraftPin(null);
+        expandSeqRef.current += 1;
+        setExpandRequest({ threadId, seq: expandSeqRef.current });
+        return;
+      }
+
+      // Priority 2: scene object (place draft pin) — only for editor/owner
+      const scene = canvasRef.current?.getScene();
+      if (scene && userRole !== 'viewer') {
+        // Use 10px screen-space radius converted to world space for forgiving click detection
+        const clickRadius = 10 / vp.scale.x;
+        const hitItems = scene.queryRegion(worldPos.x - clickRadius, worldPos.y - clickRadius, clickRadius * 2, clickRadius * 2);
+        // Take the topmost (highest z) item
+        if (hitItems.length > 0) {
+          const item = hitItems.sort((a: any, b: any) => (b.data.z || 0) - (a.data.z || 0))[0];
+          const bounds = getItemWorldBounds(item);
+          const pinX = Math.max(0, Math.min(1, (worldPos.x - bounds.x) / bounds.w));
+          const pinY = Math.max(0, Math.min(1, (worldPos.y - bounds.y) / bounds.h));
+          setDraftPin({
+            objectId: item.id,
+            pinX,
+            pinY,
+            worldX: worldPos.x,
+            worldY: worldPos.y,
+          });
+          setFocusedThreadId(null);
+          return;
+        }
+      }
+
+      // Priority 3: empty canvas — clear draft and focus
+      setDraftPin(null);
+      setFocusedThreadId(null);
+    };
+
+    vp.on('pointerdown', onPointerDown);
+    vp.on('pointermove', onPointerMove);
+    vp.on('pointerup', onPointerUp);
+
+    return () => {
+      vp.off('pointerdown', onPointerDown);
+      vp.off('pointermove', onPointerMove);
+      vp.off('pointerup', onPointerUp);
+    };
+  }, [reviewMode, pinOverlay, userRole]);
+
   // Tool activation
   useEffect(() => {
     const viewport = canvasRef.current?.getViewport();
