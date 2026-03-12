@@ -6,12 +6,12 @@
  * Commits on blur/Enter, cancels on Escape.
  */
 
-import { Text } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { TextObject } from './scene-format';
 import type { StickyObject } from './scene-format';
 import { StickySprite } from './sprites/StickySprite';
+import { TextSprite } from './sprites/TextSprite';
 
 export class TextEditor {
   private _textarea: HTMLTextAreaElement | null = null;
@@ -104,10 +104,9 @@ export class TextEditor {
       screenY = screen.y;
       taWidth = 'auto';
 
-      // Hide the PixiJS text while editing
-      const pixiText = item.displayObject;
-      if (pixiText instanceof Text) {
-        pixiText.visible = false;
+      // Hide the TextSprite text while editing
+      if (item.displayObject instanceof TextSprite) {
+        item.displayObject.showText(false);
       }
     }
 
@@ -228,15 +227,13 @@ export class TextEditor {
         item.displayObject.showText(true);
         onChange?.();
       } else if (item.type === 'text') {
-        const pixiText = item.displayObject;
-        if (pixiText instanceof Text && !pixiText.destroyed) {
+        if (item.displayObject instanceof TextSprite && !item.displayObject.destroyed) {
           const data = item.data as TextObject;
           data.text = newText;
-          pixiText.text = newText;
-          pixiText.visible = true;
-          const bounds = pixiText.getLocalBounds();
-          data.w = bounds.width;
-          data.h = bounds.height;
+          item.displayObject.updateFromData(data);
+          data.w = item.displayObject.measuredWidth;
+          data.h = item.displayObject.measuredHeight;
+          item.displayObject.showText(true);
           onChange?.();
         }
       }
@@ -253,12 +250,11 @@ export class TextEditor {
         data.h = item.displayObject.computedHeight;
         item.displayObject.showText(true);
       } else if (item.type === 'text') {
-        const pixiText = item.displayObject;
-        if (pixiText instanceof Text && !pixiText.destroyed) {
+        if (item.displayObject instanceof TextSprite && !item.displayObject.destroyed) {
           const data = item.data as TextObject;
           data.text = originalText;
-          pixiText.text = originalText;
-          pixiText.visible = true;
+          item.displayObject.updateFromData(data);
+          item.displayObject.showText(true);
         }
       }
       // Always notify on cancel too — the tool callback needs this
