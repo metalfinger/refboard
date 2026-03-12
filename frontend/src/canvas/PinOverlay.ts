@@ -60,6 +60,9 @@ export class PinOverlay extends Container {
   private _scene: SceneManager;
   private _store: AnnotationStore;
   private _lastScale = -1;
+  private _ghostPin: { objectId: string; pinX: number; pinY: number } | null = null;
+  private _ghostContainer: Container | null = null;
+  private _focusedThreadId: string | null = null;
 
   constructor(viewport: Viewport, scene: SceneManager, store: AnnotationStore) {
     super();
@@ -141,6 +144,9 @@ export class PinOverlay extends Container {
         this._pins.delete(id);
       }
     }
+
+    this._updateFocusVisuals();
+    this._updateGhostPin();
   }
 
   private _createPin(thread: any, r: number, scale: number, pos: { x: number; y: number }): PinData {
@@ -257,6 +263,81 @@ export class PinOverlay extends Container {
     requestAnimationFrame(tick);
   }
 
+  setGhostPin(pin: { objectId: string; pinX: number; pinY: number } | null) {
+    this._ghostPin = pin;
+    this._updateGhostPin();
+  }
+
+  setFocusedThread(threadId: string | null) {
+    if (this._focusedThreadId === threadId) return;
+    this._focusedThreadId = threadId;
+    this._updateFocusVisuals();
+  }
+
+  private _updateGhostPin() {
+    // Remove existing ghost
+    if (this._ghostContainer) {
+      this._ghostContainer.destroy({ children: true });
+      this._ghostContainer = null;
+    }
+
+    if (!this._ghostPin) return;
+
+    const item = this._scene.items.get(this._ghostPin.objectId);
+    if (!item) return;
+
+    const b = getItemWorldBounds(item);
+    const wx = b.x + this._ghostPin.pinX * b.w;
+    const wy = b.y + this._ghostPin.pinY * b.h;
+    const scale = 1 / this._viewport.scale.x;
+    const r = PIN_RADIUS * scale;
+
+    const container = new Container();
+    container.position.set(wx, wy);
+    container.alpha = 0.4;
+
+    const gfx = new Graphics();
+    drawBubble(gfx, r, 0xffffff, 0.6, scale);
+    container.addChild(gfx);
+
+    // "+" text in center
+    const tailH = TAIL_HEIGHT * scale;
+    const bubbleH = r * 2 + r * 0.3;
+    const bubbleCenterY = -tailH - bubbleH / 2;
+    const plusText = new Text({
+      text: '+',
+      style: new TextStyle({
+        fill: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: r * 1.2,
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }),
+    });
+    plusText.anchor.set(0.5);
+    plusText.position.set(0, bubbleCenterY);
+    container.addChild(plusText);
+
+    this.addChild(container);
+    this._ghostContainer = container;
+  }
+
+  private _updateFocusVisuals() {
+    for (const [threadId, entry] of this._pins) {
+      if (this._focusedThreadId) {
+        if (threadId === this._focusedThreadId) {
+          entry.container.alpha = 1;
+          entry.container.scale.set(1.15);
+        } else {
+          entry.container.alpha = 0.7;
+          entry.container.scale.set(1);
+        }
+      } else {
+        entry.container.alpha = 1;
+        entry.container.scale.set(1);
+      }
+    }
+  }
+
   getThreadIdAtPoint(worldX: number, worldY: number): string | null {
     const scale = 1 / this._viewport.scale.x;
     const r = PIN_RADIUS * scale;
@@ -281,6 +362,10 @@ export class PinOverlay extends Container {
   }
 
   override destroy(options?: any) {
+    if (this._ghostContainer) {
+      this._ghostContainer.destroy({ children: true });
+      this._ghostContainer = null;
+    }
     for (const entry of this._pins.values()) {
       this._destroyPin(entry);
     }
