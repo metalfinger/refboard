@@ -178,11 +178,7 @@ export class PinOverlay extends Container {
 
     this.addChild(container);
 
-    // Entrance animation
-    container.alpha = 0;
-    container.scale.set(0.6);
-    this._animateEntrance(container);
-
+    // No entrance animation — focus styling must not be overwritten by animation.
     return entry;
   }
 
@@ -239,28 +235,6 @@ export class PinOverlay extends Container {
     if (!entry.container.destroyed) {
       entry.container.destroy({ children: true });
     }
-  }
-
-  private _animateEntrance(pin: Container) {
-    const tick = () => {
-      if (pin.destroyed) return;
-      let done = true;
-      if (pin.alpha < 0.99) {
-        pin.alpha += (1 - pin.alpha) * 0.3;
-        done = false;
-      } else {
-        pin.alpha = 1;
-      }
-      const s = pin.scale.x;
-      if (s < 0.99) {
-        pin.scale.set(s + (1 - s) * 0.3);
-        done = false;
-      } else {
-        pin.scale.set(1);
-      }
-      if (!done) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
   }
 
   setGhostPin(pin: { objectId: string; pinX: number; pinY: number } | null) {

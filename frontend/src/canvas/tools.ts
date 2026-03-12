@@ -49,6 +49,8 @@ export interface ToolContext {
   textEditor?: TextEditor;
   /** Switch back to select tool after placing text. */
   switchToSelect?: () => void;
+  /** When true, destructive/creative tool clicks (TEXT, ERASER) are suppressed. */
+  reviewMode?: boolean;
 }
 
 export function activateTool(
@@ -82,6 +84,7 @@ export function activateTool(
       container.style.cursor = 'text';
 
       const onClick = (e: PointerEvent) => {
+        if (ctx.reviewMode) return; // Review mode suppresses text creation
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
@@ -154,6 +157,7 @@ export function activateTool(
       selection.transformBox.update([]);
 
       const onClick = (e: PointerEvent) => {
+        if (ctx.reviewMode) return; // Review mode suppresses eraser
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
         const hit = selection._hitTest(world.x, world.y);

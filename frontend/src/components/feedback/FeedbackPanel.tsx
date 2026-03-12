@@ -323,7 +323,7 @@ export default function FeedbackPanel({
       onFilterChange={setFilter}
       onSelectThread={updateExpandedThread}
       onCollapse={() => setCollapsed(true)}
-      selectedObjectId={selectedObjectId}
+      selectedObjectId={draftPin ? null : selectedObjectId}
       selectedObjectLabel={selectedLabel}
       newCommentText={newCommentText}
       onNewCommentChange={setNewCommentText}

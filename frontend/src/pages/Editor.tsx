@@ -102,6 +102,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showMmImport, setShowMmImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
+  const reviewModeRef = useRef(false);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   // Pulse signal: threadId to open, or null to collapse detail view
   const [expandRequest, setExpandRequest] = useState<{ threadId: string | null; seq: number } | null>(null);
@@ -200,6 +201,11 @@ export default function Editor({ isPublicView }: EditorProps) {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
+
+  // Keep reviewModeRef in sync for tool handlers to read
+  useEffect(() => {
+    reviewModeRef.current = reviewMode;
+  }, [reviewMode]);
 
   // Pins visible only in review mode
   useEffect(() => {
@@ -404,6 +410,8 @@ export default function Editor({ isPublicView }: EditorProps) {
       textEditor: textEditor ?? undefined,
       switchToSelect: () => setActiveTool(ToolType.SELECT),
     };
+    // reviewMode is read at click time via getter so it stays current
+    Object.defineProperty(ctx, 'reviewMode', { get: () => reviewModeRef.current });
     toolCleanupRef.current = activateTool(ctx, activeTool, { color, strokeWidth, fontSize });
   }, [activeTool, color, strokeWidth, fontSize, onCanvasChange, textEditor]);
 
