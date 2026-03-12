@@ -29,6 +29,10 @@ interface ThreadListProps {
   newCommentText: string;
   onNewCommentChange: (text: string) => void;
   onCreateThread: () => void;
+  /** Optional slot rendered above the thread list (e.g., draft pin input) */
+  headerSlot?: React.ReactNode;
+  /** Currently focused thread ID for highlighting */
+  focusedThreadId?: string | null;
 }
 
 export default function ThreadList({
@@ -45,6 +49,8 @@ export default function ThreadList({
   newCommentText,
   onNewCommentChange,
   onCreateThread,
+  headerSlot,
+  focusedThreadId,
 }: ThreadListProps) {
   const [showOrphans, setShowOrphans] = React.useState(false);
 
@@ -154,6 +160,9 @@ export default function ThreadList({
         </div>
       )}
 
+      {/* Draft pin comment input (injected from FeedbackPanel) */}
+      {headerSlot}
+
       {/* Thread list */}
       <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2a2a2e transparent' }}>
         {threads.length === 0 && (
@@ -181,6 +190,7 @@ export default function ThreadList({
             thread={t}
             pinNumber={store.getPinNumber(t.id)}
             onClick={() => onSelectThread(t.id)}
+            focused={focusedThreadId === t.id}
           />
         ))}
 

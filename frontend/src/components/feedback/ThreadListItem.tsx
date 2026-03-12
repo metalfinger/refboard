@@ -10,15 +10,18 @@ import {
   STATUS_RESOLVED,
   BORDER,
   HOVER_BG,
+  FOCUSED_BG,
+  ACCENT,
 } from './feedbackStyles';
 
 interface ThreadListItemProps {
   thread: Thread;
   pinNumber: number;
   onClick: () => void;
+  focused?: boolean;
 }
 
-export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadListItemProps) {
+export default function ThreadListItem({ thread, pinNumber, onClick, focused }: ThreadListItemProps) {
   const firstComment = thread.comments[0];
   const isResolved = thread.status === 'resolved';
 
@@ -30,9 +33,11 @@ export default function ThreadListItem({ thread, pinNumber, onClick }: ThreadLis
         borderBottom: `1px solid ${BORDER}`,
         cursor: 'pointer',
         transition: 'background 0.1s ease',
+        background: focused ? FOCUSED_BG : 'transparent',
+        borderLeft: focused ? `2px solid ${ACCENT}` : '2px solid transparent',
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = HOVER_BG)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      onMouseEnter={(e) => { if (!focused) e.currentTarget.style.background = HOVER_BG; }}
+      onMouseLeave={(e) => { if (!focused) e.currentTarget.style.background = 'transparent'; }}
     >
       {/* Row 1: author circle + name + timestamp */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>

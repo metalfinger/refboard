@@ -17,6 +17,8 @@ export const INPUT_BORDER = '#26262c';
 export const INPUT_BORDER_FOCUS = '#4a9eff44';
 export const HOVER_BG = '#16161a';
 export const FILTER_ACTIVE_BG = '#1e1e24';
+export const FOCUSED_BG = 'rgba(74, 158, 255, 0.06)';
+export const FOCUSED_BORDER = 'rgba(74, 158, 255, 0.2)';
 
 // Shared panel container style
 export const panelContainerStyle: React.CSSProperties = {
