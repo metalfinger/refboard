@@ -73,6 +73,15 @@ function IconText() {
   );
 }
 
+function IconSticky() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="14" height="14" rx="2" />
+      <path d="M5 6h8M5 9h6M5 12h4" />
+    </svg>
+  );
+}
+
 function IconReview() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -125,6 +134,7 @@ const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: st
   { tool: ToolType.PAN, label: 'Pan', shortcut: 'H', numKey: '2', Icon: IconPan, hint: 'Click and drag to pan the canvas' },
   { tool: ToolType.PEN, label: 'Draw', shortcut: 'P', numKey: '3', Icon: IconPen, hint: 'Click and drag to draw freehand' },
   { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText, hint: 'Click on the canvas to place text' },
+  { tool: ToolType.STICKY, label: 'Sticky', shortcut: 'S', numKey: '5', Icon: IconSticky, hint: 'Click on the canvas to place a sticky note' },
 ];
 
 const REVIEW_HINT = 'Click an object to place a comment pin. Press . to toggle.';
@@ -159,7 +169,7 @@ export default function Toolbar({
   reviewMode,
 }: ToolbarProps) {
   const showStroke = activeTool === ToolType.PEN;
-  const showFontSize = activeTool === ToolType.TEXT;
+  const showFontSize = activeTool === ToolType.TEXT || activeTool === ToolType.STICKY;
 
   // Determine active hint
   const activeToolDef = toolButtons.find((t) => t.tool === activeTool);
