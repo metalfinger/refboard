@@ -15,7 +15,6 @@ import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
-import { clampTextFontSize } from '../canvas/textLimits';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -219,7 +218,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
             // Use average scale as font multiplier
             const scale = (absSx + absSy) / 2;
             const d = item.data as any;
-            d.fontSize = clampTextFontSize(d.fontSize * scale);
+            d.fontSize = Math.round(d.fontSize * scale);
             d.sx = item.data.sx > 0 ? 1 : -1;
             d.sy = item.data.sy > 0 ? 1 : -1;
             if (item.displayObject instanceof TextSprite) {
