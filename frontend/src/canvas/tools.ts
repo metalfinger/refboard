@@ -348,7 +348,8 @@ export function activateTool(
           const canvasEl = container.querySelector('canvas');
           const domContainer = canvasEl?.parentElement ?? container;
 
-          setTimeout(() => {
+          // Use microtask instead of 50ms delay — PixiJS only needs one tick
+          queueMicrotask(() => {
             ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
               // Cleanup rule — fires on BOTH save and cancel (stopEditing always calls _onChange):
               //   - new sticky + cancel/blur with empty text => remove (no blank notes left behind)
@@ -362,7 +363,7 @@ export function activateTool(
               ctx.onChange();
             });
             ctx.textEditor!.clearText();
-          }, 50);
+          });
         }
 
         ctx.switchToSelect?.();
