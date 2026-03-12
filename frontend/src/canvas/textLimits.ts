@@ -5,8 +5,8 @@
  * Direct manipulation (resize-bake) intentionally bypasses these
  * clamps so users can scale text to any size.
  *
- * Sticky notes use discrete presets (S/M/L/XL/XXL) defined in
- * TextFormatToolbar.tsx — not continuous clamps.
+ * Sticky notes use discrete presets defined in stickyPresets.ts — not
+ * continuous clamps.
  */
 
 const TEXT_FONT_MIN = 6;

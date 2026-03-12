@@ -21,7 +21,7 @@ import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
 import SelectionToolbar from '../components/SelectionToolbar';
 import TextFormatToolbar from '../components/TextFormatToolbar';
-import { getStickyWidthForSize } from '../canvas/stickyPresets';
+import { getStickyWorldMetricsForScreenFont } from '../canvas/stickyPresets';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
@@ -629,7 +629,7 @@ export default function Editor({ isPublicView }: EditorProps) {
           kind: 'sticky', x: posX, y: posY,
           fontFamily: sd.fontFamily || 'Inter, system-ui, sans-serif',
           textColor: sd.textColor || '#1a1a1a', fill: sd.fill || '#ffd43b',
-          stickyFontSize: sd.fontSize || 14,
+          stickyFontSize: (sd.fontSize || 14) * vp.scale.x * Math.abs(sd.sx || 1),
           items: stickyItems,
         });
       }
@@ -974,20 +974,26 @@ export default function Editor({ isPublicView }: EditorProps) {
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             } : undefined}
-            onStickySizeChange={textToolbar.kind === 'sticky' ? (fontSize) => {
+            onStickySizeChange={textToolbar.kind === 'sticky' ? (screenFontSize) => {
               const scene = canvasRef.current?.getScene();
-              const newWidth = getStickyWidthForSize(fontSize);
+              const vp = canvasRef.current?.getViewport();
+              const zoom = vp?.scale.x ?? 1;
               for (const item of textToolbar.items) {
                 const d = item.data as StickyObject;
-                d.fontSize = fontSize;
-                d.w = newWidth;
+                const metrics = getStickyWorldMetricsForScreenFont(
+                  screenFontSize,
+                  zoom,
+                  Math.abs(d.sx || 1),
+                );
+                d.fontSize = metrics.fontSize;
+                d.w = metrics.width;
                 if (item.displayObject instanceof StickySprite) {
                   item.displayObject.updateFromData(d);
                   d.h = item.displayObject.computedHeight;
                 }
                 if (scene) scene.updateSpatialEntry(item);
               }
-              setTextToolbar((prev) => prev && prev.kind === 'sticky' ? { ...prev, stickyFontSize: fontSize } : prev);
+              setTextToolbar((prev) => prev && prev.kind === 'sticky' ? { ...prev, stickyFontSize: screenFontSize } : prev);
               selectionRef.current?.transformBox.update(textToolbar.items);
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
