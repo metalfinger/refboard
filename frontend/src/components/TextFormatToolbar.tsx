@@ -3,7 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 type StickyTextSize = 'S' | 'M' | 'L' | 'XL' | 'XXL';
 
 const STICKY_SIZES: StickyTextSize[] = ['S', 'M', 'L', 'XL', 'XXL'];
-const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 10, M: 14, L: 18, XL: 24, XXL: 32 };
+const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 20, M: 28, L: 36, XL: 48, XXL: 60 };
+const STICKY_WIDTH_MAP: Record<StickyTextSize, number> = { S: 200, M: 260, L: 320, XL: 400, XXL: 480 };
 const STICKY_SIZE_VALUES = Object.values(STICKY_SIZE_MAP);
 
 function nearestStickySize(fontSize: number): StickyTextSize {
@@ -16,15 +17,21 @@ function nearestStickySize(fontSize: number): StickyTextSize {
   return best;
 }
 
-/** Snap a raw fontSize to the nearest preset value. */
-export function snapToStickyPreset(fontSize: number): number {
-  let best = STICKY_SIZE_VALUES[0];
+/** Snap a raw fontSize to the nearest preset. Returns { fontSize, width }. */
+export function snapToStickyPreset(fontSize: number): { fontSize: number; width: number } {
+  let best: StickyTextSize = 'M';
   let bestDist = Infinity;
-  for (const v of STICKY_SIZE_VALUES) {
-    const dist = Math.abs(fontSize - v);
-    if (dist < bestDist) { bestDist = dist; best = v; }
+  for (const size of STICKY_SIZES) {
+    const dist = Math.abs(fontSize - STICKY_SIZE_MAP[size]);
+    if (dist < bestDist) { bestDist = dist; best = size; }
   }
-  return best;
+  return { fontSize: STICKY_SIZE_MAP[best], width: STICKY_WIDTH_MAP[best] };
+}
+
+/** Get the width for a given sticky text size preset. */
+export function getStickyWidthForSize(fontSize: number): number {
+  const size = nearestStickySize(fontSize);
+  return STICKY_WIDTH_MAP[size];
 }
 
 interface TextFormatToolbarProps {
@@ -135,9 +142,9 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
               key={size}
               style={{
                 ...btnStyle,
-                width: '26px',
-                padding: 0,
-                fontSize: size === 'S' ? '9px' : size === 'M' ? '10px' : size === 'L' ? '11px' : size === 'XL' ? '12px' : '13px',
+                minWidth: size.length > 2 ? '32px' : '24px',
+                padding: '0 3px',
+                fontSize: '10px',
                 fontWeight: active ? 700 : 400,
                 color: active ? '#fff' : '#666',
                 background: active ? '#333' : 'transparent',
@@ -157,7 +164,7 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
       {/* Font family dropdown */}
       <div style={{ position: 'relative' }}>
         <button
-          style={{ ...btnStyle, maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          style={{ ...btnStyle, maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis' }}
           onClick={(e) => { e.stopPropagation(); setShowFontMenu((v) => !v); setShowColorPicker(false); }}
           title="Font family"
           {...hoverHandlers}

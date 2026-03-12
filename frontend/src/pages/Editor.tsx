@@ -20,7 +20,7 @@ import UserCursors from '../components/UserCursors';
 import ContextMenu from '../components/ContextMenu';
 import LayerPanel from '../components/LayerPanel';
 import SelectionToolbar from '../components/SelectionToolbar';
-import TextFormatToolbar from '../components/TextFormatToolbar';
+import TextFormatToolbar, { getStickyWidthForSize } from '../components/TextFormatToolbar';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import MattermostImport from '../components/MattermostImport';
@@ -975,9 +975,11 @@ export default function Editor({ isPublicView }: EditorProps) {
             } : undefined}
             onStickySizeChange={textToolbar.kind === 'sticky' ? (fontSize) => {
               const scene = canvasRef.current?.getScene();
+              const newWidth = getStickyWidthForSize(fontSize);
               for (const item of textToolbar.items) {
                 const d = item.data as StickyObject;
                 d.fontSize = fontSize;
+                d.w = newWidth;
                 if (item.displayObject instanceof StickySprite) {
                   item.displayObject.updateFromData(d);
                   d.h = item.displayObject.computedHeight;

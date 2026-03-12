@@ -37,7 +37,7 @@ const defaultOptions: ToolOptions = {
 
 // Creation defaults — zoom-aware via screenToWorld()
 const DEFAULT_TEXT_SCREEN_FONT = 24;
-const DEFAULT_STICKY_SCREEN_FONT = 14;
+const DEFAULT_STICKY_SCREEN_FONT = 28;
 const DEFAULT_STICKY_SCREEN_WIDTH = 220;
 const DEFAULT_STICKY_SCREEN_HEIGHT = 66;
 
@@ -328,7 +328,8 @@ export function activateTool(
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
         const zoom = viewport.scale.x;
-        const cardW = screenToWorld(DEFAULT_STICKY_SCREEN_WIDTH, zoom, 120, 400);
+        const preset = snapToStickyPreset(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 16, 72));
+        const cardW = preset.width;
         const cardH = screenToWorld(DEFAULT_STICKY_SCREEN_HEIGHT, zoom, 40, 200);
         const stickyData = {
           id: crypto.randomUUID(),
@@ -346,7 +347,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: snapToStickyPreset(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 8, 40)),
+          fontSize: preset.fontSize,
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',
