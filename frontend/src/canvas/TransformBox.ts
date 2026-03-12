@@ -9,6 +9,7 @@
 import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import { type SceneItem, getItemWorldBounds } from './SceneManager';
+import { StickySprite } from './sprites/StickySprite';
 import type { SnapGuides } from './SnapGuides';
 
 // ---------------------------------------------------------------------------
@@ -20,6 +21,7 @@ const BORDER_WIDTH = 1.5;
 const HANDLE_SIZE = 8;
 const HANDLE_FILL = 0xffffff;
 const HANDLE_STROKE = 0x4a90d9;
+const MIN_STICKY_WIDTH = 80;
 
 type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
 
@@ -43,7 +45,7 @@ interface DragState {
   startX: number;
   startY: number;
   origBounds: { x: number; y: number; w: number; h: number };
-  origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number }>;
+  origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,7 @@ export class TransformBox extends Container {
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
   private _onDragEnd: ((itemIds: string[]) => void) | null = null;
   private _snapGuides: SnapGuides | null = null;
+  private _stickyOnly = false;
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
 
@@ -161,6 +164,7 @@ export class TransformBox extends Container {
     }
 
     this._bounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    this._stickyOnly = items.length > 0 && items.every(i => i.type === 'sticky');
     this._draw();
     this.visible = true;
   }
@@ -195,7 +199,18 @@ export class TransformBox extends Container {
     const s = HANDLE_SIZE / zoom;
     const half = s / 2;
 
+    // Vertical-only handles hidden for sticky-only selections (width-only resize)
+    const hideVertical = this._stickyOnly;
+
     for (const [id, handle] of this._handles) {
+      if (hideVertical && (id === 'tc' || id === 'bc')) {
+        handle.visible = false;
+        handle.eventMode = 'none';
+        continue;
+      }
+      handle.visible = true;
+      handle.eventMode = 'static';
+
       const pos = positions[id];
       handle.clear();
 
@@ -212,7 +227,7 @@ export class TransformBox extends Container {
   private _onHandleDown(e: FederatedPointerEvent, id: HandleId): void {
     e.stopPropagation();
 
-    const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number }>();
+    const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number }>();
     for (const item of this._items) {
       origTransforms.set(item.id, {
         sx: item.data.sx,
@@ -220,6 +235,7 @@ export class TransformBox extends Container {
         angle: item.data.angle,
         x: item.data.x,
         y: item.data.y,
+        w: item.data.w,
       });
     }
 
@@ -313,6 +329,11 @@ export class TransformBox extends Container {
       }
     }
 
+    // Sticky-only: horizontal resize only — fy stays 1
+    if (this._stickyOnly) {
+      fy = 1;
+    }
+
     // Compute the anchor point (fixed edge of bounding box)
     let anchorX = ob.x; // default: top-left is fixed (br, mr, bc handles)
     let anchorY = ob.y;
@@ -329,17 +350,28 @@ export class TransformBox extends Container {
       const orig = origTransforms.get(item.id);
       if (!orig) continue;
 
-      // Apply scale factors relative to original
-      item.data.sx = orig.sx * fx;
-      item.data.sy = orig.sy * fy;
-
       // Reposition as a unit: scale each item's offset from the anchor point
       item.data.x = anchorX + (orig.x - anchorX) * fx;
       item.data.y = anchorY + (orig.y - anchorY) * fy;
 
-      item.displayObject.scale.set(item.data.sx, item.data.sy);
-      item.displayObject.position.set(item.data.x, item.data.y);
+      if (this._stickyOnly && item.type === 'sticky') {
+        // Live reflow: bake width directly so text re-wraps every frame
+        item.data.w = Math.max(MIN_STICKY_WIDTH, Math.round(orig.w * fx));
+        item.data.sx = orig.sx > 0 ? 1 : -1;
+        item.data.sy = orig.sy > 0 ? 1 : -1;
+        if (item.displayObject instanceof StickySprite) {
+          item.displayObject.updateFromData(item.data as any);
+          item.data.h = item.displayObject.computedHeight;
+        }
+        item.displayObject.scale.set(item.data.sx, item.data.sy);
+      } else {
+        // Normal proportional scale
+        item.data.sx = orig.sx * fx;
+        item.data.sy = orig.sy * fy;
+        item.displayObject.scale.set(item.data.sx, item.data.sy);
+      }
 
+      item.displayObject.position.set(item.data.x, item.data.y);
       this._onItemTransform?.(item);
     }
 

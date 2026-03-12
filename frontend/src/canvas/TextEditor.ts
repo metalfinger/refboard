@@ -178,6 +178,15 @@ export class TextEditor {
 
     const onInput = () => {
       autoSize();
+      // Live-update sticky background height as user types.
+      // PixiJS Text measures bounds regardless of visibility, so
+      // updateFromData works even with the text child hidden.
+      if (item.type === 'sticky' && item.displayObject instanceof StickySprite && !item.displayObject.destroyed) {
+        const data = item.data as StickyObject;
+        data.text = ta.value;
+        item.displayObject.updateFromData(data);
+        data.h = item.displayObject.computedHeight;
+      }
     };
 
     ta.addEventListener('keydown', onKeyDown);

@@ -123,7 +123,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
   const [textToolbar, setTextToolbar] = useState<
     | { kind: 'text'; x: number; y: number; fontFamily: string; fill: string; items: SceneItem[] }
-    | { kind: 'sticky'; x: number; y: number; fontFamily: string; textColor: string; fill: string; items: SceneItem[] }
+    | { kind: 'sticky'; x: number; y: number; fontFamily: string; textColor: string; fill: string; stickyFontSize: number; items: SceneItem[] }
     | null
   >(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
@@ -628,6 +628,7 @@ export default function Editor({ isPublicView }: EditorProps) {
           kind: 'sticky', x: posX, y: posY,
           fontFamily: sd.fontFamily || 'Inter, system-ui, sans-serif',
           textColor: sd.textColor || '#1a1a1a', fill: sd.fill || '#ffd43b',
+          stickyFontSize: sd.fontSize || 14,
           items: stickyItems,
         });
       }
@@ -915,6 +916,7 @@ export default function Editor({ isPublicView }: EditorProps) {
             fontFamily={textToolbar.fontFamily}
             fill={textToolbar.kind === 'sticky' ? textToolbar.textColor : textToolbar.fill}
             noteFill={textToolbar.kind === 'sticky' ? textToolbar.fill : undefined}
+            stickyFontSize={textToolbar.kind === 'sticky' ? textToolbar.stickyFontSize : undefined}
             position={textToolbar.items.length >= 2 ? 'below' : 'above'}
             onFontFamilyChange={(family) => {
               const scene = canvasRef.current?.getScene();
@@ -968,6 +970,22 @@ export default function Editor({ isPublicView }: EditorProps) {
                   item.displayObject.updateFromData(d);
                 }
               }
+              onCanvasChange(textToolbar.items.map(i => i.id));
+              updateOverlays();
+            } : undefined}
+            onStickySizeChange={textToolbar.kind === 'sticky' ? (fontSize) => {
+              const scene = canvasRef.current?.getScene();
+              for (const item of textToolbar.items) {
+                const d = item.data as StickyObject;
+                d.fontSize = fontSize;
+                if (item.displayObject instanceof StickySprite) {
+                  item.displayObject.updateFromData(d);
+                  d.h = item.displayObject.computedHeight;
+                }
+                if (scene) scene.updateSpatialEntry(item);
+              }
+              setTextToolbar((prev) => prev && prev.kind === 'sticky' ? { ...prev, stickyFontSize: fontSize } : prev);
+              selectionRef.current?.transformBox.update(textToolbar.items);
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             } : undefined}

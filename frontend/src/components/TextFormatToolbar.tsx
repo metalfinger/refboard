@@ -1,5 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+type StickyTextSize = 'S' | 'M' | 'L';
+
+const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 12, M: 14, L: 18 };
+
+function nearestStickySize(fontSize: number): StickyTextSize {
+  if (fontSize <= 12) return 'S';
+  if (fontSize <= 15) return 'M';
+  return 'L';
+}
+
 interface TextFormatToolbarProps {
   kind: 'text' | 'sticky';
   x: number;
@@ -9,11 +19,15 @@ interface TextFormatToolbarProps {
   fill: string;
   /** Note background color (sticky only). */
   noteFill?: string;
+  /** Current sticky fontSize (for S/M/L toggle). */
+  stickyFontSize?: number;
   position?: 'above' | 'below';
   onFontFamilyChange: (family: string) => void;
   onFillChange: (color: string) => void;
   /** Called when sticky note background color changes. */
   onNoteFillChange?: (color: string) => void;
+  /** Called when sticky text size preset changes. */
+  onStickySizeChange?: (fontSize: number) => void;
 }
 
 const FONT_FAMILIES = [
@@ -33,7 +47,7 @@ const PRESET_COLORS = [
 ];
 
 export default function TextFormatToolbar(props: TextFormatToolbarProps) {
-  const { kind, x, y, fontFamily, fill, noteFill, position = 'above', onFontFamilyChange, onFillChange, onNoteFillChange } = props;
+  const { kind, x, y, fontFamily, fill, noteFill, stickyFontSize, position = 'above', onFontFamilyChange, onFillChange, onNoteFillChange, onStickySizeChange } = props;
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showNoteFillPicker, setShowNoteFillPicker] = useState(false);
@@ -95,6 +109,34 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
+      {/* S/M/L text size toggle (sticky only) */}
+      {kind === 'sticky' && onStickySizeChange && (<>
+        {(['S', 'M', 'L'] as StickyTextSize[]).map((size) => {
+          const active = nearestStickySize(stickyFontSize || 14) === size;
+          return (
+            <button
+              key={size}
+              style={{
+                ...btnStyle,
+                width: '26px',
+                padding: 0,
+                fontSize: size === 'S' ? '10px' : size === 'M' ? '12px' : '14px',
+                fontWeight: active ? 700 : 400,
+                color: active ? '#fff' : '#666',
+                background: active ? '#333' : 'transparent',
+              }}
+              onClick={() => onStickySizeChange(STICKY_SIZE_MAP[size])}
+              title={`${size === 'S' ? 'Small' : size === 'M' ? 'Medium' : 'Large'} text`}
+              onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = '#333'; e.currentTarget.style.color = '#fff'; } }}
+              onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#666'; } }}
+            >
+              {size}
+            </button>
+          );
+        })}
+        <div style={{ width: '1px', height: '18px', background: '#333', margin: '0 2px', flexShrink: 0 }} />
+      </>)}
+
       {/* Font family dropdown */}
       <div style={{ position: 'relative' }}>
         <button

@@ -1,9 +1,9 @@
 /**
  * textLimits — single source of truth for font-size constraints.
  *
- * Every path that creates, resizes, or mutates fontSize on text/sticky
- * items must go through these helpers. This prevents inconsistent
- * clamping when ranges are widened later.
+ * Used by creation defaults to keep initial sizes reasonable.
+ * Direct manipulation (resize-bake) intentionally bypasses these
+ * clamps so users can scale text to any size.
  */
 
 // Plain text: generous range for direct manipulation

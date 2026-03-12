@@ -233,7 +233,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
               const d = item.data as any;
               // Bake width only — text re-wraps and height auto-adjusts.
               // fontSize stays stable so the card acts like a resizable text box.
-              d.w = Math.round(d.w * absSx);
+              d.w = Math.max(80, Math.round(d.w * absSx));
               d.sx = item.data.sx > 0 ? 1 : -1;
               d.sy = item.data.sy > 0 ? 1 : -1;
               if (item.displayObject instanceof StickySprite) {
