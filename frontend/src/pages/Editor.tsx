@@ -1039,7 +1039,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         {reviewMode && annotationStore && user && resolvedBoardId && (
           <FeedbackPanel
             annotationStore={annotationStore}
-            selectedObjectId={selectedLayerIds.length === 1 ? selectedLayerIds[0] : null}
+            selectedObjectId={draftPin ? null : (selectedLayerIds.length === 1 ? selectedLayerIds[0] : null)}
             userId={user.id}
             boardId={resolvedBoardId}
             token={localStorage.getItem('refboard_token') || ''}
@@ -1047,8 +1047,6 @@ export default function Editor({ isPublicView }: EditorProps) {
             onError={(msg) => showToast(msg)}
             expandRequest={expandRequest}
             focusedThreadId={focusedThreadId}
-            draftPin={draftPin}
-            onCreatePointThread={handleCreatePointThread}
             onThreadDetailChange={setOpenThreadDetailId}
             onJumpToObject={(objectId, thread) => {
               const scene = canvasRef.current?.getScene();

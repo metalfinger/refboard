@@ -2,9 +2,7 @@ import React, { useState, useCallback, useEffect, useSyncExternalStore } from 'r
 import { AnnotationStore } from '../../stores/annotationStore';
 import ThreadList, { FilterType } from './ThreadList';
 import ThreadDetail from './ThreadDetail';
-import CommentInput from './CommentInput';
 import { PANEL_BG, BORDER, TEXT_MUTED, TEXT_PRIMARY, STATUS_OPEN } from './feedbackStyles';
-import type { DraftPin } from '../../pages/Editor';
 
 interface FeedbackPanelProps {
   annotationStore: AnnotationStore;
@@ -19,10 +17,6 @@ interface FeedbackPanelProps {
   expandRequest?: { threadId: string | null; seq: number } | null;
   /** Focused thread ID for highlighting */
   focusedThreadId?: string | null;
-  /** Draft pin for point-comment creation */
-  draftPin?: DraftPin | null;
-  /** Callback to create a point-pinned thread */
-  onCreatePointThread?: (draftPin: DraftPin, content: string) => Promise<void>;
   /** Callback when expanded thread detail changes */
   onThreadDetailChange?: (threadId: string | null) => void;
 }
@@ -38,8 +32,6 @@ export default function FeedbackPanel({
   onError,
   expandRequest,
   focusedThreadId,
-  draftPin,
-  onCreatePointThread,
   onThreadDetailChange,
 }: FeedbackPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -289,30 +281,6 @@ export default function FeedbackPanel({
     selectedObjectId?.slice(0, 8) ||
     '';
 
-  // Draft pin comment input (shown above thread list when draft is active)
-  const draftCommentSection = draftPin ? (
-    <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BORDER}`, background: 'rgba(249, 115, 22, 0.03)' }}>
-      <div style={{ color: TEXT_MUTED, fontSize: '10px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Comment on point
-      </div>
-      <div style={{ color: TEXT_PRIMARY, fontSize: '12px', marginBottom: '10px', fontWeight: 500 }}>
-        {canvasObjects.get(draftPin.objectId)?.name || canvasObjects.get(draftPin.objectId)?.type || 'Object'}
-      </div>
-      <CommentInput
-        value={newCommentText}
-        onChange={setNewCommentText}
-        onSubmit={async () => {
-          if (!newCommentText.trim() || !onCreatePointThread || !draftPin) return;
-          await onCreatePointThread(draftPin, newCommentText.trim());
-          setNewCommentText('');
-        }}
-        placeholder="Add a point comment..."
-        submitLabel="Comment"
-        autoFocus
-      />
-    </div>
-  ) : null;
-
   return (
     <ThreadList
       threads={threads}
@@ -323,12 +291,11 @@ export default function FeedbackPanel({
       onFilterChange={setFilter}
       onSelectThread={updateExpandedThread}
       onCollapse={() => setCollapsed(true)}
-      selectedObjectId={draftPin ? null : selectedObjectId}
+      selectedObjectId={selectedObjectId}
       selectedObjectLabel={selectedLabel}
       newCommentText={newCommentText}
       onNewCommentChange={setNewCommentText}
       onCreateThread={handleCreateThread}
-      headerSlot={draftCommentSection}
       focusedThreadId={focusedThreadId}
     />
   );
