@@ -2,7 +2,9 @@ import React, { useState, useCallback, useEffect, useSyncExternalStore } from 'r
 import { AnnotationStore } from '../../stores/annotationStore';
 import ThreadList, { FilterType } from './ThreadList';
 import ThreadDetail from './ThreadDetail';
-import { PANEL_BG, BORDER, TEXT_MUTED, STATUS_OPEN } from './feedbackStyles';
+import CommentInput from './CommentInput';
+import { PANEL_BG, BORDER, TEXT_MUTED, TEXT_PRIMARY, STATUS_OPEN } from './feedbackStyles';
+import type { DraftPin } from '../../pages/Editor';
 
 interface FeedbackPanelProps {
   annotationStore: AnnotationStore;
@@ -11,10 +13,18 @@ interface FeedbackPanelProps {
   boardId: string;
   token: string;
   canvasObjects: Map<string, { id: string; name?: string; type: string }>;
-  onJumpToObject?: (objectId: string) => void;
+  onJumpToObject?: (objectId: string, thread?: any) => void;
   onError?: (msg: string) => void;
-  /** Set externally to expand a specific thread (e.g. from pin click) */
-  expandThreadId?: string | null;
+  /** Pulse signal to expand a specific thread */
+  expandRequest?: { threadId: string | null; seq: number } | null;
+  /** Focused thread ID for highlighting */
+  focusedThreadId?: string | null;
+  /** Draft pin for point-comment creation */
+  draftPin?: DraftPin | null;
+  /** Callback to create a point-pinned thread */
+  onCreatePointThread?: (draftPin: DraftPin, content: string) => Promise<void>;
+  /** Callback when expanded thread detail changes */
+  onThreadDetailChange?: (threadId: string | null) => void;
 }
 
 export default function FeedbackPanel({
@@ -26,7 +36,11 @@ export default function FeedbackPanel({
   canvasObjects,
   onJumpToObject,
   onError,
-  expandThreadId,
+  expandRequest,
+  focusedThreadId,
+  draftPin,
+  onCreatePointThread,
+  onThreadDetailChange,
 }: FeedbackPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
@@ -39,13 +53,25 @@ export default function FeedbackPanel({
     () => annotationStore.version,
   );
 
-  // External expand trigger (from pin click)
+  // Wrap setExpandedThreadId to notify parent
+  const updateExpandedThread = useCallback((id: string | null) => {
+    setExpandedThreadId(id);
+    onThreadDetailChange?.(id);
+  }, [onThreadDetailChange]);
+
+  // External expand trigger (from pin click or submit)
   useEffect(() => {
-    if (expandThreadId) {
-      setExpandedThreadId(expandThreadId);
+    if (!expandRequest) return;
+    if (expandRequest.threadId) {
+      // Open/expand a specific thread
+      updateExpandedThread(expandRequest.threadId);
       setCollapsed(false);
+    } else {
+      // Collapse signal (threadId: null) — close thread detail
+      updateExpandedThread(null);
     }
-  }, [expandThreadId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandRequest?.seq]);
 
   const allThreads = Array.from(annotationStore.threads.values());
   const openCount = allThreads.filter((t) => t.status === 'open').length;
@@ -147,12 +173,12 @@ export default function FeedbackPanel({
           method: 'DELETE',
           headers: headers(false),
         });
-        setExpandedThreadId(null);
+        updateExpandedThread(null);
       } catch {
         // Error surfaced via onError
       }
     },
-    [boardId, headers, apiFetch],
+    [boardId, headers, apiFetch, updateExpandedThread],
   );
 
   const handleCreateThread = useCallback(async () => {
@@ -245,12 +271,12 @@ export default function FeedbackPanel({
         thread={expandedThread}
         store={annotationStore}
         userId={userId}
-        onBack={() => setExpandedThreadId(null)}
+        onBack={() => updateExpandedThread(null)}
         onReply={handleReply}
         onResolve={handleResolve}
         onDeleteComment={handleDeleteComment}
         onDeleteThread={handleDeleteThread}
-        onJumpToObject={onJumpToObject}
+        onJumpToObject={onJumpToObject ? (objectId) => onJumpToObject(objectId, expandedThread) : undefined}
       />
     );
   }
@@ -263,6 +289,30 @@ export default function FeedbackPanel({
     selectedObjectId?.slice(0, 8) ||
     '';
 
+  // Draft pin comment input (shown above thread list when draft is active)
+  const draftCommentSection = draftPin ? (
+    <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BORDER}`, background: 'rgba(249, 115, 22, 0.03)' }}>
+      <div style={{ color: TEXT_MUTED, fontSize: '10px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        Comment on point
+      </div>
+      <div style={{ color: TEXT_PRIMARY, fontSize: '12px', marginBottom: '10px', fontWeight: 500 }}>
+        {canvasObjects.get(draftPin.objectId)?.name || canvasObjects.get(draftPin.objectId)?.type || 'Object'}
+      </div>
+      <CommentInput
+        value={newCommentText}
+        onChange={setNewCommentText}
+        onSubmit={async () => {
+          if (!newCommentText.trim() || !onCreatePointThread || !draftPin) return;
+          await onCreatePointThread(draftPin, newCommentText.trim());
+          setNewCommentText('');
+        }}
+        placeholder="Add a point comment..."
+        submitLabel="Comment"
+        autoFocus
+      />
+    </div>
+  ) : null;
+
   return (
     <ThreadList
       threads={threads}
@@ -271,13 +321,15 @@ export default function FeedbackPanel({
       openCount={openCount}
       filter={filter}
       onFilterChange={setFilter}
-      onSelectThread={setExpandedThreadId}
+      onSelectThread={updateExpandedThread}
       onCollapse={() => setCollapsed(true)}
       selectedObjectId={selectedObjectId}
       selectedObjectLabel={selectedLabel}
       newCommentText={newCommentText}
       onNewCommentChange={setNewCommentText}
       onCreateThread={handleCreateThread}
+      headerSlot={draftCommentSection}
+      focusedThreadId={focusedThreadId}
     />
   );
 }
