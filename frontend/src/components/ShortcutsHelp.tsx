@@ -45,7 +45,6 @@ export default function ShortcutsHelp({ shortcuts, onClose }: ShortcutsHelpProps
   // Additional tool shortcuts not in registry
   const toolShortcuts = [
     { keys: 'V / 1', description: 'Select tool' },
-    { keys: 'H / 2', description: 'Pan tool' },
     { keys: 'P / 3', description: 'Draw tool' },
     { keys: 'T / 4', description: 'Text tool' },
     { keys: 'S / 5', description: 'Sticky note tool' },

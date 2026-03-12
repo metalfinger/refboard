@@ -46,14 +46,6 @@ function IconSelect() {
   );
 }
 
-function IconPan() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M8 1v14M1 8h14M4 4L8 1L12 4M4 12L8 15L12 12M1 4L4 8L1 12M15 4L12 8L15 12" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function IconPen() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -129,7 +121,6 @@ function IconLayers() {
 
 const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: string; Icon: React.FC; hint?: string }[] = [
   { tool: ToolType.SELECT, label: 'Select', shortcut: 'V', numKey: '1', Icon: IconSelect, hint: 'Click to select, drag to move, Shift+click for multi-select' },
-  { tool: ToolType.PAN, label: 'Pan', shortcut: 'H', numKey: '2', Icon: IconPan, hint: 'Click and drag to pan the canvas' },
   { tool: ToolType.PEN, label: 'Draw', shortcut: 'P', numKey: '3', Icon: IconPen, hint: 'Click and drag to draw freehand' },
   { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText, hint: 'Click on the canvas to place text' },
   { tool: ToolType.STICKY, label: 'Sticky', shortcut: 'S', numKey: '5', Icon: IconSticky, hint: 'Click on the canvas to place a sticky note' },

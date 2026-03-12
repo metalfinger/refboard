@@ -56,7 +56,7 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
       const viewport = canvasRef.current?.getViewport();
       if (!scene || !selection || !viewport) return;
 
-      // Tool shortcuts (bare keys 1-5, v/h/p/t/e -- no modifiers)
+      // Tool shortcuts (bare keys only for the primary visible tools)
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         const tool = toolShortcuts[e.key.toLowerCase()];
         if (tool) {

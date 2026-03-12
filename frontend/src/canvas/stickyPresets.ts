@@ -11,11 +11,11 @@ export type StickyTextSize = 'S' | 'M' | 'L' | 'XL' | 'XXL';
 export const STICKY_SIZES: StickyTextSize[] = ['S', 'M', 'L', 'XL', 'XXL'];
 
 export const STICKY_FONT_MAP: Record<StickyTextSize, number> = {
-  S: 20, M: 28, L: 36, XL: 48, XXL: 60,
+  S: 12, M: 14, L: 18, XL: 24, XXL: 32,
 };
 
 export const STICKY_WIDTH_MAP: Record<StickyTextSize, number> = {
-  S: 200, M: 260, L: 320, XL: 400, XXL: 480,
+  S: 180, M: 220, L: 280, XL: 340, XXL: 420,
 };
 
 /** Default preset for new sticky creation. */

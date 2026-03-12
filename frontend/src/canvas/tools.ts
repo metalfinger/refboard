@@ -1,10 +1,9 @@
 /**
  * Tools — PixiJS version.
  *
- * SELECT/PAN are handled by the viewport (pixi-viewport) and SelectionManager.
- * PEN/TEXT/ERASER need PixiJS implementations.
- * For now, only SELECT and PAN are fully functional; PEN/TEXT/ERASER are stubs
- * that will be implemented when drawing support is added.
+ * Canvas navigation is handled by the viewport (space-drag, middle-drag, etc.)
+ * and SelectionManager.
+ * PEN/TEXT/ERASER/STICKY are PixiJS tool modes.
  */
 
 import type { Viewport } from 'pixi-viewport';
@@ -400,12 +399,10 @@ export function activateTool(
 
 export const toolShortcuts: Record<string, ToolType> = {
   v: ToolType.SELECT,
-  h: ToolType.PAN,
   p: ToolType.PEN,
   t: ToolType.TEXT,
   s: ToolType.STICKY,
   '1': ToolType.SELECT,
-  '2': ToolType.PAN,
   '3': ToolType.PEN,
   '4': ToolType.TEXT,
   '5': ToolType.STICKY,
