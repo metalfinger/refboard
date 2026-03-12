@@ -19,6 +19,7 @@ export class TextEditor {
   private _viewport: Viewport | null = null;
   private _container: HTMLElement | null = null;
   private _onChange: (() => void) | null = null;
+  private _onLiveResize: ((item: SceneItem) => void) | null = null;
   private _originalText: string = '';
 
   /** True when a textarea is open. */
@@ -42,6 +43,7 @@ export class TextEditor {
     viewport: Viewport,
     container: HTMLElement,
     onChange: () => void,
+    onLiveResize?: (item: SceneItem) => void,
   ): void {
     // Accept text and sticky items
     if (item.type !== 'text' && item.type !== 'sticky') return;
@@ -53,6 +55,7 @@ export class TextEditor {
     this._viewport = viewport;
     this._container = container;
     this._onChange = onChange;
+    this._onLiveResize = onLiveResize || null;
 
     const zoom = viewport.scale.x;
 
@@ -186,6 +189,7 @@ export class TextEditor {
         data.text = ta.value;
         item.displayObject.updateFromData(data);
         data.h = item.displayObject.computedHeight;
+        this._onLiveResize?.(item);
       }
     };
 
@@ -221,6 +225,7 @@ export class TextEditor {
     this._viewport = null;
     this._container = null;
     this._onChange = null;
+    this._onLiveResize = null;
     this._originalText = '';
 
     if (save) {

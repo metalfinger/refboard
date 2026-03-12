@@ -14,7 +14,7 @@ import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
 import { TextEditor } from './TextEditor';
 import { clampTextFontSize } from './textLimits';
-import { snapToStickyPreset } from '../components/TextFormatToolbar';
+import { DEFAULT_STICKY_PRESET, STICKY_FONT_MAP, STICKY_WIDTH_MAP } from './stickyPresets';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -37,9 +37,6 @@ const defaultOptions: ToolOptions = {
 
 // Creation defaults — zoom-aware via screenToWorld()
 const DEFAULT_TEXT_SCREEN_FONT = 24;
-const DEFAULT_STICKY_SCREEN_FONT = 28;
-const DEFAULT_STICKY_SCREEN_WIDTH = 220;
-const DEFAULT_STICKY_SCREEN_HEIGHT = 66;
 
 type CleanupFn = (() => void) | null;
 
@@ -327,17 +324,15 @@ export function activateTool(
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
-        const zoom = viewport.scale.x;
-        const preset = snapToStickyPreset(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 16, 72));
-        const cardW = preset.width;
-        const cardH = screenToWorld(DEFAULT_STICKY_SCREEN_HEIGHT, zoom, 40, 200);
+        const cardW = STICKY_WIDTH_MAP[DEFAULT_STICKY_PRESET];
+        const cardH = 60; // auto-computed by StickySprite
         const stickyData = {
           id: crypto.randomUUID(),
           type: 'sticky' as const,
           x: world.x - cardW / 2,
           y: world.y - cardH / 2,
           w: cardW,
-          h: cardH,  // will be auto-computed by StickySprite
+          h: cardH,
           sx: 1,
           sy: 1,
           angle: 0,
@@ -347,7 +342,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: preset.fontSize,
+          fontSize: STICKY_FONT_MAP[DEFAULT_STICKY_PRESET],
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',

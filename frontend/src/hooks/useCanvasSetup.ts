@@ -130,6 +130,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           }
           syncRef.current?.broadcastElements([item.id]);
           onCanvasChange();
+        }, (resizedItem) => {
+          scene.updateSpatialEntry(resizedItem);
+          selection.transformBox.update([resizedItem]);
         });
       };
 

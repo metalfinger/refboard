@@ -1,38 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-
-type StickyTextSize = 'S' | 'M' | 'L' | 'XL' | 'XXL';
-
-const STICKY_SIZES: StickyTextSize[] = ['S', 'M', 'L', 'XL', 'XXL'];
-const STICKY_SIZE_MAP: Record<StickyTextSize, number> = { S: 20, M: 28, L: 36, XL: 48, XXL: 60 };
-const STICKY_WIDTH_MAP: Record<StickyTextSize, number> = { S: 200, M: 260, L: 320, XL: 400, XXL: 480 };
-const STICKY_SIZE_VALUES = Object.values(STICKY_SIZE_MAP);
-
-function nearestStickySize(fontSize: number): StickyTextSize {
-  let best: StickyTextSize = 'M';
-  let bestDist = Infinity;
-  for (const size of STICKY_SIZES) {
-    const dist = Math.abs(fontSize - STICKY_SIZE_MAP[size]);
-    if (dist < bestDist) { bestDist = dist; best = size; }
-  }
-  return best;
-}
-
-/** Snap a raw fontSize to the nearest preset. Returns { fontSize, width }. */
-export function snapToStickyPreset(fontSize: number): { fontSize: number; width: number } {
-  let best: StickyTextSize = 'M';
-  let bestDist = Infinity;
-  for (const size of STICKY_SIZES) {
-    const dist = Math.abs(fontSize - STICKY_SIZE_MAP[size]);
-    if (dist < bestDist) { bestDist = dist; best = size; }
-  }
-  return { fontSize: STICKY_SIZE_MAP[best], width: STICKY_WIDTH_MAP[best] };
-}
-
-/** Get the width for a given sticky text size preset. */
-export function getStickyWidthForSize(fontSize: number): number {
-  const size = nearestStickySize(fontSize);
-  return STICKY_WIDTH_MAP[size];
-}
+import {
+  STICKY_SIZES, STICKY_FONT_MAP, nearestStickySize,
+  type StickyTextSize,
+} from '../canvas/stickyPresets';
 
 interface TextFormatToolbarProps {
   kind: 'text' | 'sticky';
@@ -149,8 +119,8 @@ export default function TextFormatToolbar(props: TextFormatToolbarProps) {
                 color: active ? '#fff' : '#666',
                 background: active ? '#333' : 'transparent',
               }}
-              onClick={() => onStickySizeChange(STICKY_SIZE_MAP[size])}
-              title={`${STICKY_SIZE_MAP[size]}px text`}
+              onClick={() => onStickySizeChange(STICKY_FONT_MAP[size])}
+              title={`${STICKY_FONT_MAP[size]}px text`}
               onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = '#333'; e.currentTarget.style.color = '#fff'; } }}
               onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#666'; } }}
             >
