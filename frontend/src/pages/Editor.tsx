@@ -294,6 +294,79 @@ export default function Editor({ isPublicView }: EditorProps) {
     };
   }, [reviewMode, pinOverlay, userRole]);
 
+  // Review-mode Escape priority: draft → thread detail → review mode
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+
+      if (draftPin) {
+        e.preventDefault();
+        setDraftPin(null);
+        return;
+      }
+      if (openThreadDetailId) {
+        e.preventDefault();
+        setFocusedThreadId(null);
+        // Send collapse signal to FeedbackPanel
+        expandSeqRef.current += 1;
+        setExpandRequest({ threadId: null, seq: expandSeqRef.current });
+        return;
+      }
+      if (reviewMode) {
+        // Don't exit review mode if user is typing in an unrelated input
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        e.preventDefault();
+        setReviewMode(false);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [draftPin, openThreadDetailId, reviewMode]);
+
+  // Create point-pinned thread via REST
+  const handleCreatePointThread = useCallback(async (draft: DraftPin, content: string) => {
+    if (!resolvedBoardId) return;
+    const token = localStorage.getItem('refboard_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/boards/${resolvedBoardId}/threads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          object_id: draft.objectId,
+          anchor_type: 'point',
+          pin_x: draft.pinX,
+          pin_y: draft.pinY,
+          content,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.error || 'Failed to create comment');
+        return;
+      }
+      const data = await res.json();
+      // Clear draft, pre-focus the new thread
+      setDraftPin(null);
+      setFocusedThreadId(data.thread.id);
+      expandSeqRef.current += 1;
+      setExpandRequest({ threadId: data.thread.id, seq: expandSeqRef.current });
+    } catch (err: any) {
+      showToast('Failed to create comment: ' + (err.message || 'network error'));
+    }
+  }, [resolvedBoardId, showToast]);
+
+  // Clear draft and focus when exiting review mode
+  useEffect(() => {
+    if (!reviewMode) {
+      setDraftPin(null);
+      setFocusedThreadId(null);
+      setExpandRequest(null);
+    }
+  }, [reviewMode]);
+
   // Tool activation
   useEffect(() => {
     const viewport = canvasRef.current?.getViewport();
