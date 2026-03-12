@@ -231,9 +231,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
               item.displayObject.scale.set(d.sx, d.sy);
             } else if (item.type === 'sticky') {
               const d = item.data as any;
-              // Scale card width and fontSize, then reset sx/sy so text re-rasterizes crisp
+              // Bake width only — text re-wraps and height auto-adjusts.
+              // fontSize stays stable so the card acts like a resizable text box.
               d.w = Math.round(d.w * absSx);
-              d.fontSize = Math.round((d.fontSize || 14) * ((absSx + absSy) / 2));
               d.sx = item.data.sx > 0 ? 1 : -1;
               d.sy = item.data.sy > 0 ? 1 : -1;
               if (item.displayObject instanceof StickySprite) {

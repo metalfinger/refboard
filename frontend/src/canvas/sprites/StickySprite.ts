@@ -1,10 +1,13 @@
 /**
  * StickySprite — renders a sticky note card.
  *
+ * Composes TextCore for dirty-checked text rendering with word-wrap.
+ * Adds a rounded-rect background that auto-sizes to fit text.
+ *
  * Structure:
  *   Container (this)
  *     └─ _bg: Graphics (rounded rect background)
- *     └─ _text: Text (word-wrapped content)
+ *     └─ TextCore.pixiText (word-wrapped content)
  *
  * Dimensions:
  *   - width is fixed (from data.w)
@@ -17,8 +20,9 @@
  *   - showText() never triggers layout or redraw
  */
 
-import { Container, Graphics, Text, TextStyle } from 'pixi.js';
+import { Container, Graphics } from 'pixi.js';
 import type { StickyObject } from '../scene-format';
+import { TextCore } from './TextCore';
 
 const DEFAULT_PADDING = 16;
 const DEFAULT_CORNER_RADIUS = 8;
@@ -27,8 +31,7 @@ const MIN_HEIGHT = 60;
 
 export class StickySprite extends Container {
   private _bg: Graphics;
-  private _text: Text;
-  private _style: TextStyle;
+  private _core: TextCore;
 
   // Cached layout state
   private _cardW = 200;
@@ -37,11 +40,7 @@ export class StickySprite extends Container {
   private _cornerRadius = DEFAULT_CORNER_RADIUS;
   private _bgColor = '#ffd43b';
 
-  // Dirty-check cache: last known inputs to avoid redundant work
-  private _lastText = '';
-  private _lastFontSize = 14;
-  private _lastFontFamily = 'Inter, system-ui, sans-serif';
-  private _lastTextColor = '#1a1a1a';
+  // Dirty-check cache for bg-only props (text props are in TextCore)
   private _lastFill = '#ffd43b';
   private _lastW = 200;
   private _lastPadding = DEFAULT_PADDING;
@@ -49,7 +48,6 @@ export class StickySprite extends Container {
 
   // Background redraw cache: skip Graphics.clear()+redraw when shape is unchanged
   private _bgCacheKey = '';
-  private _zoomBucket = 1;
 
   /** After layout, the computed card height. Parent should sync to data.h. */
   get computedHeight(): number {
@@ -58,7 +56,7 @@ export class StickySprite extends Container {
 
   /** Show/hide the text child (used by TextEditor during editing). */
   showText(visible: boolean): void {
-    this._text.visible = visible;
+    this._core.setVisible(visible);
   }
 
   /**
@@ -66,9 +64,7 @@ export class StickySprite extends Container {
    * Only re-rasterizes when the bucket actually changes.
    */
   setZoomBucket(bucket: number): void {
-    if (bucket === this._zoomBucket) return;
-    this._zoomBucket = bucket;
-    this._text.resolution = bucket;
+    this._core.setZoomBucket(bucket);
   }
 
   constructor(data: StickyObject) {
@@ -83,26 +79,20 @@ export class StickySprite extends Container {
     this._bg = new Graphics();
     this.addChild(this._bg);
 
-    // Text style
+    // Text via shared TextCore (word-wrapped)
     const fontSize = data.fontSize || 14;
-    this._style = new TextStyle({
+    this._core = new TextCore({
+      text: data.text || '',
       fontSize,
       fontFamily: data.fontFamily || 'Inter, system-ui, sans-serif',
       fill: data.textColor || '#1a1a1a',
-      wordWrap: true,
       wordWrapWidth: Math.max(data.w - this._padding * 2, 1),
-      lineHeight: fontSize * DEFAULT_LINE_HEIGHT,
+      lineHeightMultiplier: DEFAULT_LINE_HEIGHT,
     });
+    this._core.pixiText.position.set(this._padding, this._padding);
+    this.addChild(this._core.pixiText);
 
-    this._text = new Text({ text: data.text || '', style: this._style });
-    this._text.position.set(this._padding, this._padding);
-    this.addChild(this._text);
-
-    // Snapshot initial state
-    this._lastText = data.text || '';
-    this._lastFontSize = fontSize;
-    this._lastFontFamily = data.fontFamily || 'Inter, system-ui, sans-serif';
-    this._lastTextColor = data.textColor || '#1a1a1a';
+    // Snapshot initial state for bg-only dirty checks
     this._lastFill = this._bgColor;
     this._lastW = data.w;
     this._lastPadding = this._padding;
@@ -120,17 +110,8 @@ export class StickySprite extends Container {
     const cornerRadius = data.cornerRadius ?? DEFAULT_CORNER_RADIUS;
     const bgColor = data.fill || '#ffd43b';
     const w = data.w;
-    const text = data.text || '';
-    const fontSize = data.fontSize || 14;
-    const fontFamily = data.fontFamily || 'Inter, system-ui, sans-serif';
-    const textColor = data.textColor || '#1a1a1a';
 
-    // Check if anything actually changed
-    const textChanged = text !== this._lastText;
-    const styleChanged =
-      fontSize !== this._lastFontSize ||
-      fontFamily !== this._lastFontFamily ||
-      textColor !== this._lastTextColor;
+    // Check bg/layout-only changes
     const layoutChanged =
       w !== this._lastW ||
       padding !== this._lastPadding;
@@ -138,41 +119,35 @@ export class StickySprite extends Container {
       bgColor !== this._lastFill ||
       cornerRadius !== this._lastCornerRadius;
 
+    // Delegate text+style dirty-checking to TextCore
+    const textChanged = this._core.update({
+      text: data.text || '',
+      fontSize: data.fontSize || 14,
+      fontFamily: data.fontFamily || 'Inter, system-ui, sans-serif',
+      fill: data.textColor || '#1a1a1a',
+      wordWrapWidth: Math.max(w - padding * 2, 1),
+      lineHeightMultiplier: DEFAULT_LINE_HEIGHT,
+    });
+
     // Nothing changed — skip all work
-    if (!textChanged && !styleChanged && !layoutChanged && !bgChanged) return;
+    if (!textChanged && !layoutChanged && !bgChanged) return;
 
     // Update cached state
     this._padding = padding;
     this._cornerRadius = cornerRadius;
     this._bgColor = bgColor;
     this._cardW = w;
-    this._lastText = text;
-    this._lastFontSize = fontSize;
-    this._lastFontFamily = fontFamily;
-    this._lastTextColor = textColor;
     this._lastFill = bgColor;
     this._lastW = w;
     this._lastPadding = padding;
     this._lastCornerRadius = cornerRadius;
 
-    // Only update text if content changed
-    if (textChanged) {
-      this._text.text = text;
-    }
-
-    // Only update style if style/layout props changed
-    if (styleChanged || layoutChanged) {
-      this._style.fontSize = fontSize;
-      this._style.fontFamily = fontFamily;
-      this._style.fill = textColor;
-      this._style.wordWrapWidth = Math.max(w - padding * 2, 1);
-      this._style.lineHeight = fontSize * DEFAULT_LINE_HEIGHT;
-      this._text.style = this._style;
-      this._text.position.set(padding, padding);
+    if (layoutChanged) {
+      this._core.pixiText.position.set(padding, padding);
     }
 
     // Relayout if text, style, or dimensions changed (need remeasure)
-    if (textChanged || styleChanged || layoutChanged) {
+    if (textChanged || layoutChanged) {
       this._layout();
     } else if (bgChanged) {
       // Only bg color/radius changed — redraw background without remeasuring text
@@ -184,7 +159,7 @@ export class StickySprite extends Container {
    * Recompute layout: measure text height, resize card, redraw background.
    */
   private _layout(): void {
-    const textBounds = this._text.getLocalBounds();
+    const textBounds = this._core.pixiText.getLocalBounds();
     const textH = textBounds.height;
 
     this._cardH = Math.max(textH + this._padding * 2, MIN_HEIGHT);
