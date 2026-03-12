@@ -5,7 +5,7 @@
  * and spring-animated add/remove operations.
  */
 
-import { Container, Graphics, Text, TextStyle } from 'pixi.js';
+import { Container } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
@@ -14,6 +14,7 @@ import { VideoSprite } from './sprites/VideoSprite';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
 import { StickySprite } from './sprites/StickySprite';
+import { TextSprite } from './sprites/TextSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
 import { SpatialGrid } from './SpatialGrid';
@@ -320,13 +321,7 @@ export class SceneManager {
       }
 
       case 'text': {
-        const txtData = data as TextObject;
-        const style = new TextStyle({
-          fontSize: txtData.fontSize,
-          fill: txtData.fill,
-          fontFamily: txtData.fontFamily,
-        });
-        displayObject = new Text({ text: txtData.text, style });
+        displayObject = new TextSprite(data as TextObject);
         break;
       }
 
@@ -412,11 +407,12 @@ export class SceneManager {
       const drawData = data as DrawingObject;
       obj.setPoints(drawData.points);
     }
-    if (data.type === 'text' && obj instanceof Text) {
-      const txtData = data as TextObject;
-      obj.text = txtData.text;
-      obj.style.fontSize = txtData.fontSize;
-      obj.style.fill = txtData.fill;
+    if (data.type === 'text' && obj instanceof TextSprite) {
+      const dimensionsChanged = obj.updateFromData(data as TextObject);
+      if (dimensionsChanged) {
+        data.w = obj.measuredWidth;
+        data.h = obj.measuredHeight;
+      }
     }
     if (data.type === 'group' && obj instanceof FrameSprite) {
       obj.updateFromData(data as GroupObject);
