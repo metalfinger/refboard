@@ -53,6 +53,14 @@ interface OnlineUser {
   color: string;
 }
 
+export interface DraftPin {
+  objectId: string;
+  pinX: number;       // 0-1 relative to object bounds
+  pinY: number;       // 0-1 relative to object bounds
+  worldX: number;     // world-space coords at placement time
+  worldY: number;     // world-space coords at placement time
+}
+
 export default function Editor({ isPublicView }: EditorProps) {
   const { boardId } = useParams<{ boardId?: string }>();
   const navigate = useNavigate();
@@ -95,6 +103,11 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showExport, setShowExport] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
+  // Pulse signal: threadId to open, or null to collapse detail view
+  const [expandRequest, setExpandRequest] = useState<{ threadId: string | null; seq: number } | null>(null);
+  const [draftPin, setDraftPin] = useState<DraftPin | null>(null);
+  const [openThreadDetailId, setOpenThreadDetailId] = useState<string | null>(null);
+  const expandSeqRef = useRef(0);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -188,27 +201,12 @@ export default function Editor({ isPublicView }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
 
-  // Pins are always visible; review mode just controls the panel + click-to-comment
+  // Pin visibility — will be gated on reviewMode in Task 10
   useEffect(() => {
     if (!pinOverlay) return;
     pinOverlay.visible = true;
     pinOverlay.refresh();
-
-    // Pin click → expand thread in panel (listen on viewport since pins are item children)
-    const vp = canvasRef.current?.getViewport();
-    if (!vp) return;
-    const onClick = (e: any) => {
-      const worldPos = vp.toWorld(e.global);
-      const threadId = pinOverlay.getThreadIdAtPoint(worldPos.x, worldPos.y);
-      if (threadId) {
-        if (!reviewMode) setReviewMode(true);
-        setFocusedThreadId(threadId);
-        requestAnimationFrame(() => setFocusedThreadId(null));
-      }
-    };
-    vp.on('pointerdown', onClick);
-    return () => { vp.off('pointerdown', onClick); };
-  }, [reviewMode, pinOverlay]);
+  }, [pinOverlay]);
 
   // Tool activation
   useEffect(() => {
