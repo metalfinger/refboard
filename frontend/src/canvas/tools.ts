@@ -21,6 +21,7 @@ export enum ToolType {
   PEN = 'PEN',
   TEXT = 'TEXT',
   ERASER = 'ERASER',
+  STICKY = 'STICKY',
 }
 
 export interface ToolOptions {
@@ -304,6 +305,76 @@ export function activateTool(
       };
     }
 
+    case ToolType.STICKY: {
+      container.style.cursor = 'crosshair';
+
+      const onClick = (e: PointerEvent) => {
+        if (ctx.reviewMode) return;
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+        const stickyData = {
+          id: crypto.randomUUID(),
+          type: 'sticky' as const,
+          x: world.x - 100, // center the 200px card on click
+          y: world.y - 30,
+          w: 200,
+          h: 60,  // will be auto-computed by StickySprite
+          sx: 1,
+          sy: 1,
+          angle: 0,
+          z: scene.nextZ(),
+          opacity: 1,
+          locked: false,
+          name: '',
+          visible: true,
+          text: '',
+          fontSize: 14,
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fill: '#ffd43b',     // default yellow
+          textColor: '#1a1a1a',
+          padding: 16,
+          cornerRadius: 8,
+        };
+
+        scene._createItem(stickyData, true);
+        scene._applyZOrder();
+        ctx.broadcastElements?.([stickyData.id]);
+        ctx.onChange();
+
+        // Immediately open text editor on the new sticky
+        const item = scene.getById(stickyData.id);
+        if (item && ctx.textEditor) {
+          const canvasEl = container.querySelector('canvas');
+          const domContainer = canvasEl?.parentElement ?? container;
+
+          setTimeout(() => {
+            ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
+              // Cleanup rule — fires on BOTH save and cancel (stopEditing always calls _onChange):
+              //   - new sticky + cancel/blur with empty text => remove (no blank notes left behind)
+              //   - new sticky + save with empty text => remove
+              //   - existing sticky + cancel => text already restored to original by stopEditing, no removal
+              const text = (item.data as any).text?.trim();
+              if (!text) {
+                scene.removeItem(item.id, true);
+              }
+              ctx.broadcastElements?.([item.id]);
+              ctx.onChange();
+            });
+            ctx.textEditor!.clearText();
+          }, 50);
+        }
+
+        ctx.switchToSelect?.();
+        container.removeEventListener('pointerdown', onClick);
+      };
+
+      container.addEventListener('pointerdown', onClick);
+      return () => {
+        container.removeEventListener('pointerdown', onClick);
+      };
+    }
+
     default:
       return null;
   }
@@ -314,8 +385,10 @@ export const toolShortcuts: Record<string, ToolType> = {
   h: ToolType.PAN,
   p: ToolType.PEN,
   t: ToolType.TEXT,
+  s: ToolType.STICKY,
   '1': ToolType.SELECT,
   '2': ToolType.PAN,
   '3': ToolType.PEN,
   '4': ToolType.TEXT,
+  '5': ToolType.STICKY,
 };
