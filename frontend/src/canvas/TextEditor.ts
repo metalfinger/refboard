@@ -201,52 +201,12 @@ export class TextEditor {
     const item = this._item;
     if (!ta || !item) return;
 
-    if (save) {
-      const newText = ta.value;
+    const onChange = this._onChange;
+    const originalText = this._originalText;
+    const newText = ta.value;
 
-      if (item.type === 'sticky' && item.displayObject instanceof StickySprite) {
-        const data = item.data as StickyObject;
-        data.text = newText;
-        item.displayObject.updateFromData(data);
-        data.h = item.displayObject.computedHeight;
-        item.displayObject.showText(true);
-        this._onChange?.();
-      } else if (item.type === 'text') {
-        const pixiText = item.displayObject;
-        if (pixiText instanceof Text) {
-          const data = item.data as TextObject;
-          data.text = newText;
-          pixiText.text = newText;
-          pixiText.visible = true;
-          const bounds = pixiText.getLocalBounds();
-          data.w = bounds.width;
-          data.h = bounds.height;
-          this._onChange?.();
-        }
-      }
-    } else {
-      // Cancel — restore original
-      if (item.type === 'sticky' && item.displayObject instanceof StickySprite) {
-        const data = item.data as StickyObject;
-        data.text = this._originalText;
-        item.displayObject.updateFromData(data);
-        data.h = item.displayObject.computedHeight;
-        item.displayObject.showText(true);
-      } else if (item.type === 'text') {
-        const pixiText = item.displayObject;
-        if (pixiText instanceof Text) {
-          const data = item.data as TextObject;
-          data.text = this._originalText;
-          pixiText.text = this._originalText;
-          pixiText.visible = true;
-        }
-      }
-      // Always notify on cancel too — the tool callback needs this
-      // to clean up empty newly-created items (sticky or text).
-      this._onChange?.();
-    }
-
-    // DOM cleanup
+    // Clear editor state before mutating scene objects or invoking callbacks.
+    // This prevents blur/startEditing re-entry from acting on a destroyed item.
     ta.remove();
     this._textarea = null;
     this._item = null;
@@ -254,5 +214,56 @@ export class TextEditor {
     this._container = null;
     this._onChange = null;
     this._originalText = '';
+
+    if (save) {
+      if (
+        item.type === 'sticky' &&
+        item.displayObject instanceof StickySprite &&
+        !item.displayObject.destroyed
+      ) {
+        const data = item.data as StickyObject;
+        data.text = newText;
+        item.displayObject.updateFromData(data);
+        data.h = item.displayObject.computedHeight;
+        item.displayObject.showText(true);
+        onChange?.();
+      } else if (item.type === 'text') {
+        const pixiText = item.displayObject;
+        if (pixiText instanceof Text && !pixiText.destroyed) {
+          const data = item.data as TextObject;
+          data.text = newText;
+          pixiText.text = newText;
+          pixiText.visible = true;
+          const bounds = pixiText.getLocalBounds();
+          data.w = bounds.width;
+          data.h = bounds.height;
+          onChange?.();
+        }
+      }
+    } else {
+      // Cancel — restore original
+      if (
+        item.type === 'sticky' &&
+        item.displayObject instanceof StickySprite &&
+        !item.displayObject.destroyed
+      ) {
+        const data = item.data as StickyObject;
+        data.text = originalText;
+        item.displayObject.updateFromData(data);
+        data.h = item.displayObject.computedHeight;
+        item.displayObject.showText(true);
+      } else if (item.type === 'text') {
+        const pixiText = item.displayObject;
+        if (pixiText instanceof Text && !pixiText.destroyed) {
+          const data = item.data as TextObject;
+          data.text = originalText;
+          pixiText.text = originalText;
+          pixiText.visible = true;
+        }
+      }
+      // Always notify on cancel too — the tool callback needs this
+      // to clean up empty newly-created items (sticky or text).
+      onChange?.();
+    }
   }
 }
