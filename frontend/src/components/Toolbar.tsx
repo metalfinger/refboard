@@ -127,7 +127,7 @@ const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: st
   { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText, hint: 'Click on the canvas to place text' },
 ];
 
-const REVIEW_HINT = 'Click an image to leave a comment. Press . to toggle.';
+const REVIEW_HINT = 'Click an object to place a comment pin. Press . to toggle.';
 
 export default function Toolbar({
   activeTool,
@@ -180,11 +180,11 @@ export default function Toolbar({
       {/* Tool buttons */}
       <div style={{ display: 'flex', gap: '1px', background: '#222', borderRadius: '8px', padding: '2px' }}>
         {toolButtons.map(({ tool, label, shortcut, numKey, Icon }) => {
-          const active = activeTool === tool && !reviewMode;
+          const active = activeTool === tool;
           return (
             <button
               key={tool}
-              onClick={() => { onToolChange(tool); if (reviewMode && onToggleReview) onToggleReview(); }}
+              onClick={() => onToolChange(tool)}
               title={`${label} (${shortcut} or ${numKey})`}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -212,37 +212,38 @@ export default function Toolbar({
             </button>
           );
         })}
-        {/* Review mode — in tool group */}
-        {onToggleReview && (
-          <button
-            onClick={onToggleReview}
-            title="Review (.)"
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: '4px', height: '32px', padding: '0 10px',
-              background: reviewMode ? 'linear-gradient(135deg, #f97316, #ea580c)' : 'transparent',
-              border: 'none', borderRadius: '6px',
-              color: reviewMode ? '#fff' : '#777',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              boxShadow: reviewMode ? '0 1px 4px rgba(249,115,22,0.3)' : 'none',
-            }}
-            onMouseEnter={(e) => { if (!reviewMode) { e.currentTarget.style.background = '#2a2a2a'; e.currentTarget.style.color = '#bbb'; } }}
-            onMouseLeave={(e) => { if (!reviewMode) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#777'; } }}
-          >
-            <IconReview />
-            <span style={{ fontSize: '11px', fontWeight: reviewMode ? 600 : 400, letterSpacing: '0.2px' }}>Review</span>
-            <span style={{
-              fontSize: '9px', color: reviewMode ? 'rgba(255,255,255,0.5)' : '#555',
-              background: reviewMode ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
-              padding: '1px 4px', borderRadius: '3px', fontWeight: 500,
-              lineHeight: '14px', minWidth: '14px', textAlign: 'center',
-            }}>
-              .
-            </span>
-          </button>
-        )}
       </div>
+      {/* Review mode — independent toggle, separated from tools */}
+      {onToggleReview && (<>
+        <Divider />
+        <button
+          onClick={onToggleReview}
+          title="Review (.)"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '4px', height: '32px', padding: '0 10px',
+            background: reviewMode ? 'linear-gradient(135deg, #f97316, #ea580c)' : 'transparent',
+            border: 'none', borderRadius: '6px',
+            color: reviewMode ? '#fff' : '#777',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: reviewMode ? '0 1px 4px rgba(249,115,22,0.3)' : 'none',
+          }}
+          onMouseEnter={(e) => { if (!reviewMode) { e.currentTarget.style.background = '#2a2a2a'; e.currentTarget.style.color = '#bbb'; } }}
+          onMouseLeave={(e) => { if (!reviewMode) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#777'; } }}
+        >
+          <IconReview />
+          <span style={{ fontSize: '11px', fontWeight: reviewMode ? 600 : 400, letterSpacing: '0.2px' }}>Review</span>
+          <span style={{
+            fontSize: '9px', color: reviewMode ? 'rgba(255,255,255,0.5)' : '#555',
+            background: reviewMode ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
+            padding: '1px 4px', borderRadius: '3px', fontWeight: 500,
+            lineHeight: '14px', minWidth: '14px', textAlign: 'center',
+          }}>
+            .
+          </span>
+        </button>
+      </>)}
 
       <Divider />
 
