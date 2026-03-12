@@ -33,6 +33,7 @@ import { useAnchoredOverlayPosition } from '../hooks/useAnchoredOverlayPosition'
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
+import { getPointAnchorWorld } from '../canvas/reviewAnchors';
 import type { TextObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import * as ops from '../canvas/operations';
@@ -1063,8 +1064,11 @@ export default function Editor({ isPublicView }: EditorProps) {
               let centerX = b.x + b.w / 2;
               let centerY = b.y + b.h / 2;
               if (thread?.anchor_type === 'point' && thread.pin_x != null && thread.pin_y != null) {
-                centerX = b.x + thread.pin_x * b.w;
-                centerY = b.y + thread.pin_y * b.h;
+                const pinWorld = getPointAnchorWorld(scene, objectId, thread.pin_x, thread.pin_y);
+                if (pinWorld) {
+                  centerX = pinWorld.x;
+                  centerY = pinWorld.y;
+                }
               }
 
               // Pan only by default; zoom in if object is too small on screen
