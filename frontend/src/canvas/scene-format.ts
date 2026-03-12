@@ -4,7 +4,7 @@
 
 export interface SceneObject {
   id: string;
-  type: 'image' | 'video' | 'text' | 'group' | 'drawing';
+  type: 'image' | 'video' | 'text' | 'group' | 'drawing' | 'sticky';
   x: number;
   y: number;
   w: number;
@@ -73,7 +73,18 @@ export interface GroupObject extends SceneObject {
   padding?: number;    // inner padding around children (default 12)
 }
 
-export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject;
+export interface StickyObject extends SceneObject {
+  type: 'sticky';
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  fill: string;        // background/card color (e.g. '#ffd43b')
+  textColor: string;   // text color (e.g. '#1a1a1a')
+  padding: number;     // inner padding (default 16)
+  cornerRadius: number; // border radius (default 8)
+}
+
+export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject | StickyObject;
 
 export interface SceneData {
   v: 2;
