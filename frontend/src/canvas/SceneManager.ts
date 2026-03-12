@@ -13,6 +13,7 @@ import { AnimatedGifSprite } from './sprites/AnimatedGifSprite';
 import { VideoSprite } from './sprites/VideoSprite';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
+import { StickySprite } from './sprites/StickySprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
 import { SpatialGrid } from './SpatialGrid';
@@ -341,6 +342,15 @@ export class SceneManager {
         break;
       }
 
+      case 'sticky': {
+        const stickyData = data as StickyObject;
+        const sprite = new StickySprite(stickyData);
+        // Sync auto-computed height back to data
+        data.h = sprite.computedHeight;
+        displayObject = sprite;
+        break;
+      }
+
       default:
         displayObject = new Container();
         break;
@@ -410,6 +420,11 @@ export class SceneManager {
     }
     if (data.type === 'group' && obj instanceof FrameSprite) {
       obj.updateFromData(data as GroupObject);
+    }
+    if (data.type === 'sticky' && obj instanceof StickySprite) {
+      obj.updateFromData(data as StickyObject);
+      // Sync auto-computed height
+      data.h = obj.computedHeight;
     }
     if (data.type === 'image' && obj instanceof ImageSprite) {
       const imgData = data as ImageObject;
