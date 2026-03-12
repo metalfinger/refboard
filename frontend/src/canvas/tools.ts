@@ -10,7 +10,6 @@
 import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
-import { Text, TextStyle } from 'pixi.js';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
 import { TextEditor } from './TextEditor';
@@ -37,6 +36,14 @@ const defaultOptions: ToolOptions = {
 };
 
 type CleanupFn = (() => void) | null;
+
+/**
+ * Compute world-space size from a desired screen-space size.
+ * Clamps to reasonable bounds to avoid extreme values.
+ */
+function screenToWorld(screenPx: number, zoom: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, screenPx / zoom));
+}
 
 export interface ToolContext {
   viewport: Viewport;
@@ -89,6 +96,7 @@ export function activateTool(
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
+        const zoom = viewport.scale.x;
         const textData = {
           id: crypto.randomUUID(),
           type: 'text' as const,
@@ -105,7 +113,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: ' ', // placeholder — will be replaced by user input
-          fontSize: opts.fontSize!,
+          fontSize: screenToWorld(opts.fontSize!, zoom, 10, 72),
           fill: opts.color!,
           fontFamily: 'sans-serif',
         };
@@ -122,8 +130,8 @@ export function activateTool(
           const canvasEl = container.querySelector('canvas');
           const domContainer = canvasEl?.parentElement ?? container;
 
-          // Small delay to let PixiJS render the text sprite
-          setTimeout(() => {
+          // Use microtask instead of 50ms delay — PixiJS only needs one tick
+          queueMicrotask(() => {
             ctx.textEditor!.startEditing(item, viewport, domContainer, () => {
               // If user saved empty text, remove the item
               const text = (item.data as any).text?.trim();
@@ -135,7 +143,7 @@ export function activateTool(
             });
             // Clear placeholder so user types from scratch
             ctx.textEditor!.clearText();
-          }, 50);
+          });
         }
 
         // Switch back to select tool after placing
@@ -313,13 +321,16 @@ export function activateTool(
         const rect = container.getBoundingClientRect();
         const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
+        const zoom = viewport.scale.x;
+        const cardW = screenToWorld(220, zoom, 120, 400);
+        const cardH = screenToWorld(66, zoom, 40, 200);
         const stickyData = {
           id: crypto.randomUUID(),
           type: 'sticky' as const,
-          x: world.x - 100, // center the 200px card on click
-          y: world.y - 30,
-          w: 200,
-          h: 60,  // will be auto-computed by StickySprite
+          x: world.x - cardW / 2,
+          y: world.y - cardH / 2,
+          w: cardW,
+          h: cardH,  // will be auto-computed by StickySprite
           sx: 1,
           sy: 1,
           angle: 0,
@@ -329,7 +340,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: opts.fontSize!,
+          fontSize: screenToWorld(opts.fontSize!, zoom, 10, 48),
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',
