@@ -13,6 +13,7 @@ import type { SelectionManager } from './SelectionManager';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import type { DrawingObject } from './scene-format';
 import { TextEditor } from './TextEditor';
+import { clampTextFontSize, clampStickyFontSize } from './textLimits';
 
 export enum ToolType {
   SELECT = 'SELECT',
@@ -117,7 +118,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: ' ', // placeholder — will be replaced by user input
-          fontSize: screenToWorld(DEFAULT_TEXT_SCREEN_FONT, zoom, 10, 72),
+          fontSize: clampTextFontSize(screenToWorld(DEFAULT_TEXT_SCREEN_FONT, zoom, 6, 160)),
           fill: opts.color!,
           fontFamily: 'sans-serif',
         };
@@ -344,7 +345,7 @@ export function activateTool(
           name: '',
           visible: true,
           text: '',
-          fontSize: screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 10, 48),
+          fontSize: clampStickyFontSize(screenToWorld(DEFAULT_STICKY_SCREEN_FONT, zoom, 8, 96)),
           fontFamily: 'Inter, system-ui, sans-serif',
           fill: '#ffd43b',     // default yellow
           textColor: '#1a1a1a',
