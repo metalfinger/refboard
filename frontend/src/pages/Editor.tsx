@@ -28,6 +28,8 @@ import Minimap from '../components/Minimap';
 import UploadPanel from '../components/UploadPanel';
 import ExportDialog from '../components/ExportDialog';
 import FeedbackPanel from '../components/feedback/FeedbackPanel';
+import InlineCommentComposer from '../components/feedback/InlineCommentComposer';
+import { useAnchoredOverlayPosition } from '../hooks/useAnchoredOverlayPosition';
 import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
@@ -111,6 +113,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const expandSeqRef = useRef(0);
   const [draftCommentText, setDraftCommentText] = useState('');
   const [creatingPointThread, setCreatingPointThread] = useState(false);
+  const [sceneVersion, setSceneVersion] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -150,6 +153,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Omit for structural changes — falls through to debounced full scene sync.
   const onCanvasChange = useCallback((changedIds?: string[]) => {
     scheduleSave();
+    setSceneVersion(v => v + 1);
     if (changedIds && changedIds.length > 0) {
       // Incremental: broadcast only changed elements
       syncRef.current?.broadcastElements(changedIds);
@@ -203,6 +207,15 @@ export default function Editor({ isPublicView }: EditorProps) {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
+
+  // Inline composer position — tracks viewport + scene changes for anchored placement
+  const composerAnchor = draftPin ? { objectId: draftPin.objectId, pinX: draftPin.pinX, pinY: draftPin.pinY } : null;
+  const composerPos = useAnchoredOverlayPosition(
+    canvasRef.current?.getViewport() ?? null,
+    canvasRef.current?.getScene() ?? null,
+    composerAnchor,
+    sceneVersion,
+  );
 
   // Keep reviewModeRef in sync for tool handlers to read
   useEffect(() => {
@@ -958,6 +971,32 @@ export default function Editor({ isPublicView }: EditorProps) {
           }} onClick={stopFollowing}>
             Following {followingDisplayName} — click to stop
           </div>
+        )}
+
+        {/* Inline comment composer — anchored to draft pin */}
+        {reviewMode && draftPin && (
+          <InlineCommentComposer
+            visible={composerPos.visible}
+            x={composerPos.screenX}
+            y={composerPos.screenY}
+            placement={composerPos.placement}
+            objectLabel={
+              canvasObjectMap.get(draftPin.objectId)?.name ||
+              canvasObjectMap.get(draftPin.objectId)?.type ||
+              'Object'
+            }
+            value={draftCommentText}
+            onChange={setDraftCommentText}
+            onSubmit={async () => {
+              if (!draftPin || !draftCommentText.trim()) return;
+              await handleCreatePointThread(draftPin, draftCommentText.trim());
+            }}
+            onCancel={() => {
+              setDraftPin(null);
+              setDraftCommentText('');
+            }}
+            submitting={creatingPointThread}
+          />
         )}
 
         {/* Context menu */}
