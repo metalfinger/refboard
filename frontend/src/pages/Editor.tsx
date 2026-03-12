@@ -34,6 +34,7 @@ import { UploadManager } from '../stores/uploadManager';
 import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
 import { getPointAnchorWorld } from '../canvas/reviewAnchors';
+import { resolveReviewTargetAtPoint } from '../canvas/reviewTargeting';
 import type { TextObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import * as ops from '../canvas/operations';
@@ -291,21 +292,21 @@ export default function Editor({ isPublicView }: EditorProps) {
       // Priority 2: scene object (place draft pin) — only for editor/owner
       const scene = canvasRef.current?.getScene();
       if (scene && userRole !== 'viewer') {
-        // Use 10px screen-space radius converted to world space for forgiving click detection
         const clickRadius = 10 / vp.scale.x;
-        const hitItems = scene.queryRegion(worldPos.x - clickRadius, worldPos.y - clickRadius, clickRadius * 2, clickRadius * 2);
-        // Take the topmost (highest z) item
-        if (hitItems.length > 0) {
-          const item = hitItems.sort((a: any, b: any) => (b.data.z || 0) - (a.data.z || 0))[0];
-          const bounds = getItemWorldBounds(item);
-          const pinX = Math.max(0, Math.min(1, (worldPos.x - bounds.x) / bounds.w));
-          const pinY = Math.max(0, Math.min(1, (worldPos.y - bounds.y) / bounds.h));
+        const target = resolveReviewTargetAtPoint({
+          scene,
+          worldX: worldPos.x,
+          worldY: worldPos.y,
+          clickRadius,
+        });
+        // Defensive guard: never attach a comment to a group
+        if (target && target.objectType !== 'group') {
           setDraftPin({
-            objectId: item.id,
-            pinX,
-            pinY,
-            worldX: worldPos.x,
-            worldY: worldPos.y,
+            objectId: target.objectId,
+            pinX: target.pinX,
+            pinY: target.pinY,
+            worldX: target.worldX,
+            worldY: target.worldY,
           });
           setFocusedThreadId(null);
           return;
