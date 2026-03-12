@@ -12,7 +12,12 @@ interface SaveManagerOptions {
 }
 
 /**
- * Debounced save with thumbnail generation from PixiJS renderer.
+ * Debounced autosave — state only, no thumbnail.
+ *
+ * Thumbnail generation (extract.canvas on the full viewport) was removed
+ * from the hot save path because it blocks the main thread and GPU for
+ * hundreds of ms, causing focus/typing/wheel jank.  Thumbnails should be
+ * generated on idle, on explicit export, or server-side.
  */
 export function useSaveManager({ resolvedBoardId, isPublicView, readOnly, canvasRef, setSaveStatus }: SaveManagerOptions) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,38 +32,7 @@ export function useSaveManager({ resolvedBoardId, isPublicView, readOnly, canvas
       setSaveStatus('saving');
       try {
         const state = JSON.stringify(scene.serialize());
-
-        // Generate thumbnail — skip for large scenes to avoid GPU OOM
-        let thumbnail: string | undefined;
-        try {
-          const app = canvasRef.current?.getApp();
-          const viewport = canvasRef.current?.getViewport();
-          const itemCount = scene.getAllItems().length;
-          // Skip thumbnail extraction when >50 items — extract.canvas on
-          // the full viewport with many textures causes WebGL OOM.
-          if (app?.renderer?.extract && viewport && itemCount <= 50) {
-            const fullCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
-            const thumbMax = 400;
-            const sw = fullCanvas.width;
-            const sh = fullCanvas.height;
-            if (sw > 0 && sh > 0) {
-              const ratio = Math.min(thumbMax / sw, thumbMax / sh, 1);
-              const tw = Math.round(sw * ratio);
-              const th = Math.round(sh * ratio);
-              const offscreen = document.createElement('canvas');
-              offscreen.width = tw;
-              offscreen.height = th;
-              const ctx = offscreen.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(fullCanvas, 0, 0, tw, th);
-                thumbnail = offscreen.toDataURL('image/webp', 0.6);
-              }
-            }
-          }
-        } catch (thumbErr) {
-          console.warn('Thumbnail generation failed:', thumbErr);
-        }
-        await saveCanvas(resolvedBoardId, state, thumbnail);
+        await saveCanvas(resolvedBoardId, state, undefined);
         setSaveStatus('saved');
       } catch (err: any) {
         if (err?.response?.status === 403) {
