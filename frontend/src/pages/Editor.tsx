@@ -109,6 +109,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [draftPin, setDraftPin] = useState<DraftPin | null>(null);
   const [openThreadDetailId, setOpenThreadDetailId] = useState<string | null>(null);
   const expandSeqRef = useRef(0);
+  const [draftCommentText, setDraftCommentText] = useState('');
+  const [creatingPointThread, setCreatingPointThread] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -320,6 +322,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       if (draftPin) {
         e.preventDefault();
         setDraftPin(null);
+        setDraftCommentText('');
         return;
       }
       if (openThreadDetailId) {
@@ -345,9 +348,10 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   // Create point-pinned thread via REST
   const handleCreatePointThread = useCallback(async (draft: DraftPin, content: string) => {
-    if (!resolvedBoardId) return;
+    if (!resolvedBoardId || creatingPointThread) return;
     const token = localStorage.getItem('refboard_token');
     if (!token) return;
+    setCreatingPointThread(true);
     try {
       const res = await fetch(`/api/boards/${resolvedBoardId}/threads`, {
         method: 'POST',
@@ -368,18 +372,22 @@ export default function Editor({ isPublicView }: EditorProps) {
       const data = await res.json();
       // Clear draft, pre-focus the new thread
       setDraftPin(null);
+      setDraftCommentText('');
       setFocusedThreadId(data.thread.id);
       expandSeqRef.current += 1;
       setExpandRequest({ threadId: data.thread.id, seq: expandSeqRef.current });
     } catch (err: any) {
       showToast('Failed to create comment: ' + (err.message || 'network error'));
+    } finally {
+      setCreatingPointThread(false);
     }
-  }, [resolvedBoardId, showToast]);
+  }, [resolvedBoardId, showToast, creatingPointThread]);
 
   // Clear draft and focus when exiting review mode
   useEffect(() => {
     if (!reviewMode) {
       setDraftPin(null);
+      setDraftCommentText('');
       setFocusedThreadId(null);
       setExpandRequest(null);
     }
