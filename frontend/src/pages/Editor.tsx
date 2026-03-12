@@ -201,12 +201,12 @@ export default function Editor({ isPublicView }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
 
-  // Pin visibility — will be gated on reviewMode in Task 10
+  // Pins visible only in review mode
   useEffect(() => {
     if (!pinOverlay) return;
-    pinOverlay.visible = true;
-    pinOverlay.refresh();
-  }, [pinOverlay]);
+    pinOverlay.visible = reviewMode;
+    if (reviewMode) pinOverlay.refresh();
+  }, [pinOverlay, reviewMode]);
 
   // Sync draft pin to PinOverlay ghost pin
   useEffect(() => {
