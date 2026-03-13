@@ -49,7 +49,11 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
 
   useEffect(() => {
     async function onKeyDown(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
+      ) return;
 
       const scene = canvasRef.current?.getScene();
       const selection = selectionRef.current;
