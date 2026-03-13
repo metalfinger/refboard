@@ -103,6 +103,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [zoom, setZoom] = useState(1);
   const [objectCount, setObjectCount] = useState(0);
+  const [sceneLoading, setSceneLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState({ loaded: 0, total: 0 });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -199,6 +201,9 @@ export default function Editor({ isPublicView }: EditorProps) {
     setZoom(z);
     const scene = canvasRef.current?.getScene();
     if (scene) setObjectCount(scene.getAllItems().length);
+    // Update scene loading state
+    const isLoading = canvasRef.current?.isSceneLoading() ?? false;
+    setSceneLoading(isLoading);
     const vp = canvasRef.current?.getViewport();
     if (vp) setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
   }, [scheduleSave]);
@@ -309,6 +314,21 @@ export default function Editor({ isPublicView }: EditorProps) {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
+
+  // Track asset load progress during initial load
+  useEffect(() => {
+    if (!sceneLoading && loadProgress.total > 0 && loadProgress.loaded >= loadProgress.total) return;
+    const interval = setInterval(() => {
+      const scene = canvasRef.current?.getScene();
+      if (!scene) return;
+      const progress = scene.getLoadProgress();
+      setLoadProgress(progress);
+      // Also update sceneLoading flag
+      const isLoading = canvasRef.current?.isSceneLoading() ?? false;
+      setSceneLoading(isLoading);
+    }, 300);
+    return () => clearInterval(interval);
+  }, [sceneLoading, loadProgress]);
 
   // Inline composer position — tracks viewport + scene changes for anchored placement
   const composerAnchor = draftPin ? { objectId: draftPin.objectId, pinX: draftPin.pinX, pinY: draftPin.pinY } : null;
@@ -876,8 +896,10 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a1a', color: '#666', fontSize: '14px' }}>
-        Loading board...
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a1a', color: '#888', fontSize: '13px', gap: '12px', fontFamily: 'system-ui, sans-serif' }}>
+        <div style={{ width: '24px', height: '24px', border: '2px solid #333', borderTopColor: '#4a9eff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        Loading board
       </div>
     );
   }
@@ -1034,8 +1056,33 @@ export default function Editor({ isPublicView }: EditorProps) {
           canvasTransform={canvasTransform}
         />
 
-        {/* Empty canvas guide */}
-        {objectCount === 0 && (
+        {/* Loading / Empty canvas guide */}
+        {(sceneLoading || (objectCount > 0 && loadProgress.total > 0 && loadProgress.loaded < loadProgress.total)) && (
+          <div style={{
+            position: 'absolute', bottom: '48px', left: '50%', transform: 'translateX(-50%)',
+            pointerEvents: 'none', textAlign: 'center', color: '#888', userSelect: 'none',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+          }}>
+            <div style={{ fontSize: '12px', fontFamily: 'system-ui, sans-serif' }}>
+              {sceneLoading
+                ? `Loading ${loadProgress.total || '...'} items`
+                : `Loading assets ${loadProgress.loaded}/${loadProgress.total}`}
+            </div>
+            {loadProgress.total > 0 && (
+              <div style={{
+                width: '160px', height: '3px', borderRadius: '2px',
+                background: '#333', overflow: 'hidden',
+              }}>
+                <div style={{
+                  width: `${Math.round((loadProgress.loaded / loadProgress.total) * 100)}%`,
+                  height: '100%', background: '#4a9eff', borderRadius: '2px',
+                  transition: 'width 0.3s ease',
+                }} />
+              </div>
+            )}
+          </div>
+        )}
+        {objectCount === 0 && !sceneLoading && (
           <div style={{
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             pointerEvents: 'none', textAlign: 'center', color: '#555', userSelect: 'none',

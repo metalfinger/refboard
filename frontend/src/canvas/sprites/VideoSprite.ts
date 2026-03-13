@@ -231,6 +231,7 @@ export class VideoSprite extends Container {
     if (!this._hasPoster) return;
     if (this.posterTexture) {
       if (this._sprite && this._sprite.texture === this.posterTexture) {
+        this._sprite.texture = Texture.EMPTY;
         this._removeSpriteFromTree();
       }
       // Release via TextureManager if server poster, otherwise destroy directly
@@ -299,6 +300,7 @@ export class VideoSprite extends Container {
 
       // Drop poster while playing — don't keep both resident
       if (this._hasPoster && this.posterTexture) {
+        // Detach from sprite before destroying (sprite already swapped to videoTexture above)
         if (this._serverPosterLoaded && this.posterAssetKey && this.textures) {
           this.textures.release(this.posterAssetKey);
         } else {
@@ -588,7 +590,10 @@ export class VideoSprite extends Container {
   private _destroyVideoTexture(): void {
     this._stopFrameLoop();
     if (this.videoTexture) {
+      // Swap to EMPTY before destroying so PixiJS never reads a null source
+      // during its render-loop traversal (collectRenderables → alphaMode).
       if (this._sprite && this._sprite.texture === this.videoTexture) {
+        this._sprite.texture = Texture.EMPTY;
         this._removeSpriteFromTree();
         this._restorePlaceholder();
       }
@@ -603,6 +608,10 @@ export class VideoSprite extends Container {
     this._stopFrameLoop();
     this.pause();
     this._destroyVideoEl();
+    // Detach sprite from any texture before destroying them
+    if (this._sprite) {
+      this._sprite.texture = Texture.EMPTY;
+    }
     if (this.videoTexture) { this.videoTexture.destroy(true); this.videoTexture = null; }
     this._frameCanvas = null;
     this._frameCtx = null;

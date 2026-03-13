@@ -4,6 +4,7 @@ import type { SceneManager } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
 import type { UploadManager } from '../stores/uploadManager';
 import { uploadImage, uploadImageFromUrl } from '../api';
+import { wasRecentInternalPaste } from './shortcut-definitions';
 
 type OnChange = () => void;
 
@@ -333,6 +334,10 @@ export function setupPaste(
     // If focus is inside a contentEditable (e.g. BlockNote editor), let native paste through
     const active = document.activeElement;
     if (active instanceof HTMLElement && (active.isContentEditable || active.closest('[contenteditable]'))) return;
+
+    // If an internal paste (scene item duplication) just happened via the shortcut
+    // handler, skip the native paste to avoid double-pasting the PNG screenshot.
+    if (wasRecentInternalPaste()) return;
 
     const items = e.clipboardData?.items;
     if (!items) return;

@@ -40,6 +40,8 @@ export interface PixiCanvasHandle {
   fitAll: () => void;
   getZoom: () => number;
   setZoom: (zoom: number) => void;
+  /** True while the initial scene is being loaded (items being created). */
+  isSceneLoading: () => boolean;
 }
 
 export interface PixiCanvasProps {
@@ -106,6 +108,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
     const viewportRef = useRef<Viewport | null>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const initialLoadDone = useRef(false);
+    const sceneLoadingRef = useRef(false);
     const spaceHeld = useRef(false);
     const onChangeRef = useRef(onChange);
     const [pixiReady, setPixiReady] = useState(false);
@@ -442,7 +445,11 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
       }
 
       initialLoadDone.current = true;
-      sceneRef.current.loadScene(sceneData);
+      sceneLoadingRef.current = true;
+      sceneRef.current.loadScene(sceneData).then(() => {
+        sceneLoadingRef.current = false;
+        onChangeRef.current?.(); // trigger objectCount update
+      });
     }, [canvasState, pixiReady]);
 
     // ── Space key for pan mode ────────────────────────────────────────
@@ -543,6 +550,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             ease: 'easeOutQuad',
           });
         },
+        isSceneLoading: () => sceneLoadingRef.current,
       }),
       [fitAll],
     );

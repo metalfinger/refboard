@@ -22,10 +22,17 @@ import { onArrangeAnimationDone } from './operations';
 // Tracks when the last internal copy happened so paste can decide
 // whether to use internal clipboard (just copied) vs system clipboard (external app).
 let _lastInternalCopyTime = 0;
+// Tracks when the last internal paste happened so setupPaste can skip the native event.
+let _lastInternalPasteTime = 0;
 
 /** Mark that an internal copy just happened. Called by copy/cut handlers. */
 export function markInternalCopy(): void {
   _lastInternalCopyTime = Date.now();
+}
+
+/** Check if an internal paste just happened (within last 500ms). Used by setupPaste to skip. */
+export function wasRecentInternalPaste(): boolean {
+  return Date.now() - _lastInternalPasteTime < 500;
 }
 
 /** Collect selected items + their group children (for deep clone). */
@@ -494,19 +501,18 @@ export const shortcuts: ShortcutDef[] = [
     category: 'editing', description: 'Paste',
     preventDefault: false,
     handler: async (ctx) => {
-      // Only handle recent internal copies here.
-      // For external clipboard content (images, text, HTML), do NOT call
-      // e.preventDefault() — let the native paste event fire through to setupPaste
-      // in image-drop.ts, which is the single path for all external clipboard content.
-      const timeSinceInternalCopy = Date.now() - _lastInternalCopyTime;
+      // If we have items in the internal clipboard, always prefer internal paste
+      // (duplicates the scene items with offset). This avoids re-uploading the
+      // PNG screenshot that Ctrl+C also wrote to the system clipboard.
       const hasInternalItems = ctx.clipboardRef.current.length > 0;
-      const recentInternalCopy = hasInternalItems && timeSinceInternalCopy < 500;
 
-      if (recentInternalCopy) {
+      if (hasInternalItems) {
+        _lastInternalPasteTime = Date.now();
         await _pasteInternal(ctx);
         return;
       }
-      // For external clipboard content: do nothing, let native paste event fire through to setupPaste
+      // No internal items — let native paste event fire through to setupPaste
+      // in image-drop.ts for external clipboard content (images, text, HTML).
     },
   },
   {

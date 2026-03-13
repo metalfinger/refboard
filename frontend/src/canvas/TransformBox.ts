@@ -13,7 +13,7 @@ import { MarkdownSprite } from './sprites/MarkdownSprite';
 import type { MarkdownObject } from './scene-format';
 import { type SceneItem, getItemWorldBounds } from './SceneManager';
 import type { SnapGuides } from './SnapGuides';
-import { applyImageDisplayTransform } from './imageTransforms';
+import { applyImageDisplayTransform, getImageVisibleLocalRect } from './imageTransforms';
 import type { ImageObject } from './scene-format';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +77,10 @@ export class TransformBox extends Container {
   private _resizeConstraint: 'full' | 'horizontal' | 'none' = 'full';
   /** Only images (and videos) support rotation. */
   private _rotateAllowed = true;
+  /** Rotation angle of the transform box itself (matches single item rotation). */
+  private _selectionAngle = 0;
+  /** Center of the rotated transform box in world space. */
+  private _rotatedCenter = { x: 0, y: 0 };
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
 
@@ -179,55 +183,111 @@ export class TransformBox extends Container {
       return;
     }
 
-    // Compute combined bounding rect via canonical getItemWorldBounds()
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    for (const item of items) {
-      const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
-      if (ix < minX) minX = ix;
-      if (iy < minY) minY = iy;
-      if (ix + iw > maxX) maxX = ix + iw;
-      if (iy + ih > maxY) maxY = iy + ih;
-    }
-
-    this._bounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     const allSticky = items.length > 0 && items.every(i => i.type === 'sticky');
     const allMarkdown = items.length > 0 && items.every(i => i.type === 'markdown');
     this._resizeConstraint = allSticky ? 'none' : allMarkdown ? 'horizontal' : 'full';
     // Only allow rotation for image/video selections
     const ROTATABLE_TYPES = new Set(['image', 'video']);
     this._rotateAllowed = items.length > 0 && items.every(i => ROTATABLE_TYPES.has(i.type));
+
+    // Single rotated item: use the item's local rect so the transform box
+    // wraps the unrotated shape and we rotate the box itself.
+    const singleItem = items.length === 1 ? items[0] : null;
+    const itemAngle = singleItem?.data.angle ?? 0;
+
+    if (singleItem && Math.abs(itemAngle) > 0.01) {
+      this._selectionAngle = itemAngle;
+      // Compute the item's local (unrotated) visible rect in world units
+      let localW: number;
+      let localH: number;
+      if (singleItem.type === 'image') {
+        const vis = getImageVisibleLocalRect(singleItem.data as ImageObject);
+        localW = vis.w * Math.abs(singleItem.data.sx);
+        localH = vis.h * Math.abs(singleItem.data.sy);
+      } else {
+        localW = singleItem.data.w * Math.abs(singleItem.data.sx);
+        localH = singleItem.data.h * Math.abs(singleItem.data.sy);
+      }
+      // Get the AABB to find the center (center is invariant under rotation)
+      const aabb = getItemWorldBounds(singleItem);
+      const cx = aabb.x + aabb.w / 2;
+      const cy = aabb.y + aabb.h / 2;
+      this._rotatedCenter = { x: cx, y: cy };
+      // Bounds in local (unrotated) space, centered on world center
+      this._bounds = { x: cx - localW / 2, y: cy - localH / 2, w: localW, h: localH };
+    } else {
+      this._selectionAngle = 0;
+      // Multi-selection or unrotated: use axis-aligned world bounds
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const item of items) {
+        const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
+        if (ix < minX) minX = ix;
+        if (iy < minY) minY = iy;
+        if (ix + iw > maxX) maxX = ix + iw;
+        if (iy + ih > maxY) maxY = iy + ih;
+      }
+      this._bounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      this._rotatedCenter = { x: minX + (maxX - minX) / 2, y: minY + (maxY - minY) / 2 };
+    }
+
     this._draw();
     this.visible = true;
   }
 
   // -- Drawing --------------------------------------------------------------
 
+  /** Rotate a point around a center by an angle in degrees. */
+  private _rotatePoint(px: number, py: number, cx: number, cy: number, angleDeg: number): { x: number; y: number } {
+    const rad = (angleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const dx = px - cx;
+    const dy = py - cy;
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  }
+
   private _draw(): void {
     const { x, y, w, h } = this._bounds;
     const zoom = this._viewport?.scale.x ?? 1;
+    const angle = this._selectionAngle;
+    const rcx = this._rotatedCenter.x;
+    const rcy = this._rotatedCenter.y;
 
     // Border — constant screen-width stroke
     this._border.clear();
-    this._border.rect(x, y, w, h);
-    this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH / zoom });
+    if (Math.abs(angle) > 0.01) {
+      // Draw rotated rectangle as a polygon
+      const tl = this._rotatePoint(x, y, rcx, rcy, angle);
+      const tr = this._rotatePoint(x + w, y, rcx, rcy, angle);
+      const br = this._rotatePoint(x + w, y + h, rcx, rcy, angle);
+      const bl = this._rotatePoint(x, y + h, rcx, rcy, angle);
+      this._border.moveTo(tl.x, tl.y);
+      this._border.lineTo(tr.x, tr.y);
+      this._border.lineTo(br.x, br.y);
+      this._border.lineTo(bl.x, bl.y);
+      this._border.closePath();
+      this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH / zoom });
+    } else {
+      this._border.rect(x, y, w, h);
+      this._border.stroke({ color: BORDER_COLOR, width: BORDER_WIDTH / zoom });
+    }
 
-    // Position handles
+    // Position handles (in local bounds space, then rotated)
     const cx = x + w / 2;
     const cy = y + h / 2;
 
-    const positions: Record<HandleId, { px: number; py: number }> = {
-      tl: { px: x, py: y },
-      tc: { px: cx, py: y },
-      tr: { px: x + w, py: y },
-      ml: { px: x, py: cy },
-      mr: { px: x + w, py: cy },
-      bl: { px: x, py: y + h },
-      bc: { px: cx, py: y + h },
-      br: { px: x + w, py: y + h },
+    const localPositions: Record<HandleId, { x: number; y: number }> = {
+      tl: { x, y },
+      tc: { x: cx, y },
+      tr: { x: x + w, y },
+      ml: { x, y: cy },
+      mr: { x: x + w, y: cy },
+      bl: { x, y: y + h },
+      bc: { x: cx, y: y + h },
+      br: { x: x + w, y: y + h },
     };
 
     // Counter-scale handles so they stay the same screen size at any zoom
@@ -252,21 +312,25 @@ export class TransformBox extends Container {
       handle.visible = true;
       handle.eventMode = 'static';
 
-      const pos = positions[id];
+      const lp = localPositions[id];
+      const pos = Math.abs(angle) > 0.01
+        ? this._rotatePoint(lp.x, lp.y, rcx, rcy, angle)
+        : lp;
       handle.clear();
 
       handle.rect(-half, -half, s, s);
       handle.fill(HANDLE_FILL);
       handle.stroke({ color: HANDLE_STROKE, width: 1 / zoom });
 
-      handle.position.set(pos.px, pos.py);
+      handle.position.set(pos.x, pos.y);
+      handle.rotation = (angle * Math.PI) / 180;
     }
 
-    const rotatePositions: Record<RotateHandleId, { px: number; py: number }> = {
-      tl: { px: x - rotateOffset, py: y - rotateOffset },
-      tr: { px: x + w + rotateOffset, py: y - rotateOffset },
-      bl: { px: x - rotateOffset, py: y + h + rotateOffset },
-      br: { px: x + w + rotateOffset, py: y + h + rotateOffset },
+    const localRotatePositions: Record<RotateHandleId, { x: number; y: number }> = {
+      tl: { x: x - rotateOffset, y: y - rotateOffset },
+      tr: { x: x + w + rotateOffset, y: y - rotateOffset },
+      bl: { x: x - rotateOffset, y: y + h + rotateOffset },
+      br: { x: x + w + rotateOffset, y: y + h + rotateOffset },
     };
 
     for (const [id, handle] of this._rotateHandles) {
@@ -281,7 +345,11 @@ export class TransformBox extends Container {
       handle.circle(0, 0, rotateHalf);
       handle.fill({ color: ROTATE_HANDLE_FILL, alpha: 0.9 });
       handle.stroke({ color: HANDLE_FILL, width: 1 / zoom });
-      handle.position.set(rotatePositions[id].px, rotatePositions[id].py);
+      const lp = localRotatePositions[id];
+      const pos = Math.abs(angle) > 0.01
+        ? this._rotatePoint(lp.x, lp.y, rcx, rcy, angle)
+        : lp;
+      handle.position.set(pos.x, pos.y);
     }
   }
 
@@ -416,6 +484,13 @@ export class TransformBox extends Container {
       return;
     }
 
+    // If the transform box is rotated, project mouse into the local
+    // (unrotated) coordinate system so the scale math stays correct.
+    let localMouse = { x: world.x, y: world.y };
+    if (Math.abs(this._selectionAngle) > 0.01) {
+      localMouse = this._rotatePoint(world.x, world.y, this._rotatedCenter.x, this._rotatedCenter.y, -this._selectionAngle);
+    }
+
     // Compute scale factors: new size / original size
     // Each handle has a fixed edge — the opposite side stays put
     const MIN = 0.05;
@@ -426,8 +501,8 @@ export class TransformBox extends Container {
       // --- Corner handles (proportional) ---
       case 'br': {
         // Fixed edge: top-left. New size = mouse - top-left.
-        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
-        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        fx = Math.max(MIN, (localMouse.x - ob.x) / ob.w);
+        fy = Math.max(MIN, (localMouse.y - ob.y) / ob.h);
         // Proportional: use average
         const f = (fx + fy) / 2;
         fx = f; fy = f;
@@ -437,8 +512,8 @@ export class TransformBox extends Container {
         // Fixed edge: bottom-right
         const right = ob.x + ob.w;
         const bottom = ob.y + ob.h;
-        fx = Math.max(MIN, (right - world.x) / ob.w);
-        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        fx = Math.max(MIN, (right - localMouse.x) / ob.w);
+        fy = Math.max(MIN, (bottom - localMouse.y) / ob.h);
         const f = (fx + fy) / 2;
         fx = f; fy = f;
         break;
@@ -446,8 +521,8 @@ export class TransformBox extends Container {
       case 'tr': {
         // Fixed edge: bottom-left
         const bottom = ob.y + ob.h;
-        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
-        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        fx = Math.max(MIN, (localMouse.x - ob.x) / ob.w);
+        fy = Math.max(MIN, (bottom - localMouse.y) / ob.h);
         const f = (fx + fy) / 2;
         fx = f; fy = f;
         break;
@@ -455,32 +530,32 @@ export class TransformBox extends Container {
       case 'bl': {
         // Fixed edge: top-right
         const right = ob.x + ob.w;
-        fx = Math.max(MIN, (right - world.x) / ob.w);
-        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        fx = Math.max(MIN, (right - localMouse.x) / ob.w);
+        fy = Math.max(MIN, (localMouse.y - ob.y) / ob.h);
         const f = (fx + fy) / 2;
         fx = f; fy = f;
         break;
       }
       // --- Edge handles (proportional by default, hold Shift for free-form) ---
       case 'mr': {
-        fx = Math.max(MIN, (world.x - ob.x) / ob.w);
+        fx = Math.max(MIN, (localMouse.x - ob.x) / ob.w);
         if (!e.shiftKey && this._resizeConstraint !== 'horizontal') fy = fx;
         break;
       }
       case 'ml': {
         const right = ob.x + ob.w;
-        fx = Math.max(MIN, (right - world.x) / ob.w);
+        fx = Math.max(MIN, (right - localMouse.x) / ob.w);
         if (!e.shiftKey) fy = fx;
         break;
       }
       case 'bc': {
-        fy = Math.max(MIN, (world.y - ob.y) / ob.h);
+        fy = Math.max(MIN, (localMouse.y - ob.y) / ob.h);
         if (!e.shiftKey) fx = fy;
         break;
       }
       case 'tc': {
         const bottom = ob.y + ob.h;
-        fy = Math.max(MIN, (bottom - world.y) / ob.h);
+        fy = Math.max(MIN, (bottom - localMouse.y) / ob.h);
         if (!e.shiftKey) fx = fy;
         break;
       }
@@ -555,16 +630,21 @@ export class TransformBox extends Container {
     // Show dimension label
     const bounds = this._bounds;
     const zoom = this._viewport?.scale.x ?? 1;
-    const w = Math.round(bounds.w);
-    const h = Math.round(bounds.h);
-    this._dimLabel.text = `${w} \u00d7 ${h}`;
+    const dimW = Math.round(bounds.w);
+    const dimH = Math.round(bounds.h);
+    this._dimLabel.text = `${dimW} \u00d7 ${dimH}`;
     this._dimLabel.scale.set(1 / zoom); // Stay fixed screen size
 
-    // Position below bottom-right corner with offset
-    const labelX = bounds.x + bounds.w;
-    const labelY = bounds.y + bounds.h + 12 / zoom;
+    // Position below bottom-right corner with offset (rotated if needed)
+    let labelAnchorX = bounds.x + bounds.w;
+    let labelAnchorY = bounds.y + bounds.h + 12 / zoom;
+    if (Math.abs(this._selectionAngle) > 0.01) {
+      const rotated = this._rotatePoint(labelAnchorX, labelAnchorY, this._rotatedCenter.x, this._rotatedCenter.y, this._selectionAngle);
+      labelAnchorX = rotated.x;
+      labelAnchorY = rotated.y;
+    }
     this._dimLabel.anchor.set(1, 0); // right-aligned
-    this._dimLabel.position.set(labelX, labelY);
+    this._dimLabel.position.set(labelAnchorX, labelAnchorY);
 
     // Background pill
     const pad = 4 / zoom;
@@ -572,8 +652,8 @@ export class TransformBox extends Container {
     const textH = this._dimLabel.height;
     this._dimLabelBg.clear();
     this._dimLabelBg.roundRect(
-      labelX - textW - pad,
-      labelY - pad / 2,
+      labelAnchorX - textW - pad,
+      labelAnchorY - pad / 2,
       textW + pad * 2,
       textH + pad,
       3 / zoom,
