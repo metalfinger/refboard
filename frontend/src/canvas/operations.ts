@@ -4,7 +4,7 @@
  * any needed re-render or persistence.
  */
 
-import type { SceneItem } from './SceneManager';
+import { getItemWorldBounds, type SceneItem } from './SceneManager';
 import type { ImageObject } from './scene-format';
 import { ColorMatrixFilter } from 'pixi.js';
 import { applyImageDisplayTransform, getImageDisplayTransform } from './imageTransforms';
@@ -17,11 +17,27 @@ function isFixedSize(item: SceneItem): boolean {
 }
 
 function scaledW(item: SceneItem): number {
-  return item.data.w * item.data.sx;
+  return getItemWorldBounds(item).w;
 }
 
 function scaledH(item: SceneItem): number {
-  return item.data.h * item.data.sy;
+  return getItemWorldBounds(item).h;
+}
+
+function bounds(item: SceneItem) {
+  return getItemWorldBounds(item);
+}
+
+function moveVisibleTopLeftTo(item: SceneItem, x: number, y: number): void {
+  const b = bounds(item);
+  item.data.x += x - b.x;
+  item.data.y += y - b.y;
+  syncPosition(item);
+}
+
+function moveVisibleCenterTo(item: SceneItem, cx: number, cy: number): void {
+  const b = bounds(item);
+  moveVisibleTopLeftTo(item, cx - b.w / 2, cy - b.h / 2);
 }
 
 // ─── Animated position sync ───
@@ -111,37 +127,39 @@ function syncTransform(item: SceneItem): void {
 
 export function alignLeft(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const minLeft = Math.min(...objects.map((item) => item.data.x));
+  const minLeft = Math.min(...objects.map((item) => bounds(item).x));
   objects.forEach((item) => {
-    item.data.x = minLeft;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, minLeft, bounds(item).y);
   });
 }
 
 export function alignRight(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const maxRight = Math.max(...objects.map((item) => item.data.x + scaledW(item)));
+  const maxRight = Math.max(...objects.map((item) => {
+    const b = bounds(item);
+    return b.x + b.w;
+  }));
   objects.forEach((item) => {
-    item.data.x = maxRight - scaledW(item);
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, maxRight - scaledW(item), bounds(item).y);
   });
 }
 
 export function alignTop(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const minTop = Math.min(...objects.map((item) => item.data.y));
+  const minTop = Math.min(...objects.map((item) => bounds(item).y));
   objects.forEach((item) => {
-    item.data.y = minTop;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, bounds(item).x, minTop);
   });
 }
 
 export function alignBottom(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const maxBottom = Math.max(...objects.map((item) => item.data.y + scaledH(item)));
+  const maxBottom = Math.max(...objects.map((item) => {
+    const b = bounds(item);
+    return b.y + b.h;
+  }));
   objects.forEach((item) => {
-    item.data.y = maxBottom - scaledH(item);
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, bounds(item).x, maxBottom - scaledH(item));
   });
 }
 
@@ -155,12 +173,10 @@ export function distributeHorizontal(objects: SceneItem[]) {
   normalizeHeight(objects);
   // Then arrange as row with even spacing
   const gap = 20;
-  const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
+  const sorted = [...objects].sort((a, b) => bounds(a).x - bounds(b).x);
   let x = 0;
   sorted.forEach((item) => {
-    item.data.x = startX + x;
-    item.data.y = startY;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX + x, startY);
     x += scaledW(item) + gap;
   });
 }
@@ -173,12 +189,10 @@ export function distributeVertical(objects: SceneItem[]) {
   normalizeWidth(objects);
   // Then arrange as column with even spacing
   const gap = 20;
-  const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
+  const sorted = [...objects].sort((a, b) => bounds(a).y - bounds(b).y);
   let y = 0;
   sorted.forEach((item) => {
-    item.data.x = startX;
-    item.data.y = startY + y;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX, startY + y);
     y += scaledH(item) + gap;
   });
 }
@@ -249,8 +263,8 @@ export function normalizeWidth(objects: SceneItem[]) {
 /** Get the top-left corner of the bounding box of all items. */
 function anchorTopLeft(objects: SceneItem[]): { x: number; y: number } {
   return {
-    x: Math.min(...objects.map((item) => item.data.x)),
-    y: Math.min(...objects.map((item) => item.data.y)),
+    x: Math.min(...objects.map((item) => bounds(item).x)),
+    y: Math.min(...objects.map((item) => bounds(item).y)),
   };
 }
 
@@ -271,9 +285,7 @@ export function arrangeOptimal(objects: SceneItem[]) {
       y += shelfHeight + gap;
       shelfHeight = 0;
     }
-    item.data.x = startX + x;
-    item.data.y = startY + y;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX + x, startY + y);
     shelfHeight = Math.max(shelfHeight, h);
     x += w + gap;
   });
@@ -289,22 +301,18 @@ export function arrangeGrid(objects: SceneItem[]) {
   objects.forEach((item, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    item.data.x = startX + col * (maxW + gap);
-    item.data.y = startY + row * (maxH + gap);
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX + col * (maxW + gap), startY + row * (maxH + gap));
   });
 }
 
 export function arrangeRow(objects: SceneItem[]) {
   if (objects.length < 2) return;
   const { x: startX, y: startY } = anchorTopLeft(objects);
-  const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
+  const sorted = [...objects].sort((a, b) => bounds(a).x - bounds(b).x);
   const gap = 20;
   let x = 0;
   sorted.forEach((item) => {
-    item.data.x = startX + x;
-    item.data.y = startY;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX + x, startY);
     x += scaledW(item) + gap;
   });
 }
@@ -312,25 +320,27 @@ export function arrangeRow(objects: SceneItem[]) {
 export function arrangeColumn(objects: SceneItem[]) {
   if (objects.length < 2) return;
   const { x: startX, y: startY } = anchorTopLeft(objects);
-  const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
+  const sorted = [...objects].sort((a, b) => bounds(a).y - bounds(b).y);
   const gap = 20;
   let y = 0;
   sorted.forEach((item) => {
-    item.data.x = startX;
-    item.data.y = startY + y;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX, startY + y);
     y += scaledH(item) + gap;
   });
 }
 
 export function stackObjects(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const cx = objects.reduce((s, item) => s + item.data.x + scaledW(item) / 2, 0) / objects.length;
-  const cy = objects.reduce((s, item) => s + item.data.y + scaledH(item) / 2, 0) / objects.length;
+  const cx = objects.reduce((s, item) => {
+    const b = bounds(item);
+    return s + b.x + b.w / 2;
+  }, 0) / objects.length;
+  const cy = objects.reduce((s, item) => {
+    const b = bounds(item);
+    return s + b.y + b.h / 2;
+  }, 0) / objects.length;
   objects.forEach((item) => {
-    item.data.x = cx - scaledW(item) / 2;
-    item.data.y = cy - scaledH(item) / 2;
-    syncPosition(item);
+    moveVisibleCenterTo(item, cx, cy);
   });
 }
 
@@ -355,9 +365,7 @@ export function arrangeRandomly(objects: SceneItem[]) {
   const spreadW = Math.sqrt(totalW * totalH) * 1.5;
   const spreadH = spreadW;
   objects.forEach((item) => {
-    item.data.x = startX + Math.random() * spreadW;
-    item.data.y = startY + Math.random() * spreadH;
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, startX + Math.random() * spreadW, startY + Math.random() * spreadH);
   });
 }
 
@@ -370,9 +378,7 @@ function layoutAsGrid(sorted: SceneItem[], anchor: { x: number; y: number }) {
   sorted.forEach((item, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    item.data.x = anchor.x + col * (maxW + gap);
-    item.data.y = anchor.y + row * (maxH + gap);
-    syncPosition(item);
+    moveVisibleTopLeftTo(item, anchor.x + col * (maxW + gap), anchor.y + row * (maxH + gap));
   });
 }
 
@@ -463,13 +469,14 @@ export function nudge(objects: SceneItem[], dx: number, dy: number) {
 
 export function scaleBy(objects: SceneItem[], factor: number) {
   objects.forEach((item) => {
-    const cx = item.data.x + scaledW(item) / 2;
-    const cy = item.data.y + scaledH(item) / 2;
+    const b = bounds(item);
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
     item.data.sx *= factor;
     item.data.sy *= factor;
-    // Keep center in place
-    item.data.x = cx - scaledW(item) / 2;
-    item.data.y = cy - scaledH(item) / 2;
+    const nextBounds = bounds(item);
+    item.data.x += cx - (nextBounds.x + nextBounds.w / 2);
+    item.data.y += cy - (nextBounds.y + nextBounds.h / 2);
     syncTransform(item);
   });
 }
@@ -503,19 +510,23 @@ export function setOpacity(objects: SceneItem[], opacity: number) {
 
 export function alignCenterH(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const avgCX = objects.reduce((s, item) => s + item.data.x + scaledW(item) / 2, 0) / objects.length;
+  const avgCX = objects.reduce((s, item) => {
+    const b = bounds(item);
+    return s + b.x + b.w / 2;
+  }, 0) / objects.length;
   objects.forEach((item) => {
-    item.data.x = avgCX - scaledW(item) / 2;
-    syncPosition(item);
+    moveVisibleCenterTo(item, avgCX, bounds(item).y + bounds(item).h / 2);
   });
 }
 
 export function alignCenterV(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const avgCY = objects.reduce((s, item) => s + item.data.y + scaledH(item) / 2, 0) / objects.length;
+  const avgCY = objects.reduce((s, item) => {
+    const b = bounds(item);
+    return s + b.y + b.h / 2;
+  }, 0) / objects.length;
   objects.forEach((item) => {
-    item.data.y = avgCY - scaledH(item) / 2;
-    syncPosition(item);
+    moveVisibleCenterTo(item, bounds(item).x + bounds(item).w / 2, avgCY);
   });
 }
 
@@ -523,22 +534,22 @@ export function alignCenterV(objects: SceneItem[]) {
 
 export function equalSpacingH(objects: SceneItem[], gap = 20) {
   if (objects.length < 2) return;
-  const sorted = [...objects].sort((a, b) => a.data.x - b.data.x);
-  let x = sorted[0].data.x + scaledW(sorted[0]) + gap;
+  const sorted = [...objects].sort((a, b) => bounds(a).x - bounds(b).x);
+  const first = bounds(sorted[0]);
+  let x = first.x + first.w + gap;
   for (let i = 1; i < sorted.length; i++) {
-    sorted[i].data.x = x;
-    syncPosition(sorted[i]);
+    moveVisibleTopLeftTo(sorted[i], x, bounds(sorted[i]).y);
     x += scaledW(sorted[i]) + gap;
   }
 }
 
 export function equalSpacingV(objects: SceneItem[], gap = 20) {
   if (objects.length < 2) return;
-  const sorted = [...objects].sort((a, b) => a.data.y - b.data.y);
-  let y = sorted[0].data.y + scaledH(sorted[0]) + gap;
+  const sorted = [...objects].sort((a, b) => bounds(a).y - bounds(b).y);
+  const first = bounds(sorted[0]);
+  let y = first.y + first.h + gap;
   for (let i = 1; i < sorted.length; i++) {
-    sorted[i].data.y = y;
-    syncPosition(sorted[i]);
+    moveVisibleTopLeftTo(sorted[i], bounds(sorted[i]).x, y);
     y += scaledH(sorted[i]) + gap;
   }
 }
@@ -555,14 +566,18 @@ export function overlayCompare(objects: SceneItem[]) {
       item.displayObject.alpha = 1;
     });
   } else {
-    const cx = objects.reduce((s, item) => s + item.data.x + scaledW(item) / 2, 0) / objects.length;
-    const cy = objects.reduce((s, item) => s + item.data.y + scaledH(item) / 2, 0) / objects.length;
+    const cx = objects.reduce((s, item) => {
+      const b = bounds(item);
+      return s + b.x + b.w / 2;
+    }, 0) / objects.length;
+    const cy = objects.reduce((s, item) => {
+      const b = bounds(item);
+      return s + b.y + b.h / 2;
+    }, 0) / objects.length;
     objects.forEach((item) => {
       item.data.opacity = 0.5;
-      item.data.x = cx - scaledW(item) / 2;
-      item.data.y = cy - scaledH(item) / 2;
       item.displayObject.alpha = 0.5;
-      syncPosition(item);
+      moveVisibleCenterTo(item, cx, cy);
     });
   }
 }
