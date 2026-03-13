@@ -155,6 +155,8 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
     // -- Image --
     { label: 'Flip Horizontal', shortcut: 'Alt+Shift+H', onClick: () => { ops.flipHorizontal(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: 'Flip Vertical', shortcut: 'Alt+Shift+V', onClick: () => { ops.flipVertical(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
+    { label: 'Rotate Clockwise', shortcut: 'R', onClick: () => { ops.rotate90(selected, true); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
+    { label: 'Rotate Counter-Clockwise', shortcut: 'Shift+R', onClick: () => { ops.rotate90(selected, false); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: 'Crop', shortcut: 'C', onClick: () => ctx.startCrop?.(), disabled: selected.length !== 1 || selected[0]?.data.type !== 'image' },
     { label: 'Reset Transform', shortcut: 'Ctrl+Shift+T', onClick: () => { ops.resetTransform(selected); selection?.transformBox.update(selected); ctx.onChange(ids); }, disabled: !hasSel },
     { label: '', shortcut: '', onClick: () => {}, divider: true },

@@ -20,6 +20,8 @@ interface SelectionToolbarProps {
   onStack: () => void;
   onFlipH: () => void;
   onFlipV: () => void;
+  onRotateCW: () => void;
+  onRotateCCW: () => void;
   onGroup: () => void;
   onNormSize: () => void;
 }
@@ -69,6 +71,12 @@ function IcoFlipH() {
 }
 function IcoFlipV() {
   return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><line x1="1" y1="7" x2="13" y2="7" strokeDasharray="2 1" /><path d="M4 5V2L10 5H4Z" fill="currentColor" opacity="0.3" /><path d="M4 9V12L10 9H4Z" fill="currentColor" opacity="0.15" /></svg>;
+}
+function IcoRotateCW() {
+  return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M10.5 4.5V1.75H7.75" /><path d="M10.2 7A4.2 4.2 0 1 1 8.7 3.8L10.5 5.6" /></svg>;
+}
+function IcoRotateCCW() {
+  return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 4.5V1.75H6.25" /><path d="M3.8 7A4.2 4.2 0 1 0 5.3 3.8L3.5 5.6" /></svg>;
 }
 function IcoGroup() {
   return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="1" y="1" width="12" height="12" rx="1.5" strokeDasharray="2 1.5" /><rect x="3" y="3" width="4" height="4" rx="0.5" fill="currentColor" opacity="0.25" /><rect x="7" y="7" width="4" height="4" rx="0.5" fill="currentColor" opacity="0.25" /></svg>;
@@ -122,6 +130,8 @@ export default function SelectionToolbar(props: SelectionToolbarProps) {
       items: [
         { icon: IcoFlipH, label: 'Flip H', shortcut: 'Alt+Shift+H', onClick: props.onFlipH },
         { icon: IcoFlipV, label: 'Flip V', shortcut: 'Alt+Shift+V', onClick: props.onFlipV },
+        { icon: IcoRotateCW, label: 'Rotate CW', shortcut: 'R', onClick: props.onRotateCW },
+        { icon: IcoRotateCCW, label: 'Rotate CCW', shortcut: 'Shift+R', onClick: props.onRotateCCW },
         { icon: IcoGroup, label: 'Group', shortcut: 'Ctrl+G', onClick: props.onGroup },
         { icon: IcoNormSize, label: 'Same size', shortcut: '', onClick: props.onNormSize },
       ],

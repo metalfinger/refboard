@@ -1060,6 +1060,8 @@ export default function Editor({ isPublicView }: EditorProps) {
             onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onRotateCW={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.rotate90(s, true); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onRotateCCW={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.rotate90(s, false); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onGroup={handleGroup}
             onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
           />

@@ -1,9 +1,9 @@
 /**
- * TransformBox — resize/rotate handles around selected scene items.
+ * TransformBox — resize handles around selected scene items.
  *
- * Shows 8 resize handles (corners + edge midpoints) + 1 rotation handle
- * around the combined bounding rect of selected items.
- * Each handle is draggable and applies scale/rotation transforms to the items.
+ * Shows 8 resize handles (corners + edge midpoints) around the combined
+ * bounding rect of selected items. Each handle is draggable and applies
+ * scale transforms to the items.
  */
 
 import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
