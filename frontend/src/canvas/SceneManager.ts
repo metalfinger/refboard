@@ -14,6 +14,7 @@ import { VideoSprite } from './sprites/VideoSprite';
 import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
 import { StickySprite } from './sprites/StickySprite';
+import { MarkdownSprite } from './sprites/MarkdownSprite';
 import { TextSprite } from './sprites/TextSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
@@ -365,6 +366,12 @@ export class SceneManager {
         // Sync auto-computed height back to data
         data.h = sprite.computedHeight;
         displayObject = sprite;
+        break;
+      }
+
+      case 'markdown': {
+        const mdData = data as MarkdownObject;
+        displayObject = new MarkdownSprite(mdData);
         break;
       }
 
