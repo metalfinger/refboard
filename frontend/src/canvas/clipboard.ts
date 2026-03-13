@@ -1,42 +1,49 @@
 /**
  * Clipboard module — copy canvas to system clipboard and paste images from it.
  *
- * Copy approach: snapshot the already-rendered canvas, then crop the visible
- * selection region in screen space. This preserves crop/flip/rotation/group
- * transforms exactly as the user sees them.
+ * Uses the unified composition renderer for all copy operations. Image-only
+ * selections produce native-resolution output; mixed selections fall back to
+ * the viewport snapshot with an explicit warning.
  */
 
 import type { Viewport } from 'pixi-viewport';
 import type { Application } from 'pixi.js';
 import type { SceneManager, SceneItem } from './SceneManager';
 import { uploadImage } from '../api';
-import {
-  renderCanvasSnapshot,
-  renderNativeImageSelection,
-  supportsNativeImageExport,
-} from './snapshotRenderer';
+import { composeSelection } from './compositionRenderer';
+import { renderCanvasSnapshot } from './snapshotRenderer';
 
 /**
  * Write selected items (or full viewport) to system clipboard as PNG.
  * Selected items are rendered at their native size, not affected by zoom.
+ *
+ * Returns any warnings from the composition pipeline (e.g. fallback used).
  */
 export async function writeCanvasToClipboard(
   app: Application | null,
   viewport: Viewport | null,
   items?: SceneItem[],
-): Promise<void> {
+  scene?: SceneManager,
+): Promise<string[]> {
   if (!viewport) throw new Error('Viewport not available');
   if (!app) throw new Error('Renderer not available');
 
   let outputCanvas: HTMLCanvasElement;
+  let warnings: string[] = [];
+  const resolver = scene ? (id: string) => scene.getById(id) : undefined;
 
   if (items && items.length > 0) {
-    if (supportsNativeImageExport(items)) {
-      outputCanvas = await renderNativeImageSelection(items, { background: null, paddingPx: 10 });
-    } else {
-      outputCanvas = renderCanvasSnapshot(app, viewport, items, { background: null, paddingPx: 12 });
-    }
+    const result = await composeSelection(items, {
+      mode: 'clipboard',
+      scale: 1,
+      background: null,
+      paddingPx: 10,
+      fallbackToSnapshot: true,
+    }, { app, viewport }, resolver);
+    outputCanvas = result.canvas;
+    warnings = result.warnings;
   } else {
+    // Full viewport capture — always snapshot
     outputCanvas = renderCanvasSnapshot(app, viewport, undefined, { background: null });
   }
 
@@ -50,6 +57,8 @@ export async function writeCanvasToClipboard(
   await navigator.clipboard.write([
     new ClipboardItem({ 'image/png': blob }),
   ]);
+
+  return warnings;
 }
 
 /**

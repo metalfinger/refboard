@@ -544,6 +544,9 @@ export class VideoSprite extends Container {
   /** Draw current video frame to offscreen canvas, then tell PixiJS to re-upload. */
   private _drawFrame(): void {
     if (!this._frameCtx || !this._frameCanvas || !this.videoEl || !this.videoTexture) return;
+    // Guard against destroyed texture source — the frame loop callback can fire
+    // after _destroyVideoTexture() runs during zoom-triggered culling.
+    if (!this.videoTexture.source) return;
     this._frameCtx.drawImage(this.videoEl, 0, 0, this._frameCanvas.width, this._frameCanvas.height);
     this.videoTexture.source.update();
   }

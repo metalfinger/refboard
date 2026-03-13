@@ -80,7 +80,8 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
         writeCanvasToClipboard: async (items?: SceneItem[]) => {
           try {
             const app = canvasRef.current?.getApp() ?? null;
-            await writeCanvasToClipboard(app, viewport, items);
+            const scene = canvasRef.current?.getScene() ?? undefined;
+            await writeCanvasToClipboard(app, viewport, items, scene);
           } catch (err: any) {
             showToast('Copy failed: ' + (err.message || 'clipboard not available'));
           }

@@ -586,7 +586,8 @@ export default function Editor({ isPublicView }: EditorProps) {
     try {
       const app = canvasRef.current?.getApp() ?? null;
       const viewport = canvasRef.current?.getViewport() ?? null;
-      await writeClipboard(app, viewport, items);
+      const scene = canvasRef.current?.getScene() ?? undefined;
+      await writeClipboard(app, viewport, items, scene);
     } catch (err: any) {
       showToast('Copy failed: ' + (err.message || 'clipboard not available'));
     }
@@ -1622,7 +1623,8 @@ export default function Editor({ isPublicView }: EditorProps) {
             try {
               const app = canvasRef.current?.getApp() ?? null;
               const viewport = canvasRef.current?.getViewport() ?? null;
-              await exportAsImage(app, viewport, items, options);
+              const scene = canvasRef.current?.getScene() ?? undefined;
+              await exportAsImage(app, viewport, items, options, scene);
               showToast('Exported successfully');
             } catch (err: any) {
               showToast('Export failed: ' + (err.message || 'unknown error'));

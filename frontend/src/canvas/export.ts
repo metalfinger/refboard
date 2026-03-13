@@ -1,20 +1,15 @@
 /**
  * Export canvas content as a downloadable image file.
  *
- * Image-only selections use the native-resolution renderer based on canonical
- * image geometry. Mixed selections fall back to the rendered canvas snapshot.
+ * Uses the unified composition renderer. Image-only selections produce
+ * native-resolution output; mixed selections fall back to the viewport
+ * snapshot with an explicit warning.
  */
 
 import type { Viewport } from 'pixi-viewport';
 import type { Application } from 'pixi.js';
-import type { SceneItem } from './SceneManager';
-import { getItemWorldBounds } from './SceneManager';
-import {
-  getNativeImageExportDimensions,
-  renderCanvasSnapshot,
-  renderNativeImageSelection,
-  supportsNativeImageExport,
-} from './snapshotRenderer';
+import type { SceneManager, SceneItem } from './SceneManager';
+import { composeSelection, getCompositionDimensions } from './compositionRenderer';
 
 export interface ExportOptions {
   format: 'png' | 'jpeg' | 'webp';
@@ -30,41 +25,35 @@ const MIME_MAP = {
   webp: 'image/webp',
 } as const;
 
-async function renderToCanvas(
-  app: Application,
-  viewport: Viewport,
-  items: SceneItem[],
-  options: ExportOptions,
-): Promise<HTMLCanvasElement> {
-  if (supportsNativeImageExport(items)) {
-    return renderNativeImageSelection(items, {
-      scale: options.scale,
-      background: options.background,
-      paddingPx: 10,
-    });
-  }
-
-  return renderCanvasSnapshot(app, viewport, items, {
-    background: options.background,
-    paddingPx: 12,
-  });
-}
-
+/**
+ * Export selected items as a downloadable image file.
+ * Returns any warnings from the composition pipeline.
+ */
 export async function exportAsImage(
   app: Application | null,
   viewport: Viewport | null,
   items: SceneItem[],
   options: ExportOptions,
-): Promise<void> {
+  scene?: SceneManager,
+): Promise<string[]> {
   if (!app || !viewport) throw new Error('Renderer not available');
   if (items.length === 0) throw new Error('No items to export');
 
-  const canvas = await renderToCanvas(app, viewport, items, options);
+  const resolver = scene ? (id: string) => scene.getById(id) : undefined;
+
+  const result = await composeSelection(items, {
+    mode: 'export',
+    scale: options.scale,
+    background: options.background,
+    paddingPx: 10,
+    fallbackToSnapshot: true,
+  }, { app, viewport }, resolver);
+
   const mimeType = MIME_MAP[options.format];
   const quality = options.format === 'png' ? undefined : options.quality;
 
   const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
+    result.canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('Export failed'))),
       mimeType,
       quality,
@@ -79,33 +68,17 @@ export async function exportAsImage(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+
+  return result.warnings;
 }
 
 export function getExportDimensions(
   items: SceneItem[],
   scale: number,
+  scene?: SceneManager,
 ): { width: number; height: number } {
   if (items.length === 0) return { width: 0, height: 0 };
-
-  if (supportsNativeImageExport(items)) {
-    return getNativeImageExportDimensions(items, scale, 10);
-  }
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const item of items) {
-    const { x, y, w, h } = getItemWorldBounds(item);
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + w);
-    maxY = Math.max(maxY, y + h);
-  }
-
-  const pad = 12;
-  return {
-    width: Math.max(1, Math.round(maxX - minX) + pad * 2),
-    height: Math.max(1, Math.round(maxY - minY) + pad * 2),
-  };
+  const resolver = scene ? (id: string) => scene.getById(id) : undefined;
+  const dims = getCompositionDimensions(items, scale, 10, resolver);
+  return { width: dims.width, height: dims.height };
 }
