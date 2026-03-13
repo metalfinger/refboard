@@ -135,6 +135,9 @@ export class SelectionManager {
       this._pointerDown = false;
       this._rubberBanding = false;
       this._bandGfx.visible = false;
+      this.transformBox.visible = false;
+    } else if (this.selectedIds.size > 0) {
+      this.transformBox.update(this.getSelectedItems());
     }
   }
 
