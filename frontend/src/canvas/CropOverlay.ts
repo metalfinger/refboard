@@ -39,9 +39,6 @@ export class CropOverlay extends Container {
   private _onCancel: (() => void) | null = null;
   private _onStateChange: ((active: boolean) => void) | null = null;
   private _keyHandler: ((e: KeyboardEvent) => void) | null = null;
-  // Bound references for dynamic event registration
-  private _boundMove: ((e: FederatedPointerEvent) => void) | null = null;
-  private _boundUp: (() => void) | null = null;
 
   constructor(viewport: Viewport) {
     super();
@@ -59,6 +56,9 @@ export class CropOverlay extends Container {
     this._cropHitArea.eventMode = 'static';
     this._cropHitArea.cursor = 'move';
     this._cropHitArea.on('pointerdown', (e: FederatedPointerEvent) => this._onDown(e, 'move'));
+    this._cropHitArea.on('globalpointermove', (e: FederatedPointerEvent) => this._onMove(e));
+    this._cropHitArea.on('pointerup', () => this._onUp());
+    this._cropHitArea.on('pointerupoutside', () => this._onUp());
     this.addChild(this._cropHitArea);
 
     // Crop border
@@ -77,6 +77,9 @@ export class CropOverlay extends Container {
       h.eventMode = 'static';
       h.cursor = cursors[id];
       h.on('pointerdown', (e: FederatedPointerEvent) => this._onDown(e, id));
+      h.on('globalpointermove', (e: FederatedPointerEvent) => this._onMove(e));
+      h.on('pointerup', () => this._onUp());
+      h.on('pointerupoutside', () => this._onUp());
       this._handles.set(id, h);
       this.addChild(h);
     }
@@ -129,7 +132,6 @@ export class CropOverlay extends Container {
 
   /** Clean up all state and listeners. Safe to call multiple times. */
   private _cleanup(): void {
-    this._removeDragListeners();
     this._viewport.plugins.resume('drag');
     this._item = null;
     this._drag = null;
@@ -229,26 +231,6 @@ export class CropOverlay extends Container {
       startCrop: this._getViewCrop(),
       startPoint: { x: clamp01(viewPoint.x), y: clamp01(viewPoint.y) },
     };
-
-    // Register move/up on the stage (single handler, not per-handle)
-    this._removeDragListeners();
-    this._boundMove = (ev: FederatedPointerEvent) => this._onMove(ev);
-    this._boundUp = () => this._onUp();
-    this._viewport.on('globalpointermove', this._boundMove);
-    this._viewport.on('pointerup', this._boundUp);
-    this._viewport.on('pointerupoutside', this._boundUp);
-  }
-
-  private _removeDragListeners(): void {
-    if (this._boundMove) {
-      this._viewport.off('globalpointermove', this._boundMove);
-    }
-    if (this._boundUp) {
-      this._viewport.off('pointerup', this._boundUp);
-      this._viewport.off('pointerupoutside', this._boundUp);
-    }
-    this._boundMove = null;
-    this._boundUp = null;
   }
 
   private _onMove(e: FederatedPointerEvent): void {
@@ -314,7 +296,6 @@ export class CropOverlay extends Container {
 
   private _onUp(): void {
     this._drag = null;
-    this._removeDragListeners();
   }
 
   private _getViewCrop(): CropRect {
