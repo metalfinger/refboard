@@ -141,7 +141,9 @@ export function useShortcutHandler(deps: ShortcutHandlerDeps) {
         if (def.needsSelection && activeCount === 0) continue;
         if (def.minSelection && activeCount < def.minSelection) continue;
 
-        e.preventDefault();
+        if (def.preventDefault !== false) {
+          e.preventDefault();
+        }
         await def.handler(ctx);
 
         // Update zoom display after any action

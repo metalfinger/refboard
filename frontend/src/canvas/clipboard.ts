@@ -61,8 +61,7 @@ export async function writeCanvasToClipboard(
     outputCanvas.width = sw;
     outputCanvas.height = sh;
     const ctx2d = outputCanvas.getContext('2d')!;
-    ctx2d.fillStyle = '#1e1e1e';
-    ctx2d.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+    ctx2d.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
     ctx2d.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
   } else {
     // Full current view copy.
@@ -70,8 +69,7 @@ export async function writeCanvasToClipboard(
     outputCanvas.width = sourceCanvas.width;
     outputCanvas.height = sourceCanvas.height;
     const ctx2d = outputCanvas.getContext('2d')!;
-    ctx2d.fillStyle = '#1e1e1e';
-    ctx2d.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+    ctx2d.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
     ctx2d.drawImage(sourceCanvas, 0, 0);
   }
 

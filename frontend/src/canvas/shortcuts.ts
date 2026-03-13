@@ -24,6 +24,7 @@ export interface ShortcutDef {
   category: 'alignment' | 'arrangement' | 'normalize' | 'navigation' | 'editing' | 'view' | 'tools' | 'image';
   needsSelection?: boolean;   // skip if no objects selected
   minSelection?: number;      // minimum selected objects (default 1 if needsSelection)
+  preventDefault?: boolean;   // defaults to true
 }
 
 export interface ShortcutContext {

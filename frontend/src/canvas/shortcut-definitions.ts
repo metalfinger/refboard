@@ -492,6 +492,7 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'paste', keys: { key: 'v', ctrl: true },
     category: 'editing', description: 'Paste',
+    preventDefault: false,
     handler: async (ctx) => {
       // Only handle recent internal copies here.
       // For external clipboard content (images, text, HTML), do NOT call
