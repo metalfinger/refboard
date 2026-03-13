@@ -324,11 +324,38 @@ export function setupPaste(
   onChange: OnChange,
   selection?: SelectionManager | null,
   uploads?: UploadManager | null,
+  opts?: {
+    onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
+    onShortTextPaste?: (text: string) => void;
+  },
 ): () => void {
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
 
+    // ── Text/HTML detection — before media loop ──
+    let hasMedia = false;
+    let textContent = '';
+    let htmlContent = '';
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/') || item.type.startsWith('video/')) hasMedia = true;
+      if (item.type === 'text/plain') textContent = e.clipboardData?.getData('text/plain') || '';
+      if (item.type === 'text/html') htmlContent = e.clipboardData?.getData('text/html') || '';
+    }
+
+    if (textContent) {
+      e.preventDefault();
+      if (textContent.length > 20) {
+        opts?.onTextPaste?.({ text: textContent, html: htmlContent, hasImage: hasMedia });
+      } else {
+        opts?.onShortTextPaste?.(textContent);
+      }
+      return;
+    }
+
+    // ── Media paste logic (unchanged) ──
     const newItemIds: string[] = [];
 
     for (let i = 0; i < items.length; i++) {

@@ -43,6 +43,7 @@ import { StickySprite } from '../canvas/sprites/StickySprite';
 import * as ops from '../canvas/operations';
 import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
+import PasteChoicePopup from '../components/PasteChoicePopup';
 const LazyMarkdownEditView = React.lazy(() => import('../components/MarkdownEditView'));
 
 // Hooks
@@ -131,6 +132,7 @@ export default function Editor({ isPublicView }: EditorProps) {
     | null
   >(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
+  const [pastePopup, setPastePopup] = useState<{ x: number; y: number; text: string; html: string; hasImage: boolean } | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
   const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
     items: [], viewportBounds: { x: 0, y: 0, w: 1, h: 1 }, contentBounds: { x: 0, y: 0, w: 1, h: 1 },
@@ -199,11 +201,46 @@ export default function Editor({ isPublicView }: EditorProps) {
     getViewport,
   });
 
+  // Paste detection callbacks — wired into setupPaste via useCanvasSetup
+  const handleTextPaste = useCallback((data: { text: string; html: string; hasImage: boolean }) => {
+    // Show popup at screen center
+    const container = canvasContainerRef.current;
+    const rect = container?.getBoundingClientRect();
+    const sx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const sy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    setPastePopup({ x: sx, y: sy, text: data.text, html: data.html, hasImage: data.hasImage });
+  }, [canvasContainerRef]);
+
+  const handleShortTextPaste = useCallback((text: string) => {
+    const scene = canvasRef.current?.getScene();
+    const viewport = canvasRef.current?.getViewport();
+    if (!scene || !viewport) return;
+    const cx = viewport.center.x;
+    const cy = viewport.center.y;
+    const textData = {
+      id: crypto.randomUUID(),
+      type: 'text' as const,
+      x: cx - 100, y: cy - 20, w: 200, h: 40,
+      sx: 1, sy: 1, angle: 0, z: scene.nextZ(),
+      opacity: 1, locked: false, name: '', visible: true,
+      text,
+      fontSize: 24, fontFamily: 'Inter, system-ui, sans-serif',
+      fill: '#ffffff',
+    };
+    scene._createItem(textData, true);
+    scene._applyZOrder();
+    onCanvasChange([textData.id]);
+  }, [canvasRef, onCanvasChange]);
+
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
   const { annotationStore, pinOverlay, textEditor, cropOverlayRef, mdOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
+    pasteOpts: {
+      onTextPaste: handleTextPaste,
+      onShortTextPaste: handleShortTextPaste,
+    },
   });
 
   // ── Markdown overlay — sync visible card IDs for React portal rendering ──
@@ -1095,6 +1132,63 @@ export default function Editor({ isPublicView }: EditorProps) {
             y={contextMenu.y}
             items={contextMenuItems()}
             onClose={() => setContextMenu(null)}
+          />
+        )}
+
+        {/* Paste choice popup */}
+        {pastePopup && (
+          <PasteChoicePopup
+            x={pastePopup.x}
+            y={pastePopup.y}
+            showImage={pastePopup.hasImage}
+            onChoice={async (choice) => {
+              setPastePopup(null);
+              const scene = canvasRef.current?.getScene();
+              const viewport = canvasRef.current?.getViewport();
+              if (!scene || !viewport) return;
+              if (choice === 'markdown') {
+                let content = pastePopup.text;
+                if (pastePopup.html) {
+                  const { default: TurndownService } = await import('turndown');
+                  const td = new TurndownService();
+                  content = td.turndown(pastePopup.html);
+                }
+                const cx = viewport.center.x;
+                const cy = viewport.center.y;
+                const mdData = {
+                  id: crypto.randomUUID(),
+                  type: 'markdown' as const,
+                  x: cx - 225, y: cy - 30, w: 450, h: 60,
+                  sx: 1, sy: 1, angle: 0, z: scene.nextZ(),
+                  opacity: 1, locked: false, name: '', visible: true,
+                  content,
+                  bgColor: '#232336', textColor: '#e0e0e0', accentColor: '#7950f2',
+                  padding: 16, cornerRadius: 10,
+                };
+                scene._createItem(mdData, true);
+                scene._applyZOrder();
+                onCanvasChange([mdData.id]);
+              } else if (choice === 'text') {
+                const cx = viewport.center.x;
+                const cy = viewport.center.y;
+                const textData = {
+                  id: crypto.randomUUID(),
+                  type: 'text' as const,
+                  x: cx - 100, y: cy - 20, w: 200, h: 40,
+                  sx: 1, sy: 1, angle: 0, z: scene.nextZ(),
+                  opacity: 1, locked: false, name: '', visible: true,
+                  text: pastePopup.text,
+                  fontSize: 24, fontFamily: 'Inter, system-ui, sans-serif',
+                  fill: '#ffffff',
+                };
+                scene._createItem(textData, true);
+                scene._applyZOrder();
+                onCanvasChange([textData.id]);
+              } else if (choice === 'image') {
+                // Image paste handled by existing setupPaste media loop
+              }
+            }}
+            onDismiss={() => setPastePopup(null)}
           />
         )}
 

@@ -56,6 +56,10 @@ interface CanvasSetupDeps {
   showToast: (msg: string) => void;
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>;
   setSelectedLayerIds: React.Dispatch<React.SetStateAction<string[]>>;
+  pasteOpts?: {
+    onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
+    onShortTextPaste?: (text: string) => void;
+  };
 }
 
 /**
@@ -67,6 +71,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
+    pasteOpts,
   } = deps;
 
   const dropCleanupRef = useRef<(() => void) | null>(null);
@@ -487,7 +492,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         if (dropTarget) {
           dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
         }
-        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
+        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager, pasteOpts);
       }
     }, 50);
 

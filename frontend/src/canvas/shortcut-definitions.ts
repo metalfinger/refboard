@@ -493,36 +493,19 @@ export const shortcuts: ShortcutDef[] = [
     id: 'paste', keys: { key: 'v', ctrl: true },
     category: 'editing', description: 'Paste',
     handler: async (ctx) => {
-      // Strategy: Check system clipboard for images first.
-      // - If system clipboard has an image AND we did NOT just do an internal copy
-      //   (or it's been a while), paste from system clipboard (external image).
-      // - If we just did an internal copy (lastInternalCopyTime is recent),
-      //   use internal clipboard to duplicate scene items (preserves vector data).
-      // - If system clipboard has no images, fall back to internal clipboard.
-
+      // Only handle recent internal copies here.
+      // For external clipboard content (images, text, HTML), do NOT call
+      // e.preventDefault() — let the native paste event fire through to setupPaste
+      // in image-drop.ts, which is the single path for all external clipboard content.
       const timeSinceInternalCopy = Date.now() - _lastInternalCopyTime;
       const hasInternalItems = ctx.clipboardRef.current.length > 0;
       const recentInternalCopy = hasInternalItems && timeSinceInternalCopy < 500;
 
-      // If we JUST did an internal copy (<500ms ago), use internal clipboard
-      // (the system clipboard image is just the rasterized version of what we copied)
       if (recentInternalCopy) {
         await _pasteInternal(ctx);
         return;
       }
-
-      // Try system clipboard first
-      try {
-        const result = await ctx.pasteFromSystemClipboard();
-        if (result === 'Pasted image') return;
-      } catch {
-        // Clipboard API denied or unavailable — fall through
-      }
-
-      // Fall back to internal clipboard
-      if (hasInternalItems) {
-        await _pasteInternal(ctx);
-      }
+      // For external clipboard content: do nothing, let native paste event fire through to setupPaste
     },
   },
   {
