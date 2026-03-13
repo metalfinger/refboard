@@ -1,19 +1,15 @@
 /**
  * Clipboard module — copy canvas to system clipboard and paste images from it.
  *
- * Copy approach: render ONLY the selected items at native resolution using
- * PixiJS generateTexture + extract. No viewport cropping — independent of
- * zoom/pan state. Items are temporarily reparented into a clean container,
- * rendered, then restored.
+ * Copy approach: snapshot the already-rendered canvas, then crop the visible
+ * selection region in screen space. This preserves crop/flip/rotation/group
+ * transforms exactly as the user sees them.
  */
 
-import { Container, Rectangle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { Application } from 'pixi.js';
 import type { SceneManager, SceneItem } from './SceneManager';
 import { getItemWorldBounds } from './SceneManager';
-import { getImageVisibleLocalRect } from './imageTransforms';
-import type { ImageObject } from './scene-format';
 import { uploadImage } from '../api';
 
 /**
@@ -26,14 +22,21 @@ export async function writeCanvasToClipboard(
   items?: SceneItem[],
 ): Promise<void> {
   if (!viewport) throw new Error('Viewport not available');
-  if (!app?.renderer?.extract) throw new Error('Renderer not available');
+  if (!app) throw new Error('Renderer not available');
+
+  const directCanvas = app.canvas as unknown as HTMLCanvasElement | undefined;
+  const fallbackCanvas = app.renderer?.extract
+    ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
+    : undefined;
+  const sourceCanvas = directCanvas ?? fallbackCanvas;
+  if (!sourceCanvas || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
+    throw new Error('Rendered canvas unavailable');
+  }
 
   let outputCanvas: HTMLCanvasElement;
 
   if (items && items.length > 0) {
-    // --- Render selected items at native resolution ---
-
-    // 1. Compute world-space bounding box
+    // Compute world-space bounding box, then convert to visible screen-space crop.
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const item of items) {
       const { x, y, w, h } = getItemWorldBounds(item);
@@ -43,103 +46,33 @@ export async function writeCanvasToClipboard(
       maxY = Math.max(maxY, y + h);
     }
 
-    const pad = 10;
-    const totalW = Math.ceil(maxX - minX) + pad * 2;
-    const totalH = Math.ceil(maxY - minY) + pad * 2;
+    const screenTL = viewport.toScreen(minX, minY);
+    const screenBR = viewport.toScreen(maxX, maxY);
+    const rect = sourceCanvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? sourceCanvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? sourceCanvas.height / rect.height : 1;
+    const pad = 12;
+    const sx = Math.max(0, Math.floor(Math.min(screenTL.x, screenBR.x) * scaleX) - pad);
+    const sy = Math.max(0, Math.floor(Math.min(screenTL.y, screenBR.y) * scaleY) - pad);
+    const sw = Math.max(1, Math.min(sourceCanvas.width - sx, Math.ceil(Math.abs(screenBR.x - screenTL.x) * scaleX) + pad * 2));
+    const sh = Math.max(1, Math.min(sourceCanvas.height - sy, Math.ceil(Math.abs(screenBR.y - screenTL.y) * scaleY) + pad * 2));
 
-    // 2. Save original parent/transform for each item, reparent into temp container
-    const tempContainer = new Container();
-    const saved = new Map<string, {
-      parent: Container;
-      x: number;
-      y: number;
-      sx: number;
-      sy: number;
-      angle: number;
-      globalX: number;
-      globalY: number;
-    }>();
-
-    for (const item of items) {
-      const obj = item.displayObject;
-      const globalOrigin = obj.parent?.toGlobal(obj.position) ?? obj.position;
-      saved.set(item.id, {
-        parent: obj.parent as Container,
-        x: obj.x,
-        y: obj.y,
-        sx: obj.scale.x,
-        sy: obj.scale.y,
-        angle: obj.angle,
-        globalX: globalOrigin.x,
-        globalY: globalOrigin.y,
-      });
-
-      // Remove from current parent
-      obj.parent?.removeChild(obj);
-
-      const s = saved.get(item.id)!;
-      obj.position.set(s.globalX - minX + pad, s.globalY - minY + pad);
-      obj.scale.set(s.sx, s.sy);
-      obj.angle = s.angle;
-
-      tempContainer.addChild(obj);
-    }
-
-    // 3. Compute resolution multiplier to approach native texture resolution
-    //    e.g. a 2000px image displayed at 400px → ratio ~5, capped at 4x
-    let maxRatio = 1;
-    for (const item of items) {
-      const tex = (item.displayObject as any)?.texture;
-      const displayW = item.type === 'image'
-        ? getImageVisibleLocalRect(item.data as ImageObject).w * Math.abs(item.data.sx)
-        : item.data.w * Math.abs(item.data.sx);
-      if (tex && tex.width > 1 && displayW > 1) {
-        maxRatio = Math.max(maxRatio, tex.width / displayW);
-      }
-    }
-    const resolution = Math.min(Math.max(maxRatio, window.devicePixelRatio || 1), 4);
-
-    let texture;
-    let extractedCanvas: HTMLCanvasElement;
-    try {
-      texture = app.renderer.generateTexture({
-        target: tempContainer,
-        resolution,
-        frame: new Rectangle(0, 0, totalW, totalH),
-      });
-      extractedCanvas = app.renderer.extract.canvas(texture) as HTMLCanvasElement;
-    } finally {
-      // 4. Restore items to their original parents and transforms (even on error)
-      for (const item of items) {
-        const s = saved.get(item.id)!;
-        tempContainer.removeChild(item.displayObject);
-        s.parent.addChild(item.displayObject);
-        item.displayObject.position.set(s.x, s.y);
-        item.displayObject.scale.set(s.sx, s.sy);
-        item.displayObject.angle = s.angle;
-      }
-      tempContainer.destroy();
-      texture?.destroy(true);
-    }
-
-    // 6. Add opaque background
     outputCanvas = document.createElement('canvas');
-    outputCanvas.width = extractedCanvas.width;
-    outputCanvas.height = extractedCanvas.height;
+    outputCanvas.width = sw;
+    outputCanvas.height = sh;
     const ctx2d = outputCanvas.getContext('2d')!;
     ctx2d.fillStyle = '#1e1e1e';
     ctx2d.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
-    ctx2d.drawImage(extractedCanvas, 0, 0);
+    ctx2d.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
   } else {
-    // Full viewport screenshot (at device pixel ratio for crisp output)
-    const extractedCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
+    // Full current view copy.
     outputCanvas = document.createElement('canvas');
-    outputCanvas.width = extractedCanvas.width;
-    outputCanvas.height = extractedCanvas.height;
+    outputCanvas.width = sourceCanvas.width;
+    outputCanvas.height = sourceCanvas.height;
     const ctx2d = outputCanvas.getContext('2d')!;
     ctx2d.fillStyle = '#1e1e1e';
     ctx2d.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
-    ctx2d.drawImage(extractedCanvas, 0, 0);
+    ctx2d.drawImage(sourceCanvas, 0, 0);
   }
 
   const blob = await new Promise<Blob>((resolve, reject) => {
