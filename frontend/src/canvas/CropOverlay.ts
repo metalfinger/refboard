@@ -120,7 +120,7 @@ export class CropOverlay extends Container {
     if (!this._item) return;
     const item = this._item;
     const crop = { ...this._crop };
-    const data = item.data as ImageObject;
+    const data = this._getWorkingImageData();
     const viewCrop = this._getViewCrop();
     const anchorWorld = imageViewPointToWorld(data, viewCrop.x, viewCrop.y);
     const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
@@ -162,7 +162,7 @@ export class CropOverlay extends Container {
 
   private _draw(): void {
     if (!this._item) return;
-    const data = this._item.data as ImageObject;
+    const data = this._getWorkingImageData();
     const zoom = this._viewport.scale.x;
     const viewCrop = this._getViewCrop();
     const fullCorners = getImageViewRectWorldCorners(data, { x: 0, y: 0, w: 1, h: 1 });
@@ -241,7 +241,7 @@ export class CropOverlay extends Container {
     if ('preventDefault' in e.nativeEvent && typeof e.nativeEvent.preventDefault === 'function') {
       e.nativeEvent.preventDefault();
     }
-    const data = this._item.data as ImageObject;
+    const data = this._getWorkingImageData();
     const world = this._viewport.toWorld(e.global.x, e.global.y);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
     this._drag = {
@@ -260,7 +260,7 @@ export class CropOverlay extends Container {
   private _onMoveScreen(screenX: number, screenY: number): void {
     if (!this._drag || !this._item) return;
 
-    const data = this._item.data as ImageObject;
+    const data = this._getWorkingImageData();
     const world = this._viewport.toWorld(screenX, screenY);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
     const nx = clamp01(viewPoint.x);
@@ -387,6 +387,14 @@ export class CropOverlay extends Container {
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,
+    };
+  }
+
+  private _getWorkingImageData(): ImageObject {
+    const data = this._item!.data as ImageObject;
+    return {
+      ...data,
+      crop: undefined,
     };
   }
 }
