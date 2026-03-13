@@ -13,7 +13,7 @@ import { SnapGuides } from './SnapGuides';
 import { ImageSprite } from './sprites/ImageSprite';
 import { VideoSprite } from './sprites/VideoSprite';
 import type { ImageObject } from './scene-format';
-import { applyImageDisplayTransform } from './imageTransforms';
+import { applyImageDisplayTransform, getImageTransformedCorners } from './imageTransforms';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,6 +26,24 @@ const BAND_STROKE_ALPHA = 0.6;
 const BAND_STROKE_WIDTH = 1;
 const RUBBER_BAND_THRESHOLD = 5; // px in screen space before rubber band activates
 const DRAG_THRESHOLD = 5;        // px in screen space before object drag activates
+
+function isPointInPolygon(wx: number, wy: number, points: Array<{ x: number; y: number }>): boolean {
+  if (points.length < 3) return false;
+  let sign = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const cross = (b.x - a.x) * (wy - a.y) - (b.y - a.y) * (wx - a.x);
+    if (Math.abs(cross) < 1e-6) continue;
+    const nextSign = cross > 0 ? 1 : -1;
+    if (sign === 0) {
+      sign = nextSign;
+    } else if (sign !== nextSign) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // SelectionManager
@@ -210,6 +228,10 @@ export class SelectionManager {
       const { x: ix, y: iy, w: iw, h: ih } = getItemWorldBounds(item);
 
       if (ix <= wx && wx <= ix + iw && iy <= wy && wy <= iy + ih) {
+        if (item.type === 'image') {
+          const corners = getImageTransformedCorners(item.data as ImageObject);
+          if (!isPointInPolygon(wx, wy, corners)) continue;
+        }
         return item;
       }
     }
