@@ -47,7 +47,7 @@ interface DragState {
   startX: number;
   startY: number;
   origBounds: { x: number; y: number; w: number; h: number };
-  origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number }>;
+  origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number; bounds: { x: number; y: number; w: number; h: number } }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ export class TransformBox extends Container {
   private _onHandleDown(e: FederatedPointerEvent, id: HandleId): void {
     e.stopPropagation();
 
-    const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number }>();
+    const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number; bounds: { x: number; y: number; w: number; h: number } }>();
     for (const item of this._items) {
       origTransforms.set(item.id, {
         sx: item.data.sx,
@@ -243,6 +243,7 @@ export class TransformBox extends Container {
         x: item.data.x,
         y: item.data.y,
         w: item.data.w,
+        bounds: getItemWorldBounds(item),
       });
     }
 
@@ -369,15 +370,25 @@ export class TransformBox extends Container {
         continue; // Skip normal sx/sy scaling
       }
 
-      // Reposition as a unit: scale each item's offset from the anchor point
-      item.data.x = anchorX + (orig.x - anchorX) * fx;
-      item.data.y = anchorY + (orig.y - anchorY) * fy;
-
-      item.data.sx = orig.sx * fx;
-      item.data.sy = orig.sy * fy;
       if (item.type === 'image') {
+        const obounds = orig.bounds;
+        const nextVisibleX = anchorX + (obounds.x - anchorX) * fx;
+        const nextVisibleY = anchorY + (obounds.y - anchorY) * fy;
+        item.data.x = orig.x;
+        item.data.y = orig.y;
+        item.data.sx = orig.sx * fx;
+        item.data.sy = orig.sy * fy;
+        applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+        const currentBounds = getItemWorldBounds(item);
+        item.data.x += nextVisibleX - currentBounds.x;
+        item.data.y += nextVisibleY - currentBounds.y;
         applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
       } else {
+        // Reposition as a unit: scale each item's offset from the anchor point
+        item.data.x = anchorX + (orig.x - anchorX) * fx;
+        item.data.y = anchorY + (orig.y - anchorY) * fy;
+        item.data.sx = orig.sx * fx;
+        item.data.sy = orig.sy * fy;
         item.displayObject.scale.set(item.data.sx, item.data.sy);
         item.displayObject.position.set(item.data.x, item.data.y);
       }
