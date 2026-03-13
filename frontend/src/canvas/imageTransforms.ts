@@ -44,14 +44,16 @@ export function normalizeImageTransformData(data: ImageObject): void {
  * Images render from a top-left local origin, so flip uses a compensating position
  * shift to keep the visible unrotated bounds anchored at data.x/data.y.
  */
-export function getImageDisplayTransform(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>): ImageDisplayTransform {
+export function getImageDisplayTransform(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): ImageDisplayTransform {
   const sx = Math.abs(data.sx);
   const sy = Math.abs(data.sy);
+  const visibleW = data.crop ? data.crop.w * data.w : data.w;
+  const visibleH = data.crop ? data.crop.h * data.h : data.h;
   const scaleX = sx * (data.flipX ? -1 : 1);
   const scaleY = sy * (data.flipY ? -1 : 1);
   return {
-    x: data.x + (data.flipX ? data.w * sx : 0),
-    y: data.y + (data.flipY ? data.h * sy : 0),
+    x: data.x + (data.flipX ? visibleW * sx : 0),
+    y: data.y + (data.flipY ? visibleH * sy : 0),
     scaleX,
     scaleY,
     angle: data.angle,
@@ -64,21 +66,21 @@ function getVisibleLocalRect(data: Pick<ImageObject, 'w' | 'h' | 'crop'>): { x: 
     return { x: 0, y: 0, w: data.w, h: data.h };
   }
   return {
-    x: crop.x * data.w,
-    y: crop.y * data.h,
+    x: 0,
+    y: 0,
     w: crop.w * data.w,
     h: crop.h * data.h,
   };
 }
 
-export function applyImageDisplayTransform(displayObject: Container, data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>): void {
+export function applyImageDisplayTransform(displayObject: Container, data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): void {
   const t = getImageDisplayTransform(data);
   displayObject.position.set(t.x, t.y);
   displayObject.scale.set(t.scaleX, t.scaleY);
   displayObject.angle = t.angle;
 }
 
-function transformLocalPoint(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>, localX: number, localY: number): Point2D {
+function transformLocalPoint(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>, localX: number, localY: number): Point2D {
   const t = getImageDisplayTransform(data);
   return transformPoint({ x: localX, y: localY }, {
     x: t.x,
@@ -172,7 +174,7 @@ function getImageViewNormalizedFromLocal(
 }
 
 export function imageViewPointToWorld(
-  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>,
   viewX: number,
   viewY: number,
 ): Point2D {
@@ -181,7 +183,7 @@ export function imageViewPointToWorld(
 }
 
 export function worldToImageViewPoint(
-  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>,
   worldX: number,
   worldY: number,
 ): Point2D {
@@ -197,7 +199,7 @@ export function worldToImageViewPoint(
 }
 
 export function getImageViewRectWorldCorners(
-  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>,
   rect: CropRect,
 ): Point2D[] {
   return [
