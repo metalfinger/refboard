@@ -171,14 +171,26 @@ export function getImageDisplayGeometry(
 export function getImageEditorGeometry(data: ImageObject): ImageEditorGeometry {
   const sourceCrop = data.crop ? { ...data.crop } : { x: 0, y: 0, w: 1, h: 1 };
   const displayCrop = getImageDisplayCropRect(data);
-  const cropAnchorWorld = imageViewPointToWorld(data, displayCrop.x, displayCrop.y);
   const editorData: ImageObject = {
     ...data,
     crop: undefined,
   };
-  const editorAnchorWorld = imageViewPointToWorld(editorData, displayCrop.x, displayCrop.y);
-  editorData.x += cropAnchorWorld.x - editorAnchorWorld.x;
-  editorData.y += cropAnchorWorld.y - editorAnchorWorld.y;
+
+  // Anchor on the container's local origin: in the cropped sprite, local (0,0)
+  // corresponds to source pixel (srcRect.x, srcRect.y). Position the editor so
+  // that same source pixel maps to the same world point. This is correct for all
+  // flip/rotation combinations because it operates in local space, not view space.
+  const srcRect = getImageSourceRect(data);
+  const croppedDisplay = getImageDisplayTransform(data);
+  const editorDisplay = getImageDisplayTransform(editorData);
+  const editorSrcOriginWorld = transformPoint(
+    { x: srcRect.x, y: srcRect.y },
+    { x: editorDisplay.x, y: editorDisplay.y, sx: editorDisplay.scaleX, sy: editorDisplay.scaleY, angle: editorDisplay.angle },
+  );
+  editorData.x += croppedDisplay.x - editorSrcOriginWorld.x;
+  editorData.y += croppedDisplay.y - editorSrcOriginWorld.y;
+
+  const cropAnchorWorld = imageViewPointToWorld(editorData, displayCrop.x, displayCrop.y);
   return {
     editorData,
     sourceCrop,

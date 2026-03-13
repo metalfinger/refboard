@@ -13,6 +13,7 @@ import {
   normalizeImageTransformData,
   getImageTransformedCorners,
   getImageWorldBounds,
+  getBoundsFromPoints,
   transformPoint,
 } from './imageTransforms';
 
@@ -177,20 +178,17 @@ describe('getImageEditorGeometry', () => {
     expectClose(eg.cropAnchorWorld.y, displayBefore.worldBounds.y, 1);
   });
 
-  it('crop entry after flipX+flipY preserves anchor', () => {
+  it('crop entry after flipX+flipY preserves visible bounds', () => {
     const data = makeImage({ x: 100, y: 50, flipX: true, flipY: true, crop: { x: 0.1, y: 0.2, w: 0.6, h: 0.5 } });
-    // Anchor is the display crop's top-left in world space (not AABB min)
-    const displayCrop = getImageDisplayCropRect(data);
-    const expectedAnchor = imageViewPointToWorld(data, displayCrop.x, displayCrop.y);
+    const visibleBounds = getImageWorldBounds(data);
 
     const eg = getImageEditorGeometry(data);
-    expectClose(eg.cropAnchorWorld.x, expectedAnchor.x, 0.01);
-    expectClose(eg.cropAnchorWorld.y, expectedAnchor.y, 0.01);
-
-    // The editor's crop region should match the original crop region in world space
-    const editorCropCorner = imageViewPointToWorld(eg.editorData, displayCrop.x, displayCrop.y);
-    expectClose(editorCropCorner.x, expectedAnchor.x, 1);
-    expectClose(editorCropCorner.y, expectedAnchor.y, 1);
+    // The crop corners in editor should match the original visible bounds
+    const cropBounds = getBoundsFromPoints(eg.cropWorldCorners);
+    expectClose(cropBounds.x, visibleBounds.x, 0.5);
+    expectClose(cropBounds.y, visibleBounds.y, 0.5);
+    expectClose(cropBounds.w, visibleBounds.w, 0.5);
+    expectClose(cropBounds.h, visibleBounds.h, 0.5);
   });
 
   it('crop entry after rotate preserves anchor', () => {
@@ -473,6 +471,13 @@ describe('ungroup image position preservation (integration)', () => {
     expectClose(ungroupedDisplay.y, worldDisplay.y, 0.01);
   });
 
+  it('cropped + flipped image in non-rotated group round-trips', () => {
+    const img = makeImage({ x: 150, y: 80, flipX: true, crop: { x: 0.2, y: 0, w: 0.6, h: 1 } });
+    const result = simulateGroupAndUngroup(img, { x: 100, y: 50, sx: 1, sy: 1, angle: 0 });
+    expectClose(result.x, img.x, 0.01);
+    expectClose(result.y, img.y, 0.01);
+  });
+
   it('non-flipped image in scaled group round-trips', () => {
     const img = makeImage({ x: 150, y: 80 });
     const result = simulateGroupAndUngroup(img, { x: 100, y: 50, sx: 2, sy: 2, angle: 0 });
@@ -483,5 +488,116 @@ describe('ungroup image position preservation (integration)', () => {
     const resultBounds = getImageWorldBounds(result);
     // With 2x scale, bounds should be 2x size, anchored at correct position
     expectClose(resultBounds.w, origBounds.w * 2);
+  });
+});
+
+// ─── Integration: Crop → Flip → Re-enter Crop ───────────────
+// Simulates: user crops an image, flips it, then enters crop mode again.
+// The editor geometry (full uncropped image) must be positioned so the
+// crop rectangle aligns with the current visible bounds.
+
+describe('crop → flip → re-enter crop mode (integration)', () => {
+  it('editor geometry aligns crop region with visible bounds after flipX', () => {
+    // Step 1: Cropped image
+    const data = makeImage({ x: 100, y: 100, w: 400, h: 300, crop: { x: 0.2, y: 0, w: 0.6, h: 1 } });
+    const visibleBefore = getImageWorldBounds(data);
+
+    // Step 2: Flip (what operations.flipHorizontal does)
+    data.flipX = true;
+    const visibleAfterFlip = getImageWorldBounds(data);
+
+    // Visible bounds should not change after flip
+    expectClose(visibleAfterFlip.x, visibleBefore.x, 0.01);
+    expectClose(visibleAfterFlip.y, visibleBefore.y, 0.01);
+    expectClose(visibleAfterFlip.w, visibleBefore.w, 0.01);
+    expectClose(visibleAfterFlip.h, visibleBefore.h, 0.01);
+
+    // Step 3: Enter crop mode — get editor geometry
+    const eg = getImageEditorGeometry(data);
+
+    // The crop rectangle in editor space should match the current visible bounds
+    const cropCorners = eg.cropWorldCorners;
+    const cropBounds = {
+      x: Math.min(...cropCorners.map(c => c.x)),
+      y: Math.min(...cropCorners.map(c => c.y)),
+      w: Math.max(...cropCorners.map(c => c.x)) - Math.min(...cropCorners.map(c => c.x)),
+      h: Math.max(...cropCorners.map(c => c.y)) - Math.min(...cropCorners.map(c => c.y)),
+    };
+    expectClose(cropBounds.x, visibleAfterFlip.x, 0.01);
+    expectClose(cropBounds.y, visibleAfterFlip.y, 0.01);
+    expectClose(cropBounds.w, visibleAfterFlip.w, 0.01);
+    expectClose(cropBounds.h, visibleAfterFlip.h, 0.01);
+  });
+
+  it('editor geometry aligns crop region after flipX + flipY', () => {
+    const data = makeImage({ x: 100, y: 100, w: 400, h: 300, crop: { x: 0.1, y: 0.2, w: 0.6, h: 0.5 } });
+    const visibleBefore = getImageWorldBounds(data);
+
+    // Flip both axes
+    data.flipX = true;
+    data.flipY = true;
+    const visibleAfterFlip = getImageWorldBounds(data);
+
+    // Bounds unchanged
+    expectClose(visibleAfterFlip.x, visibleBefore.x, 0.01);
+    expectClose(visibleAfterFlip.w, visibleBefore.w, 0.01);
+
+    // Enter crop mode
+    const eg = getImageEditorGeometry(data);
+    const cropCorners = eg.cropWorldCorners;
+    const cropBounds = {
+      x: Math.min(...cropCorners.map(c => c.x)),
+      y: Math.min(...cropCorners.map(c => c.y)),
+      w: Math.max(...cropCorners.map(c => c.x)) - Math.min(...cropCorners.map(c => c.x)),
+      h: Math.max(...cropCorners.map(c => c.y)) - Math.min(...cropCorners.map(c => c.y)),
+    };
+    expectClose(cropBounds.x, visibleAfterFlip.x, 0.01);
+    expectClose(cropBounds.y, visibleAfterFlip.y, 0.01);
+    expectClose(cropBounds.w, visibleAfterFlip.w, 0.01);
+    expectClose(cropBounds.h, visibleAfterFlip.h, 0.01);
+  });
+
+  it('editor geometry aligns crop region after flipX + rotation', () => {
+    // For rotated images, flip changes the AABB position (not size), so we
+    // only check that the editor crop matches the post-flip visible bounds.
+    const data = makeImage({ x: 100, y: 100, w: 400, h: 300, angle: 30, flipX: true, crop: { x: 0.1, y: 0, w: 0.7, h: 1 } });
+    const visibleBounds = getImageWorldBounds(data);
+
+    const eg = getImageEditorGeometry(data);
+    const cropBounds = getBoundsFromPoints(eg.cropWorldCorners);
+    expectClose(cropBounds.x, visibleBounds.x, 0.5);
+    expectClose(cropBounds.y, visibleBounds.y, 0.5);
+    expectClose(cropBounds.w, visibleBounds.w, 0.5);
+    expectClose(cropBounds.h, visibleBounds.h, 0.5);
+  });
+
+  it('crop confirm after flip preserves anchor through re-entry', () => {
+    // Full round-trip: crop → flip → enter crop → confirm same crop → position stable
+    const original = makeImage({ x: 100, y: 100, w: 400, h: 300, crop: { x: 0.2, y: 0, w: 0.6, h: 1 } });
+    const visibleBefore = getImageWorldBounds(original);
+
+    // Flip
+    original.flipX = true;
+
+    // Enter crop mode
+    const eg = getImageEditorGeometry(original);
+
+    // Confirm with same crop (user didn't change anything)
+    const sameCrop = { ...eg.sourceCrop };
+    const displayCrop = getImageDisplayCropRect({ crop: sameCrop, flipX: original.flipX, flipY: original.flipY });
+    const anchorWorld = imageViewPointToWorld(eg.editorData, displayCrop.x, displayCrop.y);
+
+    // Apply crop (as useCanvasSetup does)
+    const result = { ...original, crop: sameCrop };
+    const currentAnchor = imageViewPointToWorld(result, displayCrop.x, displayCrop.y);
+    result.x += anchorWorld.x - currentAnchor.x;
+    result.y += anchorWorld.y - currentAnchor.y;
+
+    // Position should be unchanged
+    const visibleAfter = getImageWorldBounds(result);
+    expectClose(visibleAfter.x, visibleBefore.x, 0.01);
+    expectClose(visibleAfter.y, visibleBefore.y, 0.01);
+    expectClose(visibleAfter.w, visibleBefore.w, 0.01);
+    expectClose(visibleAfter.h, visibleBefore.h, 0.01);
   });
 });
