@@ -330,6 +330,10 @@ export function setupPaste(
   },
 ): () => void {
   async function onPaste(e: ClipboardEvent) {
+    // If focus is inside a contentEditable (e.g. BlockNote editor), let native paste through
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && (active.isContentEditable || active.closest('[contenteditable]'))) return;
+
     const items = e.clipboardData?.items;
     if (!items) return;
 

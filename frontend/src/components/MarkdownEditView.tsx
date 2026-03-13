@@ -1,12 +1,12 @@
 /**
- * MarkdownEditView — BlockNote editor wrapper for markdown card edit mode.
+ * MarkdownEditView — BlockNote editor in a side panel.
  * Lazy-loaded on first double-click via dynamic import().
  */
 
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteViewRaw } from '@blocknote/react';
-import '@blocknote/react/style.css';
+import { BlockNoteView } from '@blocknote/mantine';
+import '@blocknote/mantine/style.css';
 import { MD_BLOCKNOTE_DARK_CSS } from '../canvas/markdownStyles';
 
 interface MarkdownEditViewProps {
@@ -15,11 +15,6 @@ interface MarkdownEditViewProps {
   onSave: (newContent: string) => void;
   onCancel: () => void;
 }
-
-// Markdown conversion is built into the BlockNote editor instance:
-// - editor.tryParseMarkdownToBlocks(md) — markdown → blocks
-// - editor.blocksToMarkdownLossy(blocks) — blocks → markdown
-// No separate @blocknote/xl-markdown package needed.
 
 export default function MarkdownEditView(props: MarkdownEditViewProps) {
   const { initialContent, accentColor, onSave, onCancel } = props;
@@ -74,70 +69,67 @@ export default function MarkdownEditView(props: MarkdownEditViewProps) {
         doCancel();
       }
     };
-    document.addEventListener('keydown', onKeyDown, true); // capture phase
+    document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [doSave, doCancel]);
-
-  // Click outside to save
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-markdown-edit]')) {
-        doSave();
-      }
-    };
-    const timer = setTimeout(() => {
-      document.addEventListener('pointerdown', onClick);
-    }, 200);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('pointerdown', onClick);
-    };
-  }, [doSave]);
-
-  // Header with Done/Cancel controls
-  const headerStyle: React.CSSProperties = {
-    padding: '7px 14px',
-    background: '#2a2a42',
-    borderBottom: '1px solid #333',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    fontSize: '11px',
-  };
 
   return (
     <div
       data-markdown-edit
       style={{
-        border: `1.5px solid ${accentColor}`,
-        borderRadius: '10px',
-        overflow: 'hidden',
-        boxShadow: `0 4px 24px ${accentColor}33`,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
       }}
     >
-      <div style={headerStyle}>
-        <span style={{ color: '#ccc' }}>Editing</span>
+      {/* Header */}
+      <div style={{
+        padding: '10px 16px',
+        background: '#1a1a2e',
+        borderBottom: `2px solid ${accentColor}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
+        <span style={{ color: '#ccc', fontSize: '12px', fontWeight: 500 }}>Markdown Editor</span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span style={{ color: '#666', fontSize: '10px' }}>Esc cancel</span>
+          <span style={{ color: '#666', fontSize: '10px' }}>Esc cancel · Ctrl+Enter save</span>
+          <button
+            onClick={doCancel}
+            style={{
+              background: 'transparent',
+              color: '#aaa',
+              border: '1px solid #444',
+              borderRadius: '6px',
+              padding: '4px 12px',
+              fontSize: '11px',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
           <button
             onClick={doSave}
             style={{
               background: accentColor,
               color: '#fff',
               border: 'none',
-              borderRadius: '4px',
-              padding: '3px 10px',
-              fontSize: '10px',
+              borderRadius: '6px',
+              padding: '4px 12px',
+              fontSize: '11px',
               cursor: 'pointer',
+              fontWeight: 600,
             }}
           >
             Done
           </button>
         </div>
       </div>
-      <div style={{ minHeight: '100px' }}>
-        <BlockNoteViewRaw editor={editor} theme="dark" />
+
+      {/* Editor */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <BlockNoteView editor={editor} theme="dark" />
       </div>
     </div>
   );

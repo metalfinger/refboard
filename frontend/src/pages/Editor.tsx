@@ -40,6 +40,7 @@ import type { TextObject, StickyObject, MarkdownObject } from '../canvas/scene-f
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { StickySprite } from '../canvas/sprites/StickySprite';
+import { MarkdownSprite } from '../canvas/sprites/MarkdownSprite';
 import * as ops from '../canvas/operations';
 import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
@@ -88,6 +89,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const inboxZoneRef = useRef<InboxZone | null>(null);
   const clipboardRef = useRef<SceneItem[]>([]);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const mdOverlayRef = useRef<any>(null);
   const [uploadManager] = useState(() => new UploadManager());
 
   // Reset upload manager when switching boards
@@ -173,6 +175,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const onCanvasChange = useCallback((changedIds?: string[]) => {
     scheduleSave();
     setSceneVersion(v => v + 1);
+    // Reposition all markdown overlay divs to match canvas items
+    mdOverlayRef.current?.refreshAll();
     if (changedIds && changedIds.length > 0) {
       // Incremental: broadcast only changed elements
       syncRef.current?.broadcastElements(changedIds);
@@ -256,9 +260,11 @@ export default function Editor({ isPublicView }: EditorProps) {
   // ── Markdown overlay — sync visible card IDs for React portal rendering ──
   const [mdCardIds, setMdCardIds] = useState<string[]>([]);
   const [editingMdId, setEditingMdId] = useState<string | null>(null);
+  const [mdRevision, setMdRevision] = useState(0);
 
   useEffect(() => {
     if (!mdOverlay) return;
+    mdOverlayRef.current = mdOverlay;
 
     const syncIds = () => {
       const scene = canvasRef.current?.getScene();
@@ -276,7 +282,14 @@ export default function Editor({ isPublicView }: EditorProps) {
     };
 
     mdOverlay.onChange = syncIds;
-    mdOverlay.onRequestEdit = (id) => setEditingMdId(id);
+    mdOverlay.onRequestEdit = (id) => {
+      setEditingMdId(id);
+      if (id) {
+        selectionRef.current?.setEnabled(false);
+      } else {
+        selectionRef.current?.setEnabled(true);
+      }
+    };
     syncIds();
     return () => {
       mdOverlay.onChange = null;
@@ -1144,22 +1157,37 @@ export default function Editor({ isPublicView }: EditorProps) {
           <MarkdownFormatToolbar
             x={mdToolbar.x}
             y={mdToolbar.y}
-            bgColor={(mdToolbar.item.data as MarkdownObject).bgColor}
             accentColor={(mdToolbar.item.data as MarkdownObject).accentColor}
             width={mdToolbar.item.data.w}
-            onBgColorChange={(color) => {
-              (mdToolbar.item.data as MarkdownObject).bgColor = color;
+            name={mdToolbar.item.data.name || ''}
+            onColorChange={(accent, bg) => {
+              const data = mdToolbar.item.data as MarkdownObject;
+              data.accentColor = accent;
+              data.bgColor = bg;
+              if (mdToolbar.item.displayObject instanceof MarkdownSprite) {
+                mdToolbar.item.displayObject.updateFromData(data);
+              }
+              mdOverlay?.updateItem(mdToolbar.item.id);
               onCanvasChange([mdToolbar.item.id]);
-            }}
-            onAccentColorChange={(color) => {
-              (mdToolbar.item.data as MarkdownObject).accentColor = color;
-              onCanvasChange([mdToolbar.item.id]);
+              updateOverlays();
             }}
             onWidthChange={(w) => {
-              mdToolbar.item.data.w = w;
-              onCanvasChange([mdToolbar.item.id]);
+              const data = mdToolbar.item.data as MarkdownObject;
+              data.w = w;
+              if (mdToolbar.item.displayObject instanceof MarkdownSprite) {
+                mdToolbar.item.displayObject.updateFromData(data);
+              }
+              mdOverlay?.updateItem(mdToolbar.item.id);
               mdOverlay?.measureHeight(mdToolbar.item.id);
+              onCanvasChange([mdToolbar.item.id]);
               selectionRef.current?.transformBox.update([mdToolbar.item]);
+              updateOverlays();
+            }}
+            onNameChange={(n) => {
+              mdToolbar.item.data.name = n;
+              setMdToolbar({ ...mdToolbar });
+              setMdRevision(r => r + 1);
+              onCanvasChange([mdToolbar.item.id]);
             }}
           />
         )}
@@ -1478,7 +1506,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         const data = item.data as MarkdownObject;
         return (
           <div style={{
-            width: '420px', minWidth: '420px',
+            width: '70%', minWidth: '400px', maxWidth: '900px',
             background: '#1a1a2e',
             borderLeft: '1px solid #333',
             display: 'flex', flexDirection: 'column',
@@ -1492,12 +1520,24 @@ export default function Editor({ isPublicView }: EditorProps) {
                 initialContent={data.content}
                 accentColor={data.accentColor}
                 onSave={(newContent) => {
+                  const savedId = editingMdId!;
                   data.content = newContent;
+                  const itemRef = canvasRef.current?.getScene()?.getById(savedId);
+                  if (itemRef?.displayObject instanceof MarkdownSprite) {
+                    itemRef.displayObject.updateFromData(data);
+                  }
                   setEditingMdId(null);
                   mdOverlay?.setEditing(null);
                   selectionRef.current?.setEnabled(true);
-                  onCanvasChange([editingMdId]);
-                  mdOverlay?.measureHeight(editingMdId);
+                  setMdRevision(r => r + 1);
+                  onCanvasChange([savedId]);
+                  mdOverlay?.updateItem(savedId);
+                  // Measure height after React re-renders the portal with new content.
+                  // Multiple passes: react-markdown renders async, DOM needs layout time.
+                  const measure = () => mdOverlay?.measureHeight(savedId);
+                  setTimeout(measure, 50);
+                  setTimeout(measure, 200);
+                  setTimeout(measure, 500);
                 }}
                 onCancel={() => {
                   setEditingMdId(null);
@@ -1544,8 +1584,9 @@ export default function Editor({ isPublicView }: EditorProps) {
         const data = item.data as MarkdownObject;
         return ReactDOM.createPortal(
           <MarkdownReadView
-            key={id}
+            key={`${id}-${mdRevision}`}
             content={data.content}
+            name={data.name}
             textColor={data.textColor}
             accentColor={data.accentColor}
             bgColor={data.bgColor}

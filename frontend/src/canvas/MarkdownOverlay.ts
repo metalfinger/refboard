@@ -21,6 +21,8 @@ interface CardEntry {
   contentMount: HTMLDivElement;
   /** Current item ID. */
   id: string;
+  /** ResizeObserver for auto-height updates. */
+  resizeObserver: ResizeObserver;
 }
 
 export class MarkdownOverlay {
@@ -33,8 +35,8 @@ export class MarkdownOverlay {
   /** Callback when a card's height changes (from DOM measurement). */
   onHeightChange: ((id: string, newHeight: number) => void) | null = null;
 
-  /** Callback to enter edit mode for a card (wired by Editor.tsx). */
-  onRequestEdit: ((id: string) => void) | null = null;
+  /** Callback to enter/exit edit mode for a card (wired by Editor.tsx). */
+  onRequestEdit: ((id: string | null) => void) | null = null;
 
   /** Callback when checkbox is toggled in read mode. */
   onCheckboxToggle: ((id: string, newContent: string) => void) | null = null;
@@ -64,6 +66,8 @@ export class MarkdownOverlay {
     for (const [cardId, entry] of this._cards) {
       entry.el.style.pointerEvents = cardId === id ? 'auto' : 'none';
     }
+    // Notify React to open/close the side panel editor
+    this.onRequestEdit?.(id);
   }
 
   get editingId(): string | null {
@@ -171,8 +175,14 @@ export class MarkdownOverlay {
     const contentMount = document.createElement('div');
     el.appendChild(contentMount);
 
+    // Auto-measure height whenever DOM content changes size
+    const resizeObserver = new ResizeObserver(() => {
+      this._syncHeight(item.id);
+    });
+    resizeObserver.observe(el);
+
     this._container.appendChild(el);
-    this._cards.set(item.id, { el, contentMount, id: item.id });
+    this._cards.set(item.id, { el, contentMount, id: item.id, resizeObserver });
     this.onChange?.();
   }
 
@@ -191,9 +201,26 @@ export class MarkdownOverlay {
     entry.el.style.transform = `scale(${zoom})`;
   }
 
+  /** Sync data.h from DOM measurement — called by ResizeObserver. */
+  private _syncHeight(id: string): void {
+    const entry = this._cards.get(id);
+    const item = this._scene.getById(id);
+    if (!entry || !item || item.type !== 'markdown') return;
+
+    const h = entry.el.offsetHeight;
+    if (h > 0 && Math.abs(h - item.data.h) > 1) {
+      item.data.h = h;
+      if (item.displayObject instanceof MarkdownSprite) {
+        item.displayObject.updateFromData(item.data as MarkdownObject);
+      }
+      this.onHeightChange?.(id, h);
+    }
+  }
+
   private _removeCard(id: string): void {
     const entry = this._cards.get(id);
     if (!entry) return;
+    entry.resizeObserver.disconnect();
     entry.el.remove();
     this._cards.delete(id);
     this.onChange?.();

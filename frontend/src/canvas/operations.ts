@@ -11,6 +11,11 @@ import { applyImageDisplayTransform, getImageDisplayTransform } from './imageTra
 
 // ─── Helpers ───
 
+/** Items with fixed dimensions — scale must stay at 1. */
+function isFixedSize(item: SceneItem): boolean {
+  return item.type === 'markdown' || item.type === 'sticky';
+}
+
 function scaledW(item: SceneItem): number {
   return item.data.w * item.data.sx;
 }
@@ -182,9 +187,11 @@ export function distributeVertical(objects: SceneItem[]) {
 
 export function normalizeSize(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const areas = objects.map((item) => scaledW(item) * scaledH(item));
+  const scalable = objects.filter(i => !isFixedSize(i));
+  if (scalable.length < 2) return;
+  const areas = scalable.map((item) => scaledW(item) * scaledH(item));
   const avgArea = areas.reduce((a, b) => a + b, 0) / areas.length;
-  objects.forEach((item) => {
+  scalable.forEach((item) => {
     const currentArea = scaledW(item) * scaledH(item);
     if (currentArea <= 0) return;
     const ratio = Math.sqrt(avgArea / currentArea);
@@ -196,9 +203,11 @@ export function normalizeSize(objects: SceneItem[]) {
 
 export function normalizeScale(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const avgSX = objects.reduce((s, item) => s + item.data.sx, 0) / objects.length;
-  const avgSY = objects.reduce((s, item) => s + item.data.sy, 0) / objects.length;
-  objects.forEach((item) => {
+  const scalable = objects.filter(i => !isFixedSize(i));
+  if (scalable.length < 2) return;
+  const avgSX = scalable.reduce((s, item) => s + item.data.sx, 0) / scalable.length;
+  const avgSY = scalable.reduce((s, item) => s + item.data.sy, 0) / scalable.length;
+  scalable.forEach((item) => {
     item.data.sx = avgSX;
     item.data.sy = avgSY;
     syncScale(item);
@@ -207,8 +216,10 @@ export function normalizeScale(objects: SceneItem[]) {
 
 export function normalizeHeight(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const avgH = objects.reduce((s, item) => s + scaledH(item), 0) / objects.length;
-  objects.forEach((item) => {
+  const scalable = objects.filter(i => !isFixedSize(i));
+  if (scalable.length < 2) return;
+  const avgH = scalable.reduce((s, item) => s + scaledH(item), 0) / scalable.length;
+  scalable.forEach((item) => {
     const h = scaledH(item);
     if (h <= 0) return;
     const ratio = avgH / h;
@@ -220,8 +231,10 @@ export function normalizeHeight(objects: SceneItem[]) {
 
 export function normalizeWidth(objects: SceneItem[]) {
   if (objects.length < 2) return;
-  const avgW = objects.reduce((s, item) => s + scaledW(item), 0) / objects.length;
-  objects.forEach((item) => {
+  const scalable = objects.filter(i => !isFixedSize(i));
+  if (scalable.length < 2) return;
+  const avgW = scalable.reduce((s, item) => s + scaledW(item), 0) / scalable.length;
+  scalable.forEach((item) => {
     const w = scaledW(item);
     if (w <= 0) return;
     const ratio = avgW / w;
@@ -367,6 +380,7 @@ function layoutAsGrid(sorted: SceneItem[], anchor: { x: number; y: number }) {
 
 export function flipHorizontal(objects: SceneItem[]) {
   objects.forEach((item) => {
+    if (isFixedSize(item)) return;
     item.data.flipX = !item.data.flipX;
     if (item.type === 'image') {
       applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
@@ -378,6 +392,7 @@ export function flipHorizontal(objects: SceneItem[]) {
 
 export function flipVertical(objects: SceneItem[]) {
   objects.forEach((item) => {
+    if (isFixedSize(item)) return;
     item.data.flipY = !item.data.flipY;
     if (item.type === 'image') {
       applyImageDisplayTransform(item.displayObject, item.data as ImageObject);

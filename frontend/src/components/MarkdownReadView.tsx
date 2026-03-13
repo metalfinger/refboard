@@ -21,6 +21,7 @@ interface MarkdownReadViewProps {
   accentColor: string;
   bgColor: string;
   padding: number;
+  name?: string;
   onCheckboxToggle?: (newContent: string) => void;
 }
 
@@ -70,13 +71,13 @@ function toggleCheckbox(content: string, index: number): string {
 }
 
 export default function MarkdownReadView(props: MarkdownReadViewProps) {
-  const { content, textColor, accentColor, bgColor: _bgColor, padding, onCheckboxToggle } = props;
+  const { content, textColor, accentColor, bgColor: _bgColor, padding, name, onCheckboxToggle } = props;
 
   const displayContent = content.length > MD_MAX_CONTENT_LENGTH
     ? content.slice(0, MD_MAX_CONTENT_LENGTH) + '\n\n---\n*Content truncated*'
     : content;
 
-  const title = extractTitle(content);
+  const title = name || extractTitle(content);
 
   const checkboxIndexRef = React.useRef(0);
   checkboxIndexRef.current = 0;
