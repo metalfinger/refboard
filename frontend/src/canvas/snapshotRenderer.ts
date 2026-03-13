@@ -78,9 +78,13 @@ export async function renderNativeImageSelection(
 
   const pixelsPerWorld = getNativePixelsPerWorld(items, options?.scale ?? 1);
   const paddingPx = options?.paddingPx ?? 10;
+  const minPxX = Math.floor(minX * pixelsPerWorld) - paddingPx;
+  const minPxY = Math.floor(minY * pixelsPerWorld) - paddingPx;
+  const maxPxX = Math.ceil(maxX * pixelsPerWorld) + paddingPx;
+  const maxPxY = Math.ceil(maxY * pixelsPerWorld) + paddingPx;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.ceil((maxX - minX) * pixelsPerWorld) + paddingPx * 2);
-  canvas.height = Math.max(1, Math.ceil((maxY - minY) * pixelsPerWorld) + paddingPx * 2);
+  canvas.width = Math.max(1, maxPxX - minPxX);
+  canvas.height = Math.max(1, maxPxY - minPxY);
 
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('2D context unavailable');
@@ -102,8 +106,8 @@ export async function renderNativeImageSelection(
 
     ctx.save();
     ctx.translate(
-      Math.round((t.x - minX) * pixelsPerWorld) + paddingPx,
-      Math.round((t.y - minY) * pixelsPerWorld) + paddingPx,
+      t.x * pixelsPerWorld - minPxX,
+      t.y * pixelsPerWorld - minPxY,
     );
     ctx.rotate((t.angle * Math.PI) / 180);
     ctx.scale(t.scaleX * pixelsPerWorld, t.scaleY * pixelsPerWorld);
@@ -144,9 +148,13 @@ export function getNativeImageExportDimensions(
   }
 
   const pixelsPerWorld = getNativePixelsPerWorld(items, scale);
+  const minPxX = Math.floor(minX * pixelsPerWorld) - paddingPx;
+  const minPxY = Math.floor(minY * pixelsPerWorld) - paddingPx;
+  const maxPxX = Math.ceil(maxX * pixelsPerWorld) + paddingPx;
+  const maxPxY = Math.ceil(maxY * pixelsPerWorld) + paddingPx;
   return {
-    width: Math.max(1, Math.ceil((maxX - minX) * pixelsPerWorld) + paddingPx * 2),
-    height: Math.max(1, Math.ceil((maxY - minY) * pixelsPerWorld) + paddingPx * 2),
+    width: Math.max(1, maxPxX - minPxX),
+    height: Math.max(1, maxPxY - minPxY),
   };
 }
 
