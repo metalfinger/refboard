@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteViewRaw } from '@blocknote/react';
 import '@blocknote/react/style.css';
+import { MD_BLOCKNOTE_DARK_CSS } from '../canvas/markdownStyles';
 
 interface MarkdownEditViewProps {
   initialContent: string;
@@ -23,6 +24,17 @@ interface MarkdownEditViewProps {
 export default function MarkdownEditView(props: MarkdownEditViewProps) {
   const { initialContent, accentColor, onSave, onCancel } = props;
   const savedRef = useRef(false);
+
+  // Inject BlockNote dark theme CSS overrides (once)
+  useEffect(() => {
+    const id = 'bn-dark-theme-overrides';
+    if (!document.getElementById(id)) {
+      const style = document.createElement('style');
+      style.id = id;
+      style.textContent = MD_BLOCKNOTE_DARK_CSS;
+      document.head.appendChild(style);
+    }
+  }, []);
 
   const editor = useCreateBlockNote({
     domAttributes: {

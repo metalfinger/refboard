@@ -126,7 +126,8 @@ export class MarkdownOverlay {
     if (!entry || !item || item.type !== 'markdown') return;
 
     requestAnimationFrame(() => {
-      const h = entry.el.offsetHeight / this._viewport.scale.x;
+      // offsetHeight is the CSS layout height at unscaled width — already in world space
+      const h = entry.el.offsetHeight;
       if (Math.abs(h - item.data.h) > 1) {
         item.data.h = h;
         // Redraw MarkdownSprite background

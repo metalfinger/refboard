@@ -465,6 +465,9 @@ export class SceneManager {
       const imgData = data as ImageObject;
       obj.applyCrop(imgData.crop);
     }
+    if (data.type === 'markdown' && obj instanceof MarkdownSprite) {
+      obj.updateFromData(data as MarkdownObject);
+    }
 
     // Update stored data
     item.data = { ...data };

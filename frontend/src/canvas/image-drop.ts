@@ -346,13 +346,16 @@ export function setupPaste(
     }
 
     if (textContent) {
-      e.preventDefault();
-      if (textContent.length > 20) {
-        opts?.onTextPaste?.({ text: textContent, html: htmlContent, hasImage: hasMedia });
-      } else {
-        opts?.onShortTextPaste?.(textContent);
+      if (textContent.length > 20 && opts?.onTextPaste) {
+        e.preventDefault();
+        opts.onTextPaste({ text: textContent, html: htmlContent, hasImage: hasMedia });
+        return;
+      } else if (textContent.length <= 20 && opts?.onShortTextPaste) {
+        e.preventDefault();
+        opts.onShortTextPaste(textContent);
+        return;
       }
-      return;
+      // No callback provided — let native paste behavior through
     }
 
     // ── Media paste logic (unchanged) ──

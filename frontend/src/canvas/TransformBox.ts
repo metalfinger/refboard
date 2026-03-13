@@ -8,6 +8,8 @@
 
 import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
+import { MarkdownSprite } from './sprites/MarkdownSprite';
+import type { MarkdownObject } from './scene-format';
 import { type SceneItem, getItemWorldBounds } from './SceneManager';
 import type { SnapGuides } from './SnapGuides';
 import { applyImageDisplayTransform } from './imageTransforms';
@@ -360,6 +362,9 @@ export class TransformBox extends Container {
         item.data.x = orig.x;
         item.data.y = orig.y;
         item.displayObject.position.set(item.data.x, item.data.y);
+        if (item.displayObject instanceof MarkdownSprite) {
+          item.displayObject.updateFromData(item.data as MarkdownObject);
+        }
         this._onItemTransform?.(item);
         continue; // Skip normal sx/sy scaling
       }
