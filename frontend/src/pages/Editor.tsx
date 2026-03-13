@@ -44,6 +44,7 @@ import * as ops from '../canvas/operations';
 import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
 import PasteChoicePopup from '../components/PasteChoicePopup';
+import MarkdownFormatToolbar from '../components/MarkdownFormatToolbar';
 const LazyMarkdownEditView = React.lazy(() => import('../components/MarkdownEditView'));
 
 // Hooks
@@ -133,6 +134,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   >(null);
   const [videoCtrl, setVideoCtrl] = useState<{ videoSprite: VideoSprite; screenRect: { x: number; y: number; w: number; h: number } } | null>(null);
   const [pastePopup, setPastePopup] = useState<{ x: number; y: number; text: string; html: string; hasImage: boolean } | null>(null);
+  const [mdToolbar, setMdToolbar] = useState<{ x: number; y: number; item: SceneItem } | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
   const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
     items: [], viewportBounds: { x: 0, y: 0, w: 1, h: 1 }, contentBounds: { x: 0, y: 0, w: 1, h: 1 },
@@ -708,6 +710,17 @@ export default function Editor({ isPublicView }: EditorProps) {
       setTextToolbar(null);
     }
 
+    // Markdown format toolbar: show when exactly one markdown card is selected
+    const mdItems = items.filter((it) => it.type === 'markdown');
+    if (mdItems.length === 1 && items.length === 1) {
+      const b = getItemWorldBounds(mdItems[0]);
+      const screenTL = vp.toScreen(b.x, b.y);
+      const screenTR = vp.toScreen(b.x + b.w, b.y);
+      setMdToolbar({ x: (screenTL.x + screenTR.x) / 2, y: screenTL.y, item: mdItems[0] });
+    } else {
+      setMdToolbar(null);
+    }
+
     if (items.length < 2) { setSelToolbar(null); } else {
       // Compute world bounding box of selection
       let minX = Infinity, minY = Infinity, maxX = -Infinity;
@@ -1063,6 +1076,31 @@ export default function Editor({ isPublicView }: EditorProps) {
               onCanvasChange(textToolbar.items.map(i => i.id));
               updateOverlays();
             } : undefined}
+          />
+        )}
+
+        {/* Markdown format toolbar */}
+        {mdToolbar && activeTool === ToolType.SELECT && !contextMenu && !editingMdId && (
+          <MarkdownFormatToolbar
+            x={mdToolbar.x}
+            y={mdToolbar.y}
+            bgColor={(mdToolbar.item.data as MarkdownObject).bgColor}
+            accentColor={(mdToolbar.item.data as MarkdownObject).accentColor}
+            width={mdToolbar.item.data.w}
+            onBgColorChange={(color) => {
+              (mdToolbar.item.data as MarkdownObject).bgColor = color;
+              onCanvasChange([mdToolbar.item.id]);
+            }}
+            onAccentColorChange={(color) => {
+              (mdToolbar.item.data as MarkdownObject).accentColor = color;
+              onCanvasChange([mdToolbar.item.id]);
+            }}
+            onWidthChange={(w) => {
+              mdToolbar.item.data.w = w;
+              onCanvasChange([mdToolbar.item.id]);
+              mdOverlay?.measureHeight(mdToolbar.item.id);
+              selectionRef.current?.transformBox.update([mdToolbar.item]);
+            }}
           />
         )}
 
