@@ -60,6 +60,7 @@ interface CanvasSetupDeps {
     onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
     onShortTextPaste?: (text: string) => void;
   };
+  onCropModeChange?: (active: boolean) => void;
 }
 
 /**
@@ -72,6 +73,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
     pasteOpts,
+    onCropModeChange,
   } = deps;
 
   const dropCleanupRef = useRef<(() => void) | null>(null);
@@ -465,6 +467,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       const cropOverlay = new CropOverlay(viewport);
       viewport.addChild(cropOverlay);
       cropOverlayRef.current = cropOverlay;
+      cropOverlay.onStateChange = (active) => {
+        onCropModeChange?.(active);
+      };
 
       cropOverlay.onConfirm = (item, crop) => {
         const imgData = item.data as any;
@@ -529,7 +534,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       sharpnessCleanupRef.current = null;
       disconnectSocket();
     };
-  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
+  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds, pasteOpts, onCropModeChange]);
 
   return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlayRef, mdOverlay: mdOverlayRef.current };
 }

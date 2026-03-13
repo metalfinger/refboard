@@ -33,6 +33,7 @@ export class CropOverlay extends Container {
   private _drag: { mode: DragMode; startCrop: CropRect; startPoint: { x: number; y: number } } | null = null;
   private _onConfirm: ((item: SceneItem, crop: CropRect) => void) | null = null;
   private _onCancel: (() => void) | null = null;
+  private _onStateChange: ((active: boolean) => void) | null = null;
   private _keyHandler: ((e: KeyboardEvent) => void) | null = null;
   // Bound references for dynamic event registration
   private _boundMove: ((e: FederatedPointerEvent) => void) | null = null;
@@ -79,6 +80,7 @@ export class CropOverlay extends Container {
 
   set onConfirm(fn: (item: SceneItem, crop: CropRect) => void) { this._onConfirm = fn; }
   set onCancel(fn: () => void) { this._onCancel = fn; }
+  set onStateChange(fn: (active: boolean) => void) { this._onStateChange = fn; }
 
   /** Start cropping the given image item. */
   start(item: SceneItem): void {
@@ -87,6 +89,7 @@ export class CropOverlay extends Container {
     const imgData = item.data as ImageObject;
     this._crop = imgData.crop ? { ...imgData.crop } : { x: 0, y: 0, w: 1, h: 1 };
     this.visible = true;
+    this._onStateChange?.(true);
     // Ensure overlay renders on top of all scene items
     if (this.parent) {
       this.parent.setChildIndex(this, this.parent.children.length - 1);
@@ -125,6 +128,7 @@ export class CropOverlay extends Container {
     this._item = null;
     this._drag = null;
     this.visible = false;
+    this._onStateChange?.(false);
     if (this._keyHandler) {
       window.removeEventListener('keydown', this._keyHandler);
       this._keyHandler = null;

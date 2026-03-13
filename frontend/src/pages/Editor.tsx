@@ -127,6 +127,8 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [layerList, setLayerList] = useState<any[]>([]);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number; count: number } | null>(null);
+  const [cropToolbar, setCropToolbar] = useState<{ x: number; y: number; name: string } | null>(null);
+  const [cropModeActive, setCropModeActive] = useState(false);
   const [textToolbar, setTextToolbar] = useState<
     | { kind: 'text'; x: number; y: number; fontFamily: string; fill: string; items: SceneItem[] }
     | { kind: 'sticky'; x: number; y: number; fontFamily: string; textColor: string; fill: string; stickyFontSize: number; items: SceneItem[] }
@@ -243,6 +245,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       onTextPaste: handleTextPaste,
       onShortTextPaste: handleShortTextPaste,
     },
+    onCropModeChange: setCropModeActive,
   });
 
   // ── Markdown overlay — sync visible card IDs for React portal rendering ──
@@ -640,14 +643,31 @@ export default function Editor({ isPublicView }: EditorProps) {
   const updateOverlays = useCallback(() => {
     const selection = selectionRef.current;
     const vp = canvasRef.current?.getViewport();
-    if (!selection || !vp) { setSelToolbar(null); setVideoCtrl(null); return; }
+    if (!selection || !vp) { setSelToolbar(null); setCropToolbar(null); setVideoCtrl(null); return; }
     const items = selection.getSelectedItems();
+    const cropActive = cropModeActive && (cropOverlayRef.current?.isActive ?? false);
 
     setZoom(canvasRef.current?.getZoom() ?? 1);
     setCanvasTransform([vp.scale.x, 0, 0, vp.scale.y, vp.x, vp.y]);
 
+    if (cropActive && items.length === 1 && items[0].type === 'image') {
+      const b = getItemWorldBounds(items[0]);
+      const screenTL = vp.toScreen(b.x, b.y);
+      const screenTR = vp.toScreen(b.x + b.w, b.y);
+      setCropToolbar({
+        x: (screenTL.x + screenTR.x) / 2,
+        y: screenTL.y,
+        name: items[0].data.name || 'Image',
+      });
+      setSelToolbar(null);
+      setTextToolbar(null);
+      setVideoCtrl(null);
+    } else {
+      setCropToolbar(null);
+    }
+
     // Video controls: show when exactly 1 video is selected
-    if (items.length === 1 && items[0].type === 'video' && items[0].displayObject instanceof VideoSprite) {
+    if (!cropActive && items.length === 1 && items[0].type === 'video' && items[0].displayObject instanceof VideoSprite) {
       const vs = items[0].displayObject as VideoSprite;
       const b = getItemWorldBounds(items[0]);
       const screenTL = vp.toScreen(b.x, b.y);
@@ -672,7 +692,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       : stickyItems.length === items.length ? stickyItems
       : null; // mixed or non-text selection → hide
 
-    if (formatItems && formatItems.length > 0) {
+    if (!cropActive && formatItems && formatItems.length > 0) {
       let minX2 = Infinity, minY2 = Infinity, maxX2 = -Infinity, maxY2 = -Infinity;
       for (const item of formatItems) {
         const b = getItemWorldBounds(item);
@@ -712,7 +732,7 @@ export default function Editor({ isPublicView }: EditorProps) {
 
     // Markdown format toolbar: show when exactly one markdown card is selected
     const mdItems = items.filter((it) => it.type === 'markdown');
-    if (mdItems.length === 1 && items.length === 1) {
+    if (!cropActive && mdItems.length === 1 && items.length === 1) {
       const b = getItemWorldBounds(mdItems[0]);
       const screenTL = vp.toScreen(b.x, b.y);
       const screenTR = vp.toScreen(b.x + b.w, b.y);
@@ -721,7 +741,7 @@ export default function Editor({ isPublicView }: EditorProps) {
       setMdToolbar(null);
     }
 
-    if (items.length < 2) { setSelToolbar(null); } else {
+    if (cropActive || items.length < 2) { setSelToolbar(null); } else {
       // Compute world bounding box of selection
       let minX = Infinity, minY = Infinity, maxX = -Infinity;
       for (const item of items) {
@@ -764,7 +784,7 @@ export default function Editor({ isPublicView }: EditorProps) {
     // Pin positions follow media automatically (children of displayObjects).
     // Only refresh on zoom to update counter-scale.
     pinOverlay?.refresh();
-  }, [pinOverlay]);
+  }, [pinOverlay, cropOverlayRef, cropModeActive]);
 
   // Listen to viewport moved event for overlay updates (throttled)
   // Depends on objectCount so it re-runs after canvas init (viewport becomes available)
@@ -789,7 +809,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   // Also update overlays when selection or scene changes
   useEffect(() => {
     updateOverlays();
-  }, [selectedLayerIds, updateOverlays]);
+  }, [selectedLayerIds, sceneVersion, cropModeActive, updateOverlays]);
 
   // (PresenceOverlay removed — selection broadcast no longer needed)
 
@@ -967,7 +987,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         )}
 
         {/* Selection toolbar (floating, above selection) */}
-        {selToolbar && selToolbar.count >= 2 && activeTool === ToolType.SELECT && !contextMenu && (
+        {selToolbar && selToolbar.count >= 2 && activeTool === ToolType.SELECT && !contextMenu && !cropToolbar && (
           <SelectionToolbar
             x={selToolbar.x}
             y={selToolbar.y}
@@ -993,7 +1013,7 @@ export default function Editor({ isPublicView }: EditorProps) {
         )}
 
         {/* Contextual format toolbar (floating, above selected text/sticky items) */}
-        {textToolbar && activeTool === ToolType.SELECT && !contextMenu && (
+        {textToolbar && activeTool === ToolType.SELECT && !contextMenu && !cropToolbar && (
           <TextFormatToolbar
             kind={textToolbar.kind}
             x={textToolbar.x}
@@ -1105,11 +1125,97 @@ export default function Editor({ isPublicView }: EditorProps) {
         )}
 
         {/* Video controls (floating, below selected video) */}
-        {videoCtrl && activeTool === ToolType.SELECT && !contextMenu && (
+        {videoCtrl && activeTool === ToolType.SELECT && !contextMenu && !cropToolbar && (
           <VideoControls
             videoSprite={videoCtrl.videoSprite}
             screenRect={videoCtrl.screenRect}
           />
+        )}
+
+        {cropToolbar && activeTool === ToolType.SELECT && !contextMenu && (
+          <div
+            style={{
+              position: 'absolute',
+              left: cropToolbar.x,
+              top: cropToolbar.y - 10,
+              transform: 'translate(-50%, -100%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '8px 10px',
+              background: 'rgba(18, 18, 18, 0.96)',
+              border: '1px solid #3a3a3a',
+              borderRadius: '12px',
+              backdropFilter: 'blur(12px)',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
+              zIndex: 140,
+              pointerEvents: 'auto',
+              color: '#e8e8e8',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '220px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 7px',
+                  borderRadius: '999px',
+                  background: '#214765',
+                  color: '#9fd3ff',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}>
+                  Crop Mode
+                </span>
+                <span style={{ fontSize: '12px', color: '#b7b7b7', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {cropToolbar.name}
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: '#8f8f8f' }}>
+                Drag inside to move. Drag handles to resize. Enter applies. Esc cancels.
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                cropOverlayRef.current?.cancel();
+                updateOverlays();
+              }}
+              style={{
+                height: '30px',
+                padding: '0 12px',
+                background: 'transparent',
+                border: '1px solid #444',
+                borderRadius: '8px',
+                color: '#d0d0d0',
+                cursor: 'pointer',
+                fontSize: '12px',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                cropOverlayRef.current?.confirm();
+                updateOverlays();
+              }}
+              style={{
+                height: '30px',
+                padding: '0 12px',
+                background: '#4a90d9',
+                border: '1px solid #4a90d9',
+                borderRadius: '8px',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600,
+              }}
+            >
+              Apply
+            </button>
+          </div>
         )}
 
         {/* Minimap */}
