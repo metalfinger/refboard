@@ -62,7 +62,7 @@ export class TransformBox extends Container {
   private _onItemTransform: ((item: SceneItem) => void) | null = null;
   private _onDragEnd: ((itemIds: string[]) => void) | null = null;
   private _snapGuides: SnapGuides | null = null;
-  private _stickyOnly = false;
+  private _resizeConstraint: 'full' | 'horizontal' | 'none' = 'full';
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
 
@@ -164,7 +164,9 @@ export class TransformBox extends Container {
     }
 
     this._bounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-    this._stickyOnly = items.length > 0 && items.every(i => i.type === 'sticky');
+    const allSticky = items.length > 0 && items.every(i => i.type === 'sticky');
+    const allMarkdown = items.length > 0 && items.every(i => i.type === 'markdown');
+    this._resizeConstraint = allSticky ? 'none' : allMarkdown ? 'horizontal' : 'full';
     this._draw();
     this.visible = true;
   }
@@ -201,7 +203,12 @@ export class TransformBox extends Container {
 
     for (const [id, handle] of this._handles) {
       // No resize handles for sticky-only selections (fixed width, auto height)
-      if (this._stickyOnly) {
+      if (this._resizeConstraint === 'none') {
+        handle.visible = false;
+        handle.eventMode = 'none';
+        continue;
+      }
+      if (this._resizeConstraint === 'horizontal' && id !== 'mr') {
         handle.visible = false;
         handle.eventMode = 'none';
         continue;
@@ -305,7 +312,7 @@ export class TransformBox extends Container {
       // --- Edge handles (proportional by default, hold Shift for free-form) ---
       case 'mr': {
         fx = Math.max(MIN, (world.x - ob.x) / ob.w);
-        if (!e.shiftKey) fy = fx;
+        if (!e.shiftKey && this._resizeConstraint !== 'horizontal') fy = fx;
         break;
       }
       case 'ml': {
@@ -342,6 +349,20 @@ export class TransformBox extends Container {
     for (const item of this._items) {
       const orig = origTransforms.get(item.id);
       if (!orig) continue;
+
+      if (item.type === 'markdown') {
+        // Markdown cards: convert scale factor to width change, keep sx/sy at 1.
+        const newW = Math.min(800, Math.max(250, orig.w * fx));
+        item.data.w = newW;
+        item.data.sx = 1;
+        item.data.sy = 1;
+        item.displayObject.scale.set(1, 1);
+        item.data.x = orig.x;
+        item.data.y = orig.y;
+        item.displayObject.position.set(item.data.x, item.data.y);
+        this._onItemTransform?.(item);
+        continue; // Skip normal sx/sy scaling
+      }
 
       // Reposition as a unit: scale each item's offset from the anchor point
       item.data.x = anchorX + (orig.x - anchorX) * fx;
