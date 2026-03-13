@@ -17,7 +17,7 @@ import { MarkdownOverlay } from '../canvas/MarkdownOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
 import { getItemWorldBounds } from '../canvas/SceneManager';
-import { applyImageDisplayTransform } from '../canvas/imageTransforms';
+import { applyImageDisplayTransform, getImageDisplayCropRect, imageViewPointToWorld } from '../canvas/imageTransforms';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -484,9 +484,13 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         if (item.displayObject instanceof ImageSprite) {
           item.displayObject.applyCrop(imgData.crop);
         }
-        const after = getItemWorldBounds(item);
-        imgData.x += anchorWorld.x - after.x;
-        imgData.y += anchorWorld.y - after.y;
+        // Reposition so the crop corner stays at anchorWorld.
+        // Use the display crop's top-left in world space (not AABB min)
+        // to avoid drift on rotated images.
+        const displayCrop = getImageDisplayCropRect(imgData);
+        const currentAnchor = imageViewPointToWorld(imgData, displayCrop.x, displayCrop.y);
+        imgData.x += anchorWorld.x - currentAnchor.x;
+        imgData.y += anchorWorld.y - currentAnchor.y;
         if (item.type === 'image') {
           applyImageDisplayTransform(item.displayObject, imgData);
         }

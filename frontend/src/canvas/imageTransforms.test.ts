@@ -13,6 +13,7 @@ import {
   normalizeImageTransformData,
   getImageTransformedCorners,
   getImageWorldBounds,
+  transformPoint,
 } from './imageTransforms';
 
 /** Helper to build a minimal ImageObject for testing. */
@@ -337,5 +338,150 @@ describe('world bounds invariants', () => {
     const half = getImageWorldBounds(makeImage({ x: 0, y: 0, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } }));
     expectClose(half.w, full.w / 2);
     expectClose(half.h, full.h / 2);
+  });
+});
+
+// ─── Integration: Crop Confirm Anchor ────────────────────────
+// Simulates the crop confirm path: CropOverlay passes anchorWorld (crop
+// corner in editor space), then useCanvasSetup repositions data.x/y so
+// the crop corner stays at that world point after applying the new crop.
+
+describe('crop confirm anchor preservation (integration)', () => {
+  function simulateCropConfirm(
+    original: ImageObject,
+    newCrop: { x: number; y: number; w: number; h: number },
+  ) {
+    // 1. Editor geometry: get anchor from editor data (as CropOverlay does)
+    const eg = getImageEditorGeometry(original);
+    const displayCrop = getImageDisplayCropRect({ crop: newCrop, flipX: original.flipX, flipY: original.flipY });
+    const anchorWorld = imageViewPointToWorld(eg.editorData, displayCrop.x, displayCrop.y);
+
+    // 2. Apply new crop to a copy (as useCanvasSetup does)
+    const result: ImageObject = { ...original, crop: newCrop };
+
+    // 3. Reposition using crop corner (fixed path), not AABB min
+    const currentAnchor = imageViewPointToWorld(result, displayCrop.x, displayCrop.y);
+    result.x += anchorWorld.x - currentAnchor.x;
+    result.y += anchorWorld.y - currentAnchor.y;
+
+    return { result, anchorWorld };
+  }
+
+  it('rotate → crop confirm preserves crop corner', () => {
+    const data = makeImage({ x: 100, y: 50, angle: 45, crop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } });
+    const newCrop = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+    const { result, anchorWorld } = simulateCropConfirm(data, newCrop);
+
+    // After confirm, the crop corner should be at the same world point
+    const displayCrop = getImageDisplayCropRect({ crop: newCrop, flipX: data.flipX, flipY: data.flipY });
+    const finalAnchor = imageViewPointToWorld(result, displayCrop.x, displayCrop.y);
+    expectClose(finalAnchor.x, anchorWorld.x, 0.01);
+    expectClose(finalAnchor.y, anchorWorld.y, 0.01);
+  });
+
+  it('rotate + flipX → crop confirm preserves crop corner', () => {
+    const data = makeImage({ x: 100, y: 50, angle: 30, flipX: true, crop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } });
+    const newCrop = { x: 0.15, y: 0.1, w: 0.7, h: 0.8 };
+    const { result, anchorWorld } = simulateCropConfirm(data, newCrop);
+
+    const displayCrop = getImageDisplayCropRect({ crop: newCrop, flipX: data.flipX, flipY: data.flipY });
+    const finalAnchor = imageViewPointToWorld(result, displayCrop.x, displayCrop.y);
+    expectClose(finalAnchor.x, anchorWorld.x, 0.01);
+    expectClose(finalAnchor.y, anchorWorld.y, 0.01);
+  });
+
+  it('plain image crop confirm (no rotation)', () => {
+    const data = makeImage({ x: 200, y: 100 });
+    const newCrop = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+    const { result, anchorWorld } = simulateCropConfirm(data, newCrop);
+
+    const displayCrop = getImageDisplayCropRect({ crop: newCrop, flipX: data.flipX, flipY: data.flipY });
+    const finalAnchor = imageViewPointToWorld(result, displayCrop.x, displayCrop.y);
+    expectClose(finalAnchor.x, anchorWorld.x, 0.01);
+    expectClose(finalAnchor.y, anchorWorld.y, 0.01);
+  });
+});
+
+// ─── Integration: Ungroup Image Position ─────────────────────
+// Simulates the ungroup path for images: transform display position
+// through group transform, propagate scale/angle, back-calculate data.x/y.
+
+describe('ungroup image position preservation (integration)', () => {
+  function simulateGroupAndUngroup(
+    imageData: ImageObject,
+    groupTransform: { x: number; y: number; sx: number; sy: number; angle: number },
+  ) {
+    const { x: gx, y: gy, sx: gsx, sy: gsy, angle: ga } = groupTransform;
+
+    // GROUP: convert world → local (as groupItems does)
+    const grouped = { ...imageData };
+    grouped.x = imageData.x - gx;
+    grouped.y = imageData.y - gy;
+
+    // UNGROUP: convert local → world (as ungroupItems does for images)
+    const ungrouped = { ...grouped };
+    const localDisplay = getImageDisplayTransform(ungrouped);
+    const worldDisplay = transformPoint(
+      { x: localDisplay.x, y: localDisplay.y },
+      { x: gx, y: gy, sx: gsx, sy: gsy, angle: ga },
+    );
+    ungrouped.sx *= gsx;
+    ungrouped.sy *= gsy;
+    ungrouped.angle = (ungrouped.angle || 0) + ga;
+    const newSx = Math.abs(ungrouped.sx);
+    const newSy = Math.abs(ungrouped.sy);
+    const visibleRect = getImageVisibleLocalRect(ungrouped);
+    ungrouped.x = worldDisplay.x - (ungrouped.flipX ? visibleRect.w * newSx : 0);
+    ungrouped.y = worldDisplay.y - (ungrouped.flipY ? visibleRect.h * newSy : 0);
+
+    return ungrouped;
+  }
+
+  it('flipped image in non-rotated group round-trips', () => {
+    const img = makeImage({ x: 150, y: 80, flipX: true });
+    const result = simulateGroupAndUngroup(img, { x: 100, y: 50, sx: 1, sy: 1, angle: 0 });
+    expectClose(result.x, img.x, 0.01);
+    expectClose(result.y, img.y, 0.01);
+  });
+
+  it('flipped image in rotated uniform-scale group: ungroup preserves display position', () => {
+    // Start with image already in group-local coordinates
+    const localImg = makeImage({ x: 50, y: 30, flipX: true, flipY: true });
+    const group = { x: 100, y: 50, sx: 1, sy: 1, angle: 90 };
+
+    // Compute what PixiJS world display position would be inside the group
+    const localDisplay = getImageDisplayTransform(localImg);
+    const worldDisplay = transformPoint(
+      { x: localDisplay.x, y: localDisplay.y },
+      group,
+    );
+
+    // Ungroup
+    const ungrouped = { ...localImg };
+    ungrouped.sx *= group.sx;
+    ungrouped.sy *= group.sy;
+    ungrouped.angle = (ungrouped.angle || 0) + group.angle;
+    const newSx = Math.abs(ungrouped.sx);
+    const newSy = Math.abs(ungrouped.sy);
+    const visibleRect = getImageVisibleLocalRect(ungrouped);
+    ungrouped.x = worldDisplay.x - (ungrouped.flipX ? visibleRect.w * newSx : 0);
+    ungrouped.y = worldDisplay.y - (ungrouped.flipY ? visibleRect.h * newSy : 0);
+
+    // The ungrouped display position should match the world display position
+    const ungroupedDisplay = getImageDisplayTransform(ungrouped);
+    expectClose(ungroupedDisplay.x, worldDisplay.x, 0.01);
+    expectClose(ungroupedDisplay.y, worldDisplay.y, 0.01);
+  });
+
+  it('non-flipped image in scaled group round-trips', () => {
+    const img = makeImage({ x: 150, y: 80 });
+    const result = simulateGroupAndUngroup(img, { x: 100, y: 50, sx: 2, sy: 2, angle: 0 });
+    // After ungrouping from 2x group, sx/sy should be 2 and position should preserve display
+    expect(result.sx).toBe(2);
+    expect(result.sy).toBe(2);
+    const origBounds = getImageWorldBounds(img);
+    const resultBounds = getImageWorldBounds(result);
+    // With 2x scale, bounds should be 2x size, anchored at correct position
+    expectClose(resultBounds.w, origBounds.w * 2);
   });
 });

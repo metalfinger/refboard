@@ -145,7 +145,12 @@ export function ungroupItems(
         { x: groupX, y: groupY, sx: groupSx, sy: groupSy, angle: groupAngle },
       );
 
-      // Propagate group scale and angle
+      // Propagate group scale and angle.
+      // NOTE: This decomposition (multiply scales, add angles) is only exact for
+      // uniform group scaling or axis-aligned children. Non-uniform group scale
+      // combined with a rotated child produces shear that cannot be represented
+      // by sx/sy + angle alone. In practice groups are rarely non-uniformly
+      // scaled, so this is an acceptable limitation.
       imgData.sx *= groupSx;
       imgData.sy *= groupSy;
       imgData.angle = (imgData.angle || 0) + groupAngle;
