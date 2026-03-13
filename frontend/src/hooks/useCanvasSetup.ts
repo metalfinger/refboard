@@ -185,12 +185,15 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       undoRef.current = new UndoManager(scene);
 
       // Zoom-bucket text sharpness — re-rasterize visible text when zoom crosses bucket boundary
+      // Listen on both 'zoomed' and 'moved' — pixi-viewport may only fire 'moved' for some zoom types
       const sharpness = new TextSharpnessManager(viewport, scene);
       const onZoomBucketCheck = () => { sharpness.check(); };
       viewport.on('zoomed', onZoomBucketCheck);
+      viewport.on('moved', onZoomBucketCheck);
       scene.onItemCreated = (item) => { sharpness.applyToItem(item); };
       sharpnessCleanupRef.current = () => {
         viewport.off('zoomed', onZoomBucketCheck);
+        viewport.off('moved', onZoomBucketCheck);
         scene.onItemCreated = null;
         sharpness.destroy();
       };

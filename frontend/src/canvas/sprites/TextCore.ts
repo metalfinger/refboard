@@ -35,6 +35,7 @@ export class TextCore {
   private _lastWordWrapWidth: number;
   private _lastLineHeightMultiplier: number;
   private _zoomBucket = 1;
+  private _zoomBucketApplied = false;
 
   get measuredWidth(): number {
     return this.pixiText.width;
@@ -81,8 +82,11 @@ export class TextCore {
    * Only re-rasterizes when the bucket actually changes.
    */
   setZoomBucket(bucket: number): void {
-    if (bucket === this._zoomBucket) return;
+    // Always apply on first call (resolution starts as null/auto in PixiJS v8).
+    // After that, skip if bucket hasn't changed.
+    if (this._zoomBucketApplied && bucket === this._zoomBucket) return;
     this._zoomBucket = bucket;
+    this._zoomBucketApplied = true;
     this.pixiText.resolution = bucket;
   }
 

@@ -21,11 +21,14 @@ import { StickySprite } from './sprites/StickySprite';
  * Fewer buckets = fewer re-rasterizations = better perf.
  */
 export function getTextZoomBucket(scale: number): number {
-  if (scale < 0.4) return 0.5;
-  if (scale < 0.75) return 0.75;
-  if (scale < 1.25) return 1;
-  if (scale < 1.75) return 1.5;
-  if (scale < 2.5) return 2;
+  if (scale < 0.3) return 0.25;
+  if (scale < 0.5) return 0.5;
+  if (scale < 0.8) return 0.75;
+  if (scale < 1.1) return 1;
+  if (scale < 1.4) return 1.25;
+  if (scale < 1.8) return 1.5;
+  if (scale < 2.2) return 2;
+  if (scale < 3.0) return 2.5;
   return 3;
 }
 
