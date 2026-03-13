@@ -597,22 +597,30 @@ export default function Editor({ isPublicView }: EditorProps) {
     const scene = canvasRef.current?.getScene();
     const viewport = canvasRef.current?.getViewport();
     const app = canvasRef.current?.getApp();
-    if (!scene || !viewport || !app?.renderer?.extract) {
+    if (!scene || !app) {
       showToast('Preview snapshot is not available');
       return;
     }
 
     setRefreshingPreview(true);
     try {
-      const extractedCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
+      const directCanvas = app.canvas as unknown as HTMLCanvasElement | undefined;
+      const fallbackCanvas = viewport && app.renderer?.extract
+        ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
+        : undefined;
+      const sourceCanvas = directCanvas ?? fallbackCanvas;
+      if (!sourceCanvas || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
+        throw new Error('rendered canvas is unavailable');
+      }
+
       const maxWidth = 900;
-      const scale = extractedCanvas.width > maxWidth ? maxWidth / extractedCanvas.width : 1;
+      const scale = sourceCanvas.width > maxWidth ? maxWidth / sourceCanvas.width : 1;
       const out = document.createElement('canvas');
-      out.width = Math.max(1, Math.round(extractedCanvas.width * scale));
-      out.height = Math.max(1, Math.round(extractedCanvas.height * scale));
+      out.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+      out.height = Math.max(1, Math.round(sourceCanvas.height * scale));
       const ctx = out.getContext('2d');
       if (!ctx) throw new Error('2D context unavailable');
-      ctx.drawImage(extractedCanvas, 0, 0, out.width, out.height);
+      ctx.drawImage(sourceCanvas, 0, 0, out.width, out.height);
       const thumbnail = out.toDataURL('image/jpeg', 0.82);
       await saveCanvas(resolvedBoardId, JSON.stringify(scene.serialize()), thumbnail);
       setSaveStatus('saved');
