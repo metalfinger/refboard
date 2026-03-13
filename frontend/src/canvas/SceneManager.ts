@@ -36,6 +36,7 @@ import type {
   DrawingObject,
   GroupObject,
   StickyObject,
+  MarkdownObject,
   SceneObject,
 } from './scene-format';
 
@@ -57,7 +58,7 @@ function isGifAsset(asset: string): boolean {
 
 export interface SceneItem {
   id: string;
-  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky';
+  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky' | 'markdown';
   displayObject: Container;
   data: AnySceneObject;
 }

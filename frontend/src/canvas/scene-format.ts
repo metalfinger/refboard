@@ -4,7 +4,7 @@
 
 export interface SceneObject {
   id: string;
-  type: 'image' | 'video' | 'text' | 'group' | 'drawing' | 'sticky';
+  type: 'image' | 'video' | 'text' | 'group' | 'drawing' | 'sticky' | 'markdown';
   x: number;
   y: number;
   w: number;
@@ -84,7 +84,17 @@ export interface StickyObject extends SceneObject {
   cornerRadius: number; // border radius (default 8)
 }
 
-export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject | StickyObject;
+export interface MarkdownObject extends SceneObject {
+  type: 'markdown';
+  content: string;        // raw markdown — single source of truth
+  bgColor: string;        // card background, default '#232336'
+  textColor: string;      // body text color, default '#e0e0e0'
+  accentColor: string;    // header bar tint + blockquote accent, default '#7950f2'
+  padding: number;        // inner content padding, default 16
+  cornerRadius: number;   // border radius, default 10
+}
+
+export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject | StickyObject | MarkdownObject;
 
 export interface SceneData {
   v: 2;
