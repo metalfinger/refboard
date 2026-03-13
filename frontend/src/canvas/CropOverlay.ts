@@ -10,6 +10,7 @@ import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { ImageObject, CropRect } from './scene-format';
+import { getImageViewRectWorldCorners, imageViewPointToWorld, worldToImageViewPoint } from './imageTransforms';
 
 const HANDLE_SIZE = 8;
 const HANDLE_FILL = 0xffffff;
@@ -19,15 +20,17 @@ const DIM_ALPHA = 0.6;
 const MIN_CROP = 0.05; // minimum 5% of image in each dimension
 
 type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
+type DragMode = HandleId | 'move';
 
 export class CropOverlay extends Container {
   private _item: SceneItem | null = null;
   private _viewport: Viewport;
   private _dim: Graphics;
+  private _cropHitArea: Graphics;
   private _border: Graphics;
   private _handles = new Map<HandleId, Graphics>();
   private _crop: CropRect = { x: 0, y: 0, w: 1, h: 1 };
-  private _drag: { handleId: HandleId; startCrop: CropRect } | null = null;
+  private _drag: { mode: DragMode; startCrop: CropRect; startPoint: { x: number; y: number } } | null = null;
   private _onConfirm: ((item: SceneItem, crop: CropRect) => void) | null = null;
   private _onCancel: (() => void) | null = null;
   private _keyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -46,6 +49,12 @@ export class CropOverlay extends Container {
     this._dim = new Graphics();
     this._dim.eventMode = 'none';
     this.addChild(this._dim);
+
+    this._cropHitArea = new Graphics();
+    this._cropHitArea.eventMode = 'static';
+    this._cropHitArea.cursor = 'move';
+    this._cropHitArea.on('pointerdown', (e: FederatedPointerEvent) => this._onDown(e, 'move'));
+    this.addChild(this._cropHitArea);
 
     // Crop border
     this._border = new Graphics();
@@ -130,69 +139,59 @@ export class CropOverlay extends Container {
 
   private _draw(): void {
     if (!this._item) return;
-    const data = this._item.data;
+    const data = this._item.data as ImageObject;
     const zoom = this._viewport.scale.x;
     const viewCrop = this._getViewCrop();
-
-    // Image world rect
-    const ix = data.x;
-    const iy = data.y;
-    const iw = data.w * data.sx;
-    const ih = data.h * data.sy;
-
-    // Crop rect in world space
-    const cx = ix + viewCrop.x * iw;
-    const cy = iy + viewCrop.y * ih;
-    const cw = viewCrop.w * iw;
-    const ch = viewCrop.h * ih;
+    const fullCorners = getImageViewRectWorldCorners(data, { x: 0, y: 0, w: 1, h: 1 });
+    const cropCorners = getImageViewRectWorldCorners(data, viewCrop);
 
     // Dim: draw 4 rectangles around the crop area
     this._dim.clear();
-    if (cy > iy) {
-      this._dim.rect(ix, iy, iw, cy - iy);
-      this._dim.fill({ color: 0x000000, alpha: DIM_ALPHA });
-    }
-    const cropBottom = cy + ch;
-    if (cropBottom < iy + ih) {
-      this._dim.rect(ix, cropBottom, iw, iy + ih - cropBottom);
-      this._dim.fill({ color: 0x000000, alpha: DIM_ALPHA });
-    }
-    if (cx > ix) {
-      this._dim.rect(ix, cy, cx - ix, ch);
-      this._dim.fill({ color: 0x000000, alpha: DIM_ALPHA });
-    }
-    const cropRight = cx + cw;
-    if (cropRight < ix + iw) {
-      this._dim.rect(cropRight, cy, ix + iw - cropRight, ch);
+    const dimQuads = [
+      [fullCorners[0], fullCorners[1], cropCorners[1], cropCorners[0]],
+      [fullCorners[1], fullCorners[2], cropCorners[2], cropCorners[1]],
+      [fullCorners[2], fullCorners[3], cropCorners[3], cropCorners[2]],
+      [fullCorners[3], fullCorners[0], cropCorners[0], cropCorners[3]],
+    ];
+    for (const quad of dimQuads) {
+      this._drawPolygon(this._dim, quad);
       this._dim.fill({ color: 0x000000, alpha: DIM_ALPHA });
     }
 
     // Border around crop area
+    this._cropHitArea.clear();
+    this._drawPolygon(this._cropHitArea, cropCorners);
+    this._cropHitArea.fill({ color: 0xffffff, alpha: 0.001 });
+
     this._border.clear();
-    this._border.rect(cx, cy, cw, ch);
+    this._drawPolygon(this._border, cropCorners);
     this._border.stroke({ color: BORDER_COLOR, width: 1.5 / zoom });
 
     // Rule of thirds lines
-    const thirdW = cw / 3;
-    const thirdH = ch / 3;
     for (let i = 1; i <= 2; i++) {
-      this._border.moveTo(cx + thirdW * i, cy);
-      this._border.lineTo(cx + thirdW * i, cy + ch);
-      this._border.moveTo(cx, cy + thirdH * i);
-      this._border.lineTo(cx + cw, cy + thirdH * i);
+      const verticalX = viewCrop.x + (viewCrop.w * i) / 3;
+      const horizontalY = viewCrop.y + (viewCrop.h * i) / 3;
+      const vStart = imageViewPointToWorld(data, verticalX, viewCrop.y);
+      const vEnd = imageViewPointToWorld(data, verticalX, viewCrop.y + viewCrop.h);
+      const hStart = imageViewPointToWorld(data, viewCrop.x, horizontalY);
+      const hEnd = imageViewPointToWorld(data, viewCrop.x + viewCrop.w, horizontalY);
+      this._border.moveTo(vStart.x, vStart.y);
+      this._border.lineTo(vEnd.x, vEnd.y);
+      this._border.moveTo(hStart.x, hStart.y);
+      this._border.lineTo(hEnd.x, hEnd.y);
     }
     this._border.stroke({ color: 0xffffff, width: 0.5 / zoom, alpha: 0.3 });
 
     // Position handles
     const positions: Record<HandleId, { px: number; py: number }> = {
-      tl: { px: cx, py: cy },
-      tc: { px: cx + cw / 2, py: cy },
-      tr: { px: cx + cw, py: cy },
-      ml: { px: cx, py: cy + ch / 2 },
-      mr: { px: cx + cw, py: cy + ch / 2 },
-      bl: { px: cx, py: cy + ch },
-      bc: { px: cx + cw / 2, py: cy + ch },
-      br: { px: cx + cw, py: cy + ch },
+      tl: { px: cropCorners[0].x, py: cropCorners[0].y },
+      tc: this._toHandlePosition(imageViewPointToWorld(data, viewCrop.x + viewCrop.w / 2, viewCrop.y)),
+      tr: { px: cropCorners[1].x, py: cropCorners[1].y },
+      ml: this._toHandlePosition(imageViewPointToWorld(data, viewCrop.x, viewCrop.y + viewCrop.h / 2)),
+      mr: this._toHandlePosition(imageViewPointToWorld(data, viewCrop.x + viewCrop.w, viewCrop.y + viewCrop.h / 2)),
+      bl: { px: cropCorners[3].x, py: cropCorners[3].y },
+      bc: this._toHandlePosition(imageViewPointToWorld(data, viewCrop.x + viewCrop.w / 2, viewCrop.y + viewCrop.h)),
+      br: { px: cropCorners[2].x, py: cropCorners[2].y },
     };
 
     const s = HANDLE_SIZE / zoom;
@@ -209,9 +208,17 @@ export class CropOverlay extends Container {
 
   // -- Handle drag (single handler, registered dynamically) --
 
-  private _onDown(e: FederatedPointerEvent, id: HandleId): void {
+  private _onDown(e: FederatedPointerEvent, mode: DragMode): void {
+    if (!this._item) return;
     e.stopPropagation();
-    this._drag = { handleId: id, startCrop: this._getViewCrop() };
+    const data = this._item.data as ImageObject;
+    const world = this._viewport.toWorld(e.global.x, e.global.y);
+    const viewPoint = worldToImageViewPoint(data, world.x, world.y);
+    this._drag = {
+      mode,
+      startCrop: this._getViewCrop(),
+      startPoint: viewPoint,
+    };
 
     // Register move/up on the stage (single handler, not per-handle)
     this._removeDragListeners();
@@ -241,18 +248,24 @@ export class CropOverlay extends Container {
   private _onMove(e: FederatedPointerEvent): void {
     if (!this._drag || !this._item) return;
 
-    const data = this._item.data;
-    const iw = data.w * data.sx;
-    const ih = data.h * data.sy;
+    const data = this._item.data as ImageObject;
     const world = this._viewport.toWorld(e.global.x, e.global.y);
+    const viewPoint = worldToImageViewPoint(data, world.x, world.y);
+    const nx = viewPoint.x;
+    const ny = viewPoint.y;
 
-    const nx = (world.x - data.x) / iw;
-    const ny = (world.y - data.y) / ih;
-
-    const { handleId, startCrop: sc } = this._drag;
+    const { mode, startCrop: sc, startPoint } = this._drag;
     const crop = { ...sc };
 
-    switch (handleId) {
+    if (mode === 'move') {
+      crop.x = Math.max(0, Math.min(1 - sc.w, sc.x + (nx - startPoint.x)));
+      crop.y = Math.max(0, Math.min(1 - sc.h, sc.y + (ny - startPoint.y)));
+      this._setViewCrop(crop);
+      this._draw();
+      return;
+    }
+
+    switch (mode) {
       case 'tl':
         crop.x = Math.max(0, Math.min(nx, sc.x + sc.w - MIN_CROP));
         crop.y = Math.max(0, Math.min(ny, sc.y + sc.h - MIN_CROP));
@@ -321,5 +334,18 @@ export class CropOverlay extends Container {
       w: viewCrop.w,
       h: viewCrop.h,
     };
+  }
+
+  private _drawPolygon(graphics: Graphics, points: Array<{ x: number; y: number }>): void {
+    if (points.length === 0) return;
+    graphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      graphics.lineTo(points[i].x, points[i].y);
+    }
+    graphics.closePath();
+  }
+
+  private _toHandlePosition(point: { x: number; y: number }): { px: number; py: number } {
+    return { px: point.x, py: point.y };
   }
 }

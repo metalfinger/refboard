@@ -101,6 +101,20 @@ export function transformPoint(point: Point2D, transform: Pick<RectTransformData
   };
 }
 
+export function inverseTransformPoint(point: Point2D, transform: Pick<RectTransformData, 'x' | 'y' | 'sx' | 'sy' | 'angle'>): Point2D {
+  const rad = (transform.angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = point.x - transform.x;
+  const dy = point.y - transform.y;
+  const rotatedX = dx * cos + dy * sin;
+  const rotatedY = -dx * sin + dy * cos;
+  return {
+    x: transform.sx === 0 ? 0 : rotatedX / transform.sx,
+    y: transform.sy === 0 ? 0 : rotatedY / transform.sy,
+  };
+}
+
 export function transformPoints(points: Point2D[], transform: Pick<RectTransformData, 'x' | 'y' | 'sx' | 'sy' | 'angle'>): Point2D[] {
   return points.map((point) => transformPoint(point, transform));
 }
@@ -131,6 +145,67 @@ export function getBoundsFromPoints(points: Point2D[]): { x: number; y: number; 
 export function offsetImageDataPosition(data: Pick<ImageObject, 'x' | 'y'>, dx: number, dy: number): void {
   data.x += dx;
   data.y += dy;
+}
+
+function getImageLocalPointFromViewNormalized(
+  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY'>,
+  viewX: number,
+  viewY: number,
+): Point2D {
+  return {
+    x: (data.flipX ? 1 - viewX : viewX) * data.w,
+    y: (data.flipY ? 1 - viewY : viewY) * data.h,
+  };
+}
+
+function getImageViewNormalizedFromLocal(
+  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY'>,
+  localX: number,
+  localY: number,
+): Point2D {
+  const normX = data.w === 0 ? 0 : localX / data.w;
+  const normY = data.h === 0 ? 0 : localY / data.h;
+  return {
+    x: data.flipX ? 1 - normX : normX,
+    y: data.flipY ? 1 - normY : normY,
+  };
+}
+
+export function imageViewPointToWorld(
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  viewX: number,
+  viewY: number,
+): Point2D {
+  const local = getImageLocalPointFromViewNormalized(data, viewX, viewY);
+  return transformLocalPoint(data, local.x, local.y);
+}
+
+export function worldToImageViewPoint(
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  worldX: number,
+  worldY: number,
+): Point2D {
+  const t = getImageDisplayTransform(data);
+  const local = inverseTransformPoint({ x: worldX, y: worldY }, {
+    x: t.x,
+    y: t.y,
+    sx: t.scaleX,
+    sy: t.scaleY,
+    angle: t.angle,
+  });
+  return getImageViewNormalizedFromLocal(data, local.x, local.y);
+}
+
+export function getImageViewRectWorldCorners(
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY'>,
+  rect: CropRect,
+): Point2D[] {
+  return [
+    imageViewPointToWorld(data, rect.x, rect.y),
+    imageViewPointToWorld(data, rect.x + rect.w, rect.y),
+    imageViewPointToWorld(data, rect.x + rect.w, rect.y + rect.h),
+    imageViewPointToWorld(data, rect.x, rect.y + rect.h),
+  ];
 }
 
 export function getImageTransformedCorners(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): Point2D[] {

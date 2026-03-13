@@ -501,13 +501,8 @@ export default function Editor({ isPublicView }: EditorProps) {
       if (showInvalidToast) showToast('Select a single image to crop');
       return;
     }
-    const image = items[0];
-    if (Math.abs(image.data.angle % 360) > 0.001) {
-      showToast('Crop for rotated images is not supported yet');
-      return;
-    }
     selection.setEnabled(false);
-    cropOverlayRef.current.start(image);
+    cropOverlayRef.current.start(items[0]);
   }, [showToast, cropOverlayRef]);
 
   // Keyboard shortcuts
