@@ -132,6 +132,8 @@ export function setupSync(
       sx: data.sx,
       sy: data.sy,
       angle: data.angle,
+      flipX: data.flipX,
+      flipY: data.flipY,
     }));
     socket.emit('object:transform', { boardId, transforms });
     moveTimer = setTimeout(() => { moveTimer = null; }, MOVE_THROTTLE);
@@ -225,6 +227,8 @@ export function setupSync(
     item.data.sx = t.sx;
     item.data.sy = t.sy;
     item.data.angle = t.angle;
+    if (typeof t.flipX === 'boolean') item.data.flipX = t.flipX;
+    if (typeof t.flipY === 'boolean') item.data.flipY = t.flipY;
     const obj = item.displayObject;
     if (item.type === 'image') {
       applyImageDisplayTransform(obj, item.data as ImageObject);

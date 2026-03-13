@@ -1,6 +1,7 @@
-import { Container, Sprite, Texture, Graphics, Rectangle } from "pixi.js";
+import { Container, Sprite, Texture, Graphics } from "pixi.js";
 import { TextureManager } from "../TextureManager";
 import type { CropRect } from "../scene-format";
+import { getImageSourceRect, getImageVisibleLocalRect } from "../imageTransforms";
 
 /**
  * A Container holding a shadow graphic + sprite with lazy texture loading.
@@ -61,36 +62,37 @@ export class ImageSprite extends Container {
   get naturalWidth(): number { return this._naturalWidth; }
   get naturalHeight(): number { return this._naturalHeight; }
 
-  private _getVisibleRect(crop: CropRect | undefined): Rectangle {
-    if (!crop) {
-      return new Rectangle(0, 0, this._naturalWidth, this._naturalHeight);
-    }
-    return new Rectangle(
-      crop.x * this._naturalWidth,
-      crop.y * this._naturalHeight,
-      crop.w * this._naturalWidth,
-      crop.h * this._naturalHeight,
-    );
-  }
-
   private _drawShadow(cfg: { offsetX: number; offsetY: number; alpha: number }): void {
-    const rect = this._getVisibleRect(this._crop);
+    const rect = getImageVisibleLocalRect({
+      w: this._naturalWidth,
+      h: this._naturalHeight,
+      crop: this._crop,
+    });
     this._shadow.clear();
-    this._shadow.rect(cfg.offsetX, cfg.offsetY, rect.width, rect.height);
+    this._shadow.rect(cfg.offsetX, cfg.offsetY, rect.w, rect.h);
     this._shadow.fill({ color: 0x000000, alpha: cfg.alpha });
   }
 
   private _syncPresentation(): void {
-    const rect = this._getVisibleRect(this._crop);
+    const sourceRect = getImageSourceRect({
+      w: this._naturalWidth,
+      h: this._naturalHeight,
+      crop: this._crop,
+    });
+    const visibleRect = getImageVisibleLocalRect({
+      w: this._naturalWidth,
+      h: this._naturalHeight,
+      crop: this._crop,
+    });
     const needsClip = !!this._crop;
 
     if (this.placeholder) {
       this.placeholder.clear();
-      this.placeholder.rect(0, 0, rect.width, rect.height).fill(0x2a2a2a);
+      this.placeholder.rect(0, 0, visibleRect.w, visibleRect.h).fill(0x2a2a2a);
     }
 
     if (this._sprite) {
-      this._sprite.position.set(-rect.x, -rect.y);
+      this._sprite.position.set(-sourceRect.x, -sourceRect.y);
       this._sprite.width = this._naturalWidth;
       this._sprite.height = this._naturalHeight;
     }
@@ -101,7 +103,7 @@ export class ImageSprite extends Container {
         this.addChild(this._cropMask);
       }
       this._cropMask.clear();
-      this._cropMask.rect(0, 0, rect.width, rect.height);
+      this._cropMask.rect(0, 0, visibleRect.w, visibleRect.h);
       this._cropMask.fill(0xffffff);
       if (this._sprite) this._sprite.mask = this._cropMask;
     } else if (this._cropMask) {

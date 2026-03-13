@@ -38,7 +38,6 @@ import type {
   GroupObject,
   StickyObject,
   MarkdownObject,
-  SceneObject,
 } from './scene-format';
 
 // ---------------------------------------------------------------------------
@@ -575,8 +574,9 @@ export class SceneManager {
     const startScaleY = obj.scale.y;
     const dirX = startScaleX < 0 ? -1 : 1;
     const dirY = startScaleY < 0 ? -1 : 1;
-    const halfW = item.data.w * Math.abs(item.data.sx) / 2;
-    const halfH = item.data.h * Math.abs(item.data.sy) / 2;
+    const bounds = getItemWorldBounds(item);
+    const halfW = bounds.w / 2;
+    const halfH = bounds.h / 2;
 
     const scaleSpring = new Spring(1.0, 0.8, PRESETS.snappy);
     scaleSpring.onUpdate = (v) => {
@@ -714,13 +714,11 @@ export class SceneManager {
     // Calculate combined bounds center
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const child of children) {
-      const d = child.data;
-      const w = ('w' in d ? (d as SceneObject).w : 0) * d.sx;
-      const h = ('h' in d ? (d as SceneObject).h : 0) * d.sy;
-      minX = Math.min(minX, d.x);
-      minY = Math.min(minY, d.y);
-      maxX = Math.max(maxX, d.x + w);
-      maxY = Math.max(maxY, d.y + h);
+      const b = getItemWorldBounds(child);
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.w);
+      maxY = Math.max(maxY, b.y + b.h);
     }
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
@@ -768,8 +766,9 @@ export class SceneManager {
 
     for (const child of children) {
       const obj = child.displayObject;
-      const dx = cx - (child.data.x + ((child.data as SceneObject).w * child.data.sx) / 2);
-      const dy = cy - (child.data.y + ((child.data as SceneObject).h * child.data.sy) / 2);
+      const childBounds = getItemWorldBounds(child);
+      const dx = cx - (childBounds.x + childBounds.w / 2);
+      const dy = cy - (childBounds.y + childBounds.h / 2);
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < 1) continue; // already at center
@@ -852,8 +851,9 @@ export class SceneManager {
       freed.push(child);
 
       // Animate outward from group center
-      const childCX = worldX + ((child.data as SceneObject).w * child.data.sx) / 2;
-      const childCY = worldY + ((child.data as SceneObject).h * child.data.sy) / 2;
+      const childBounds = getItemWorldBounds(child);
+      const childCX = childBounds.x + childBounds.w / 2;
+      const childCY = childBounds.y + childBounds.h / 2;
       const dx = childCX - gcx;
       const dy = childCY - gcy;
       const dist = Math.sqrt(dx * dx + dy * dy);

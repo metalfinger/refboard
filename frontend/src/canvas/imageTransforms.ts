@@ -24,6 +24,36 @@ export interface RectTransformData {
   angle: number;
 }
 
+export interface ImageSourceRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface ImageVisibleFrame {
+  sourceRect: ImageSourceRect;
+  localRect: ImageLocalRect;
+  display: ImageDisplayTransform;
+}
+
+export interface ImageLocalRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * The canonical runtime image model:
+ * - `sourceRect` is the sampled rectangle inside the original asset
+ * - `localRect` is the visible rendered frame, always rebased to local 0,0
+ * - `display` is the final Pixi transform that places that visible frame in world space
+ *
+ * All image consumers should derive geometry from this model rather than re-deriving
+ * crop, flip, and visible bounds independently.
+ */
+
 /**
  * Normalize legacy negative image scales into positive scale magnitude plus flip flags.
  * This keeps image scene data canonical while preserving visual orientation.
@@ -39,6 +69,29 @@ export function normalizeImageTransformData(data: ImageObject): void {
   }
 }
 
+export function getImageSourceRect(data: Pick<ImageObject, 'w' | 'h' | 'crop'>): ImageSourceRect {
+  const crop = data.crop;
+  if (!crop) {
+    return { x: 0, y: 0, w: data.w, h: data.h };
+  }
+  return {
+    x: crop.x * data.w,
+    y: crop.y * data.h,
+    w: crop.w * data.w,
+    h: crop.h * data.h,
+  };
+}
+
+export function getImageVisibleLocalRect(data: Pick<ImageObject, 'w' | 'h' | 'crop'>): ImageLocalRect {
+  const sourceRect = getImageSourceRect(data);
+  return {
+    x: 0,
+    y: 0,
+    w: sourceRect.w,
+    h: sourceRect.h,
+  };
+}
+
 /**
  * Compute the actual Pixi display transform for an image from canonical scene data.
  * Images render from a top-left local origin, so flip uses a compensating position
@@ -47,29 +100,23 @@ export function normalizeImageTransformData(data: ImageObject): void {
 export function getImageDisplayTransform(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): ImageDisplayTransform {
   const sx = Math.abs(data.sx);
   const sy = Math.abs(data.sy);
-  const visibleW = data.crop ? data.crop.w * data.w : data.w;
-  const visibleH = data.crop ? data.crop.h * data.h : data.h;
+  const visibleRect = getImageVisibleLocalRect(data);
   const scaleX = sx * (data.flipX ? -1 : 1);
   const scaleY = sy * (data.flipY ? -1 : 1);
   return {
-    x: data.x + (data.flipX ? visibleW * sx : 0),
-    y: data.y + (data.flipY ? visibleH * sy : 0),
+    x: data.x + (data.flipX ? visibleRect.w * sx : 0),
+    y: data.y + (data.flipY ? visibleRect.h * sy : 0),
     scaleX,
     scaleY,
     angle: data.angle,
   };
 }
 
-function getVisibleLocalRect(data: Pick<ImageObject, 'w' | 'h' | 'crop'>): { x: number; y: number; w: number; h: number } {
-  const crop = data.crop;
-  if (!crop) {
-    return { x: 0, y: 0, w: data.w, h: data.h };
-  }
+export function getImageVisibleFrame(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): ImageVisibleFrame {
   return {
-    x: 0,
-    y: 0,
-    w: crop.w * data.w,
-    h: crop.h * data.h,
+    sourceRect: getImageSourceRect(data),
+    localRect: getImageVisibleLocalRect(data),
+    display: getImageDisplayTransform(data),
   };
 }
 
@@ -150,23 +197,29 @@ export function offsetImageDataPosition(data: Pick<ImageObject, 'x' | 'y'>, dx: 
 }
 
 function getImageLocalPointFromViewNormalized(
-  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY'>,
+  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY' | 'crop'>,
   viewX: number,
   viewY: number,
 ): Point2D {
+  const sourceRect = getImageSourceRect(data);
+  const sourceX = viewX * data.w;
+  const sourceY = viewY * data.h;
   return {
-    x: (data.flipX ? 1 - viewX : viewX) * data.w,
-    y: (data.flipY ? 1 - viewY : viewY) * data.h,
+    x: data.flipX ? (sourceRect.x + sourceRect.w) - sourceX : sourceX - sourceRect.x,
+    y: data.flipY ? (sourceRect.y + sourceRect.h) - sourceY : sourceY - sourceRect.y,
   };
 }
 
 function getImageViewNormalizedFromLocal(
-  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY'>,
+  data: Pick<ImageObject, 'w' | 'h' | 'flipX' | 'flipY' | 'crop'>,
   localX: number,
   localY: number,
 ): Point2D {
-  const normX = data.w === 0 ? 0 : localX / data.w;
-  const normY = data.h === 0 ? 0 : localY / data.h;
+  const sourceRect = getImageSourceRect(data);
+  const sourceX = data.flipX ? sourceRect.x + sourceRect.w - localX : sourceRect.x + localX;
+  const sourceY = data.flipY ? sourceRect.y + sourceRect.h - localY : sourceRect.y + localY;
+  const normX = data.w === 0 ? 0 : sourceX / data.w;
+  const normY = data.h === 0 ? 0 : sourceY / data.h;
   return {
     x: data.flipX ? 1 - normX : normX,
     y: data.flipY ? 1 - normY : normY,
@@ -210,14 +263,20 @@ export function getImageViewRectWorldCorners(
   ];
 }
 
-export function getImageTransformedCorners(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): Point2D[] {
-  const rect = getVisibleLocalRect(data);
+export function getImageVisibleLocalCorners(
+  data: Pick<ImageObject, 'w' | 'h' | 'crop'>,
+): Point2D[] {
+  const rect = getImageVisibleLocalRect(data);
   return [
-    transformLocalPoint(data, rect.x, rect.y),
-    transformLocalPoint(data, rect.x + rect.w, rect.y),
-    transformLocalPoint(data, rect.x + rect.w, rect.y + rect.h),
-    transformLocalPoint(data, rect.x, rect.y + rect.h),
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
   ];
+}
+
+export function getImageTransformedCorners(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): Point2D[] {
+  return getImageVisibleLocalCorners(data).map((point) => transformLocalPoint(data, point.x, point.y));
 }
 
 export function getImageWorldBounds(data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>): { x: number; y: number; w: number; h: number } {
