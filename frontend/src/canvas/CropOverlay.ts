@@ -6,13 +6,14 @@
  * All crop values are normalized 0-1 relative to the image's natural dimensions.
  */
 
-import { Container, Graphics, FederatedPointerEvent } from 'pixi.js';
+import { Container, Graphics, FederatedPointerEvent, Polygon, Rectangle } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { ImageObject, CropRect } from './scene-format';
 import { getImageViewRectWorldCorners, imageViewPointToWorld, worldToImageViewPoint } from './imageTransforms';
 
 const HANDLE_SIZE = 8;
+const HANDLE_HIT_SIZE = 22;
 const HANDLE_FILL = 0xffffff;
 const HANDLE_STROKE = 0x4a90d9;
 const BORDER_COLOR = 0x4a90d9;
@@ -171,6 +172,7 @@ export class CropOverlay extends Container {
     this._cropHitArea.clear();
     this._drawPolygon(this._cropHitArea, cropCorners);
     this._cropHitArea.fill({ color: 0xffffff, alpha: 0.001 });
+    this._cropHitArea.hitArea = new Polygon(cropCorners.flatMap((point) => [point.x, point.y]));
 
     this._border.clear();
     this._drawPolygon(this._border, cropCorners);
@@ -205,12 +207,15 @@ export class CropOverlay extends Container {
 
     const s = HANDLE_SIZE / zoom;
     const half = s / 2;
+    const hitSize = HANDLE_HIT_SIZE / zoom;
+    const hitHalf = hitSize / 2;
     for (const [id, handle] of this._handles) {
       const pos = positions[id];
       handle.clear();
       handle.rect(-half, -half, s, s);
       handle.fill(HANDLE_FILL);
       handle.stroke({ color: HANDLE_STROKE, width: 1 / zoom });
+      handle.hitArea = new Rectangle(-hitHalf, -hitHalf, hitSize, hitSize);
       handle.position.set(pos.px, pos.py);
     }
   }
@@ -367,8 +372,8 @@ export class CropOverlay extends Container {
     const rect = domElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
     return {
-      x: (clientX - rect.left) * (domElement.width / rect.width),
-      y: (clientY - rect.top) * (domElement.height / rect.height),
+      x: clientX - rect.left,
+      y: clientY - rect.top,
     };
   }
 }
