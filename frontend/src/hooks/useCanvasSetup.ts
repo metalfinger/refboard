@@ -16,6 +16,7 @@ import { CropOverlay } from '../canvas/CropOverlay';
 import { MarkdownOverlay } from '../canvas/MarkdownOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
+import { getItemWorldBounds } from '../canvas/SceneManager';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -150,13 +151,14 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         const padding = 80; // screen pixels of padding around the image
         const screenW = viewport.screenWidth;
         const screenH = viewport.screenHeight;
-        const bw = item.data.w * Math.abs(item.data.sx);
-        const bh = item.data.h * Math.abs(item.data.sy);
+        const bounds = getItemWorldBounds(item);
+        const bw = bounds.w;
+        const bh = bounds.h;
         const scaleX = (screenW - padding * 2) / bw;
         const scaleY = (screenH - padding * 2) / bh;
         const targetScale = Math.min(scaleX, scaleY, 3); // cap at 3x
-        const cx = item.data.x + bw / 2;
-        const cy = item.data.y + bh / 2;
+        const cx = bounds.x + bw / 2;
+        const cy = bounds.y + bh / 2;
         viewport.animate({
           time: 300,
           position: { x: cx, y: cy },
@@ -481,7 +483,9 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         if (item.displayObject instanceof ImageSprite) {
           item.displayObject.applyCrop(imgData.crop);
         }
+        scene.updateSpatialEntry(item);
         selection.setEnabled(true);
+        selection.transformBox.update([item]);
         onCanvasChange([item.id]);
       };
 

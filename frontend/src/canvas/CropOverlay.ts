@@ -11,6 +11,7 @@ import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { ImageObject, CropRect } from './scene-format';
 import { getImageViewRectWorldCorners, imageViewPointToWorld, worldToImageViewPoint } from './imageTransforms';
+import { ImageSprite } from './sprites/ImageSprite';
 
 const HANDLE_SIZE = 8;
 const HANDLE_HIT_SIZE = 22;
@@ -35,6 +36,7 @@ export class CropOverlay extends Container {
   private _border: Graphics;
   private _handles = new Map<HandleId, Graphics>();
   private _crop: CropRect = { x: 0, y: 0, w: 1, h: 1 };
+  private _originalCrop: CropRect | undefined;
   private _drag: { mode: DragMode; startCrop: CropRect; startPoint: { x: number; y: number } } | null = null;
   private _onConfirm: ((item: SceneItem, crop: CropRect) => void) | null = null;
   private _onCancel: (() => void) | null = null;
@@ -91,7 +93,11 @@ export class CropOverlay extends Container {
     if (item.type !== 'image') return;
     this._item = item;
     const imgData = item.data as ImageObject;
+    this._originalCrop = imgData.crop ? { ...imgData.crop } : undefined;
     this._crop = imgData.crop ? { ...imgData.crop } : { x: 0, y: 0, w: 1, h: 1 };
+    if (item.displayObject instanceof ImageSprite) {
+      item.displayObject.applyCrop(undefined);
+    }
     this._viewport.plugins.pause('drag');
     this.visible = true;
     this._onStateChange?.(true);
@@ -121,6 +127,9 @@ export class CropOverlay extends Container {
 
   /** Cancel cropping — restore original state. */
   cancel(): void {
+    if (this._item?.displayObject instanceof ImageSprite) {
+      this._item.displayObject.applyCrop(this._originalCrop);
+    }
     this._cleanup();
     this._onCancel?.();
   }
@@ -132,6 +141,7 @@ export class CropOverlay extends Container {
     this._removeDomDragListeners();
     this._viewport.plugins.resume('drag');
     this._item = null;
+    this._originalCrop = undefined;
     this._drag = null;
     this.visible = false;
     this._onStateChange?.(false);
