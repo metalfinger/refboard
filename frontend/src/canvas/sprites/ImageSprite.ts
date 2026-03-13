@@ -28,6 +28,8 @@ export class ImageSprite extends Container {
   private _cropMask: Graphics | null = null;
   private _naturalWidth: number;
   private _naturalHeight: number;
+  private _crop: CropRect | undefined;
+  private _shadowCfg = SHADOW_REST;
 
   constructor(
     assetKey: string,
@@ -59,22 +61,69 @@ export class ImageSprite extends Container {
   get naturalWidth(): number { return this._naturalWidth; }
   get naturalHeight(): number { return this._naturalHeight; }
 
+  private _getVisibleRect(crop: CropRect | undefined): Rectangle {
+    if (!crop) {
+      return new Rectangle(0, 0, this._naturalWidth, this._naturalHeight);
+    }
+    return new Rectangle(
+      crop.x * this._naturalWidth,
+      crop.y * this._naturalHeight,
+      crop.w * this._naturalWidth,
+      crop.h * this._naturalHeight,
+    );
+  }
+
   private _drawShadow(cfg: { offsetX: number; offsetY: number; alpha: number }): void {
-    const w = this._naturalWidth;
-    const h = this._naturalHeight;
+    const rect = this._getVisibleRect(this._crop);
     this._shadow.clear();
-    this._shadow.rect(cfg.offsetX, cfg.offsetY, w, h);
+    this._shadow.rect(cfg.offsetX, cfg.offsetY, rect.width, rect.height);
     this._shadow.fill({ color: 0x000000, alpha: cfg.alpha });
+  }
+
+  private _syncPresentation(): void {
+    const rect = this._getVisibleRect(this._crop);
+    const needsClip = !!this._crop;
+
+    if (this.placeholder) {
+      this.placeholder.clear();
+      this.placeholder.rect(0, 0, rect.width, rect.height).fill(0x2a2a2a);
+    }
+
+    if (this._sprite) {
+      this._sprite.position.set(-rect.x, -rect.y);
+      this._sprite.width = this._naturalWidth;
+      this._sprite.height = this._naturalHeight;
+    }
+
+    if (needsClip) {
+      if (!this._cropMask) {
+        this._cropMask = new Graphics();
+        this.addChild(this._cropMask);
+      }
+      this._cropMask.clear();
+      this._cropMask.rect(0, 0, rect.width, rect.height);
+      this._cropMask.fill(0xffffff);
+      if (this._sprite) this._sprite.mask = this._cropMask;
+    } else if (this._cropMask) {
+      if (this._sprite) this._sprite.mask = null;
+      this.removeChild(this._cropMask);
+      this._cropMask.destroy();
+      this._cropMask = null;
+    }
+
+    this._drawShadow(this._shadowCfg);
   }
 
   /** Expand shadow for drag-lift effect. */
   liftShadow(): void {
-    this._drawShadow(SHADOW_LIFT);
+    this._shadowCfg = SHADOW_LIFT;
+    this._drawShadow(this._shadowCfg);
   }
 
   /** Restore shadow to resting state. */
   dropShadow(): void {
-    this._drawShadow(SHADOW_REST);
+    this._shadowCfg = SHADOW_REST;
+    this._drawShadow(this._shadowCfg);
   }
 
   /** The underlying sprite's texture (used by clipboard for resolution detection). */
@@ -87,41 +136,8 @@ export class ImageSprite extends Container {
    * Pass null/undefined to remove crop.
    */
   applyCrop(crop: CropRect | undefined): void {
-    if (!crop) {
-      // Remove crop
-      if (this._cropMask) {
-        if (this._sprite) this._sprite.mask = null;
-        this.removeChild(this._cropMask);
-        this._cropMask.destroy();
-        this._cropMask = null;
-      }
-      // Restore shadow to full size
-      this._drawShadow(SHADOW_REST);
-      return;
-    }
-
-    const px = crop.x * this._naturalWidth;
-    const py = crop.y * this._naturalHeight;
-    const pw = crop.w * this._naturalWidth;
-    const ph = crop.h * this._naturalHeight;
-
-    if (!this._cropMask) {
-      this._cropMask = new Graphics();
-      this.addChild(this._cropMask);
-    }
-
-    this._cropMask.clear();
-    this._cropMask.rect(px, py, pw, ph);
-    this._cropMask.fill(0xffffff);
-
-    if (this._sprite) {
-      this._sprite.mask = this._cropMask;
-    }
-
-    // Update shadow to match cropped area
-    this._shadow.clear();
-    this._shadow.rect(px + SHADOW_REST.offsetX, py + SHADOW_REST.offsetY, pw, ph);
-    this._shadow.fill({ color: 0x000000, alpha: SHADOW_REST.alpha });
+    this._crop = crop;
+    this._syncPresentation();
   }
 
   /** Load the full-res texture. Called by viewport culling when near viewport. */
@@ -142,17 +158,14 @@ export class ImageSprite extends Container {
       this.addChild(sprite);
       this.loaded = true;
 
-      // Apply crop mask if one exists
-      if (this._cropMask) {
-        sprite.mask = this._cropMask;
-      }
-
       // Remove placeholder after successful load
       if (this.placeholder) {
         this.removeChild(this.placeholder);
         this.placeholder.destroy();
         this.placeholder = null;
       }
+
+      this._syncPresentation();
     } catch (err) {
       console.warn(
         `[ImageSprite] Failed to load "${this.assetKey}":`,
@@ -181,9 +194,9 @@ export class ImageSprite extends Container {
     // Restore placeholder
     if (!this.placeholder) {
       const placeholder = new Graphics();
-      placeholder.rect(0, 0, this._naturalWidth, this._naturalHeight).fill(0x2a2a2a);
       this.placeholder = placeholder;
       this.addChild(placeholder);
     }
+    this._syncPresentation();
   }
 }
