@@ -9,18 +9,25 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@blocknote/core": "^0.47.1",
+    "@blocknote/react": "^0.47.1",
     "axios": "^1.7.9",
     "pixi-filters": "^6.1.5",
     "pixi-viewport": "^6.0.3",
     "pixi.js": "^8.17.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.28.0",
-    "socket.io-client": "^4.8.1"
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.1",
+    "turndown": "^7.2.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^6.0.3"
