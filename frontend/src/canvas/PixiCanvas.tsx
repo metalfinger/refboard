@@ -205,8 +205,9 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           const nearbyItems = scene.queryRegion(qx, qy, qw, qh);
 
           for (const item of nearbyItems) {
-            const cx = item.data.x + (item.data.w * Math.abs(item.data.sx)) / 2;
-            const cy = item.data.y + (item.data.h * Math.abs(item.data.sy)) / 2;
+            const itemBounds = getItemWorldBounds(item);
+            const cx = itemBounds.x + itemBounds.w / 2;
+            const cy = itemBounds.y + itemBounds.h / 2;
             const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
 
             if (item.type === 'image' && (item.displayObject instanceof ImageSprite || item.displayObject instanceof AnimatedGifSprite)) {
