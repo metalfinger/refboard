@@ -1,9 +1,10 @@
 /**
- * TransformBox — resize handles around selected scene items.
+ * TransformBox — resize and rotation handles around selected scene items.
  *
  * Shows 8 resize handles (corners + edge midpoints) around the combined
- * bounding rect of selected items. Each handle is draggable and applies
- * scale transforms to the items.
+ * bounding rect of selected items, plus corner rotation grips offset slightly
+ * outward. All interactions derive from the same visible-bounds geometry so
+ * crop/flip/rotate stay aligned.
  */
 
 import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pixi.js';
@@ -22,10 +23,14 @@ import type { ImageObject } from './scene-format';
 const BORDER_COLOR = 0x4a90d9;
 const BORDER_WIDTH = 1.5;
 const HANDLE_SIZE = 8;
+const ROTATE_HANDLE_SIZE = 10;
+const ROTATE_HANDLE_OFFSET = 16;
 const HANDLE_FILL = 0xffffff;
 const HANDLE_STROKE = 0x4a90d9;
+const ROTATE_HANDLE_FILL = 0x4a90d9;
 
 type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
+type RotateHandleId = 'tl' | 'tr' | 'bl' | 'br';
 
 const HANDLE_CURSORS: Record<HandleId, string> = {
   tl: 'nwse-resize',
@@ -43,11 +48,15 @@ const HANDLE_CURSORS: Record<HandleId, string> = {
 // ---------------------------------------------------------------------------
 
 interface DragState {
+  mode: 'resize' | 'rotate';
   handleId: HandleId;
   startX: number;
   startY: number;
   origBounds: { x: number; y: number; w: number; h: number };
   origTransforms: Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number; bounds: { x: number; y: number; w: number; h: number } }>;
+  centerX?: number;
+  centerY?: number;
+  startAngleDeg?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +66,7 @@ interface DragState {
 export class TransformBox extends Container {
   private _border: Graphics;
   private _handles: Map<HandleId, Graphics> = new Map();
+  private _rotateHandles: Map<RotateHandleId, Graphics> = new Map();
   private _items: SceneItem[] = [];
   private _bounds = { x: 0, y: 0, w: 0, h: 0 };
   private _drag: DragState | null = null;
@@ -125,6 +135,22 @@ export class TransformBox extends Container {
       handle.on('pointerupoutside', () => this._onHandleUp());
 
       this._handles.set(id, handle);
+      this.addChild(handle);
+    }
+
+    const rotateIds: RotateHandleId[] = ['tl', 'tr', 'bl', 'br'];
+    for (const id of rotateIds) {
+      const handle = new Graphics();
+      handle.eventMode = 'static';
+      handle.cursor = 'grab';
+      handle.label = `rotate_handle_${id}`;
+
+      handle.on('pointerdown', (e: FederatedPointerEvent) => this._onRotateHandleDown(e, id));
+      handle.on('globalpointermove', (e: FederatedPointerEvent) => this._onHandleMove(e));
+      handle.on('pointerup', () => this._onHandleUp());
+      handle.on('pointerupoutside', () => this._onHandleUp());
+
+      this._rotateHandles.set(id, handle);
       this.addChild(handle);
     }
   }
@@ -202,6 +228,9 @@ export class TransformBox extends Container {
     // Counter-scale handles so they stay the same screen size at any zoom
     const s = HANDLE_SIZE / zoom;
     const half = s / 2;
+    const rotateSize = ROTATE_HANDLE_SIZE / zoom;
+    const rotateHalf = rotateSize / 2;
+    const rotateOffset = ROTATE_HANDLE_OFFSET / zoom;
 
     for (const [id, handle] of this._handles) {
       // No resize handles for sticky-only selections (fixed width, auto height)
@@ -227,6 +256,23 @@ export class TransformBox extends Container {
 
       handle.position.set(pos.px, pos.py);
     }
+
+    const rotatePositions: Record<RotateHandleId, { px: number; py: number }> = {
+      tl: { px: x - rotateOffset, py: y - rotateOffset },
+      tr: { px: x + w + rotateOffset, py: y - rotateOffset },
+      bl: { px: x - rotateOffset, py: y + h + rotateOffset },
+      br: { px: x + w + rotateOffset, py: y + h + rotateOffset },
+    };
+
+    for (const [id, handle] of this._rotateHandles) {
+      handle.visible = true;
+      handle.eventMode = 'static';
+      handle.clear();
+      handle.circle(0, 0, rotateHalf);
+      handle.fill({ color: ROTATE_HANDLE_FILL, alpha: 0.9 });
+      handle.stroke({ color: HANDLE_FILL, width: 1 / zoom });
+      handle.position.set(rotatePositions[id].px, rotatePositions[id].py);
+    }
   }
 
   // -- Handle drag ----------------------------------------------------------
@@ -248,6 +294,7 @@ export class TransformBox extends Container {
     }
 
     this._drag = {
+      mode: 'resize',
       handleId: id,
       startX: e.global.x,
       startY: e.global.y,
@@ -260,12 +307,103 @@ export class TransformBox extends Container {
     // this._snapGuides?.beginSession(itemIds);
   }
 
+  private _onRotateHandleDown(e: FederatedPointerEvent, id: RotateHandleId): void {
+    e.stopPropagation();
+
+    const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number; bounds: { x: number; y: number; w: number; h: number } }>();
+    for (const item of this._items) {
+      origTransforms.set(item.id, {
+        sx: item.data.sx,
+        sy: item.data.sy,
+        angle: item.data.angle,
+        x: item.data.x,
+        y: item.data.y,
+        w: item.data.w,
+        bounds: getItemWorldBounds(item),
+      });
+    }
+
+    const centerX = this._bounds.x + this._bounds.w / 2;
+    const centerY = this._bounds.y + this._bounds.h / 2;
+    const world = this._viewport!.toWorld(e.global.x, e.global.y);
+    const startAngleDeg = Math.atan2(world.y - centerY, world.x - centerX) * (180 / Math.PI);
+
+    this._drag = {
+      mode: 'rotate',
+      handleId: id,
+      startX: e.global.x,
+      startY: e.global.y,
+      origBounds: { ...this._bounds },
+      origTransforms,
+      centerX,
+      centerY,
+      startAngleDeg,
+    };
+  }
+
   private _onHandleMove(e: FederatedPointerEvent): void {
     if (!this._drag) return;
 
     // Convert mouse position to world space
     const world = this._viewport!.toWorld(e.global.x, e.global.y);
-    const { handleId, origBounds: ob, origTransforms } = this._drag;
+    const { mode, handleId, origBounds: ob, origTransforms } = this._drag;
+
+    if (mode === 'rotate') {
+      const centerX = this._drag.centerX ?? (ob.x + ob.w / 2);
+      const centerY = this._drag.centerY ?? (ob.y + ob.h / 2);
+      const startAngleDeg = this._drag.startAngleDeg ?? 0;
+      let currentAngleDeg = Math.atan2(world.y - centerY, world.x - centerX) * (180 / Math.PI);
+      let deltaDeg = currentAngleDeg - startAngleDeg;
+      if (e.shiftKey) deltaDeg = Math.round(deltaDeg / 15) * 15;
+
+      const rad = (deltaDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+
+      for (const item of this._items) {
+        const orig = origTransforms.get(item.id);
+        if (!orig) continue;
+
+        const origBounds = orig.bounds;
+        const itemCenterX = origBounds.x + origBounds.w / 2;
+        const itemCenterY = origBounds.y + origBounds.h / 2;
+        const dx = itemCenterX - centerX;
+        const dy = itemCenterY - centerY;
+        const nextCenterX = centerX + dx * cos - dy * sin;
+        const nextCenterY = centerY + dx * sin + dy * cos;
+
+        item.data.x = orig.x;
+        item.data.y = orig.y;
+        item.data.sx = orig.sx;
+        item.data.sy = orig.sy;
+        item.data.angle = ((orig.angle + deltaDeg) % 360 + 360) % 360;
+
+        if (item.type === 'image') {
+          applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+        } else {
+          item.displayObject.position.set(item.data.x, item.data.y);
+          item.displayObject.scale.set(item.data.sx, item.data.sy);
+          item.displayObject.angle = item.data.angle;
+        }
+
+        const currentBounds = getItemWorldBounds(item);
+        item.data.x += nextCenterX - (currentBounds.x + currentBounds.w / 2);
+        item.data.y += nextCenterY - (currentBounds.y + currentBounds.h / 2);
+
+        if (item.type === 'image') {
+          applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+        } else {
+          item.displayObject.position.set(item.data.x, item.data.y);
+          item.displayObject.scale.set(item.data.sx, item.data.sy);
+          item.displayObject.angle = item.data.angle;
+        }
+
+        this._onItemTransform?.(item);
+      }
+
+      this.update(this._items);
+      return;
+    }
 
     // Compute scale factors: new size / original size
     // Each handle has a fixed edge — the opposite side stays put
