@@ -467,16 +467,16 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'copy', keys: { key: 'c', ctrl: true },
     category: 'editing', description: 'Copy',
-    handler: (ctx) => {
+    handler: async (ctx) => {
       const selected = ctx.selection.getSelectedItems();
       if (selected.length > 0) {
         // Include group children in clipboard for proper paste
         ctx.clipboardRef.current = _collectGroupChildren(selected, ctx.scene);
         markInternalCopy();
-        ctx.writeCanvasToClipboard(selected);
+        await ctx.writeCanvasToClipboard(selected);
         ctx.showToast('Copied');
       } else {
-        ctx.writeCanvasToClipboard();
+        await ctx.writeCanvasToClipboard();
         ctx.showToast('Copied canvas');
       }
     },
@@ -484,9 +484,9 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'copy-as-image', keys: { key: 'c', ctrl: true, shift: true },
     category: 'editing', description: 'Copy as image to clipboard',
-    handler: (ctx) => {
+    handler: async (ctx) => {
       const selected = ctx.selection.getSelectedItems();
-      ctx.writeCanvasToClipboard(selected.length > 0 ? selected : undefined);
+      await ctx.writeCanvasToClipboard(selected.length > 0 ? selected : undefined);
     },
   },
   {
@@ -512,12 +512,12 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'cut', keys: { key: 'x', ctrl: true },
     category: 'editing', description: 'Cut',
-    handler: (ctx) => {
+    handler: async (ctx) => {
       const selected = ctx.selection.getSelectedItems();
       if (selected.length === 0) return;
       ctx.clipboardRef.current = _collectGroupChildren(selected, ctx.scene);
       markInternalCopy();
-      ctx.writeCanvasToClipboard(selected);
+      await ctx.writeCanvasToClipboard(selected);
       for (const item of selected) {
         ctx.scene.removeItem(item.id, true);
       }

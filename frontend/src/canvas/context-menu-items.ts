@@ -45,9 +45,13 @@ export function buildContextMenuItems(ctx: MenuContext): MenuItem[] {
 
   return [
     // -- Clipboard --
-    { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => {
-      if (hasSel) { ctx.clipboardRef.current = [...selected]; ctx.writeCanvasToClipboard(selected); }
-      else ctx.writeCanvasToClipboard();
+    { label: 'Copy', shortcut: 'Ctrl+C', onClick: async () => {
+      if (hasSel) {
+        ctx.clipboardRef.current = [...selected];
+        await ctx.writeCanvasToClipboard(selected);
+      } else {
+        await ctx.writeCanvasToClipboard();
+      }
     } },
     { label: 'Cut', shortcut: 'Ctrl+X', onClick: () => {
       if (!scene || !hasSel || !selection) return;
