@@ -221,8 +221,8 @@ function getImageViewNormalizedFromLocal(
   const normX = data.w === 0 ? 0 : sourceX / data.w;
   const normY = data.h === 0 ? 0 : sourceY / data.h;
   return {
-    x: data.flipX ? 1 - normX : normX,
-    y: data.flipY ? 1 - normY : normY,
+    x: normX,
+    y: normY,
   };
 }
 
