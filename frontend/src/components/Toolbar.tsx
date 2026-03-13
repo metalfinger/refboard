@@ -32,6 +32,8 @@ interface ToolbarProps {
   onToggleHelp?: () => void;
   onMmImport?: () => void;
   onExport?: () => void;
+  onRefreshPreview?: () => void;
+  previewRefreshing?: boolean;
   onToggleReview?: () => void;
   reviewMode?: boolean;
   boardName?: string;
@@ -165,6 +167,8 @@ export default function Toolbar({
   onToggleHelp,
   onMmImport,
   onExport,
+  onRefreshPreview,
+  previewRefreshing,
   onToggleReview,
   reviewMode,
 }: ToolbarProps) {
@@ -342,6 +346,20 @@ export default function Toolbar({
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
             <path d="M2 9v3h10V9" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M7 2v7M4 6l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </ActionBtn>
+      )}
+
+      {/* Refresh board preview */}
+      {onRefreshPreview && (
+        <ActionBtn
+          onClick={onRefreshPreview}
+          title={previewRefreshing ? 'Refreshing board preview...' : 'Update board preview from current view'}
+          disabled={previewRefreshing}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M11.5 4.5A4.5 4.5 0 104 11" strokeLinecap="round" />
+            <path d="M11.5 1.8v2.7H8.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </ActionBtn>
       )}

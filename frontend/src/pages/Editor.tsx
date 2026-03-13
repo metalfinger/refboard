@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PixiCanvas, { PixiCanvasHandle } from '../canvas/PixiCanvas';
 import { SelectionManager } from '../canvas/SelectionManager';
@@ -45,6 +45,7 @@ import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
 import PasteChoicePopup from '../components/PasteChoicePopup';
 import MarkdownFormatToolbar from '../components/MarkdownFormatToolbar';
+import { saveCanvas } from '../api';
 const LazyMarkdownEditView = React.lazy(() => import('../components/MarkdownEditView'));
 
 // Hooks
@@ -112,6 +113,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showHelp, setShowHelp] = useState(false);
   const [showMmImport, setShowMmImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [refreshingPreview, setRefreshingPreview] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const reviewModeRef = useRef(false);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
@@ -236,15 +238,18 @@ export default function Editor({ isPublicView }: EditorProps) {
     onCanvasChange([textData.id]);
   }, [canvasRef, onCanvasChange]);
 
+  // Memoize pasteOpts so useCanvasSetup's effect doesn't re-run every render
+  const pasteOpts = useMemo(() => ({
+    onTextPaste: handleTextPaste,
+    onShortTextPaste: handleShortTextPaste,
+  }), [handleTextPaste, handleShortTextPaste]);
+
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
   const { annotationStore, pinOverlay, textEditor, cropOverlayRef, mdOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
-    pasteOpts: {
-      onTextPaste: handleTextPaste,
-      onShortTextPaste: handleShortTextPaste,
-    },
+    pasteOpts,
     onCropModeChange: setCropModeActive,
   });
 
@@ -573,6 +578,38 @@ export default function Editor({ isPublicView }: EditorProps) {
       showToast('Copy failed: ' + (err.message || 'clipboard not available'));
     }
   }, [showToast]);
+
+  const handleRefreshPreview = useCallback(async () => {
+    if (!resolvedBoardId || isPublicView || readOnly || refreshingPreview) return;
+    const scene = canvasRef.current?.getScene();
+    const viewport = canvasRef.current?.getViewport();
+    const app = canvasRef.current?.getApp();
+    if (!scene || !viewport || !app?.renderer?.extract) {
+      showToast('Preview snapshot is not available');
+      return;
+    }
+
+    setRefreshingPreview(true);
+    try {
+      const extractedCanvas = app.renderer.extract.canvas(viewport) as HTMLCanvasElement;
+      const maxWidth = 900;
+      const scale = extractedCanvas.width > maxWidth ? maxWidth / extractedCanvas.width : 1;
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(extractedCanvas.width * scale));
+      out.height = Math.max(1, Math.round(extractedCanvas.height * scale));
+      const ctx = out.getContext('2d');
+      if (!ctx) throw new Error('2D context unavailable');
+      ctx.drawImage(extractedCanvas, 0, 0, out.width, out.height);
+      const thumbnail = out.toDataURL('image/jpeg', 0.82);
+      await saveCanvas(resolvedBoardId, JSON.stringify(scene.serialize()), thumbnail);
+      setSaveStatus('saved');
+      showToast('Board preview updated');
+    } catch (err: any) {
+      showToast('Preview update failed: ' + (err.message || 'unknown error'));
+    } finally {
+      setRefreshingPreview(false);
+    }
+  }, [resolvedBoardId, isPublicView, readOnly, refreshingPreview, showToast]);
 
   const startCropForSelection = useCallback((showInvalidToast = false) => {
     const selection = selectionRef.current;
@@ -926,12 +963,15 @@ export default function Editor({ isPublicView }: EditorProps) {
         onToggleHelp={() => setShowHelp((v) => !v)}
         onMmImport={() => setShowMmImport(true)}
         onExport={() => setShowExport(true)}
+        onRefreshPreview={readOnly || isPublicView ? undefined : handleRefreshPreview}
+        previewRefreshing={refreshingPreview}
         onToggleReview={() => setReviewMode((v) => !v)}
         reviewMode={reviewMode}
         boardName={board?.name}
       />}
 
-      {/* Canvas */}
+      {/* Canvas + Markdown edit panel row */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
       <div ref={canvasContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1e1e1e' }} onContextMenu={handleContextMenu} onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
         {/* Dot grid — behind transparent canvas */}
         {showGrid && (() => {
@@ -1431,6 +1471,46 @@ export default function Editor({ isPublicView }: EditorProps) {
         </div>
       </div>
 
+      {/* Markdown editor side panel */}
+      {editingMdId && (() => {
+        const item = canvasRef.current?.getScene()?.getById(editingMdId);
+        if (!item || item.type !== 'markdown') return null;
+        const data = item.data as MarkdownObject;
+        return (
+          <div style={{
+            width: '420px', minWidth: '420px',
+            background: '#1a1a2e',
+            borderLeft: '1px solid #333',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            <React.Suspense fallback={
+              <div style={{ padding: 24, color: '#888', fontSize: 13 }}>Loading editor...</div>
+            }>
+              <LazyMarkdownEditView
+                key={`${editingMdId}-edit`}
+                initialContent={data.content}
+                accentColor={data.accentColor}
+                onSave={(newContent) => {
+                  data.content = newContent;
+                  setEditingMdId(null);
+                  mdOverlay?.setEditing(null);
+                  selectionRef.current?.setEnabled(true);
+                  onCanvasChange([editingMdId]);
+                  mdOverlay?.measureHeight(editingMdId);
+                }}
+                onCancel={() => {
+                  setEditingMdId(null);
+                  mdOverlay?.setEditing(null);
+                  selectionRef.current?.setEnabled(true);
+                }}
+              />
+            </React.Suspense>
+          </div>
+        );
+      })()}
+      </div>{/* end flex row */}
+
       {/* Status bar */}
       {!focusMode && <StatusBar
         boardName={board?.name || 'Untitled'}
@@ -1456,50 +1536,26 @@ export default function Editor({ isPublicView }: EditorProps) {
         />
       )}
 
-      {/* Markdown card portals */}
+      {/* Markdown card portals (read-only previews on canvas) */}
       {mdCardIds.map(id => {
         const mountPoint = mdOverlay?.getMountPoint(id);
         const item = canvasRef.current?.getScene()?.getById(id);
         if (!mountPoint || !item || item.type !== 'markdown') return null;
         const data = item.data as MarkdownObject;
-        const isEditing = editingMdId === id;
         return ReactDOM.createPortal(
-          isEditing ? (
-            <React.Suspense fallback={<div style={{ padding: 16, color: '#999' }}>Loading editor...</div>}>
-              <LazyMarkdownEditView
-                key={`${id}-edit`}
-                initialContent={data.content}
-                accentColor={data.accentColor}
-                onSave={(newContent) => {
-                  data.content = newContent;
-                  setEditingMdId(null);
-                  mdOverlay?.setEditing(null);
-                  selectionRef.current?.setEnabled(true);
-                  onCanvasChange([id]);
-                  mdOverlay?.measureHeight(id);
-                }}
-                onCancel={() => {
-                  setEditingMdId(null);
-                  mdOverlay?.setEditing(null);
-                  selectionRef.current?.setEnabled(true);
-                }}
-              />
-            </React.Suspense>
-          ) : (
-            <MarkdownReadView
-              key={id}
-              content={data.content}
-              textColor={data.textColor}
-              accentColor={data.accentColor}
-              bgColor={data.bgColor}
-              padding={data.padding}
-              onCheckboxToggle={(newContent) => {
-                data.content = newContent;
-                onCanvasChange([id]);
-                mdOverlay?.measureHeight(id);
-              }}
-            />
-          ),
+          <MarkdownReadView
+            key={id}
+            content={data.content}
+            textColor={data.textColor}
+            accentColor={data.accentColor}
+            bgColor={data.bgColor}
+            padding={data.padding}
+            onCheckboxToggle={(newContent) => {
+              data.content = newContent;
+              onCanvasChange([id]);
+              mdOverlay?.measureHeight(id);
+            }}
+          />,
           mountPoint,
         );
       })}
