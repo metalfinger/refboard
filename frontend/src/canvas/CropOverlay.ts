@@ -38,7 +38,7 @@ export class CropOverlay extends Container {
   private _crop: CropRect = { x: 0, y: 0, w: 1, h: 1 };
   private _originalCrop: CropRect | undefined;
   private _drag: { mode: DragMode; startCrop: CropRect; startPoint: { x: number; y: number } } | null = null;
-  private _onConfirm: ((item: SceneItem, crop: CropRect) => void) | null = null;
+  private _onConfirm: ((item: SceneItem, crop: CropRect, anchorWorld: { x: number; y: number }) => void) | null = null;
   private _onCancel: (() => void) | null = null;
   private _onStateChange: ((active: boolean) => void) | null = null;
   private _keyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -84,7 +84,7 @@ export class CropOverlay extends Container {
     }
   }
 
-  set onConfirm(fn: (item: SceneItem, crop: CropRect) => void) { this._onConfirm = fn; }
+  set onConfirm(fn: (item: SceneItem, crop: CropRect, anchorWorld: { x: number; y: number }) => void) { this._onConfirm = fn; }
   set onCancel(fn: () => void) { this._onCancel = fn; }
   set onStateChange(fn: (active: boolean) => void) { this._onStateChange = fn; }
 
@@ -120,9 +120,12 @@ export class CropOverlay extends Container {
     if (!this._item) return;
     const item = this._item;
     const crop = { ...this._crop };
+    const data = item.data as ImageObject;
+    const viewCrop = this._getViewCrop();
+    const anchorWorld = imageViewPointToWorld(data, viewCrop.x, viewCrop.y);
     const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
     this._cleanup();
-    this._onConfirm?.(item, isFullImage ? { x: 0, y: 0, w: 1, h: 1 } : crop);
+    this._onConfirm?.(item, isFullImage ? { x: 0, y: 0, w: 1, h: 1 } : crop, anchorWorld);
   }
 
   /** Cancel cropping — restore original state. */

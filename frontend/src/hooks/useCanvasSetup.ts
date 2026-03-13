@@ -477,17 +477,16 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         onCropModeChange?.(active);
       };
 
-      cropOverlay.onConfirm = (item, crop) => {
+      cropOverlay.onConfirm = (item, crop, anchorWorld) => {
         const imgData = item.data as any;
-        const before = getItemWorldBounds(item);
         const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
         imgData.crop = isFullImage ? undefined : crop;
         if (item.displayObject instanceof ImageSprite) {
           item.displayObject.applyCrop(imgData.crop);
         }
         const after = getItemWorldBounds(item);
-        imgData.x += before.x - after.x;
-        imgData.y += before.y - after.y;
+        imgData.x += anchorWorld.x - after.x;
+        imgData.y += anchorWorld.y - after.y;
         if (item.type === 'image') {
           applyImageDisplayTransform(item.displayObject, imgData);
         }
