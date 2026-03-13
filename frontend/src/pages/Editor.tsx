@@ -43,6 +43,7 @@ import { StickySprite } from '../canvas/sprites/StickySprite';
 import * as ops from '../canvas/operations';
 import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
+const LazyMarkdownEditView = React.lazy(() => import('../components/MarkdownEditView'));
 
 // Hooks
 import { useBoardLoader } from '../hooks/useBoardLoader';
@@ -207,6 +208,7 @@ export default function Editor({ isPublicView }: EditorProps) {
 
   // ── Markdown overlay — sync visible card IDs for React portal rendering ──
   const [mdCardIds, setMdCardIds] = useState<string[]>([]);
+  const [editingMdId, setEditingMdId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!mdOverlay) return;
@@ -227,8 +229,12 @@ export default function Editor({ isPublicView }: EditorProps) {
     };
 
     mdOverlay.onChange = syncIds;
+    mdOverlay.onRequestEdit = (id) => setEditingMdId(id);
     syncIds();
-    return () => { mdOverlay.onChange = null; };
+    return () => {
+      mdOverlay.onChange = null;
+      mdOverlay.onRequestEdit = null;
+    };
   }, [mdOverlay]);
 
   // Build canvas objects map for FeedbackPanel (memoized on object count changes)
@@ -466,6 +472,11 @@ export default function Editor({ isPublicView }: EditorProps) {
       broadcastElements: (ids) => syncRef.current?.broadcastElements(ids),
       textEditor: textEditor ?? undefined,
       switchToSelect: () => setActiveTool(ToolType.SELECT),
+      onMarkdownCreated: (id) => {
+        setEditingMdId(id);
+        mdOverlay?.setEditing(id);
+        selectionRef.current?.setEnabled(false);
+      },
     };
     // reviewMode is read at click time via getter so it stays current
     Object.defineProperty(ctx, 'reviewMode', { get: () => reviewModeRef.current });
@@ -1213,20 +1224,44 @@ export default function Editor({ isPublicView }: EditorProps) {
         const item = canvasRef.current?.getScene()?.getById(id);
         if (!mountPoint || !item || item.type !== 'markdown') return null;
         const data = item.data as MarkdownObject;
+        const isEditing = editingMdId === id;
         return ReactDOM.createPortal(
-          <MarkdownReadView
-            key={id}
-            content={data.content}
-            textColor={data.textColor}
-            accentColor={data.accentColor}
-            bgColor={data.bgColor}
-            padding={data.padding}
-            onCheckboxToggle={(newContent) => {
-              data.content = newContent;
-              onCanvasChange([id]);
-              mdOverlay?.measureHeight(id);
-            }}
-          />,
+          isEditing ? (
+            <React.Suspense fallback={<div style={{ padding: 16, color: '#999' }}>Loading editor...</div>}>
+              <LazyMarkdownEditView
+                key={`${id}-edit`}
+                initialContent={data.content}
+                accentColor={data.accentColor}
+                onSave={(newContent) => {
+                  data.content = newContent;
+                  setEditingMdId(null);
+                  mdOverlay?.setEditing(null);
+                  selectionRef.current?.setEnabled(true);
+                  onCanvasChange([id]);
+                  mdOverlay?.measureHeight(id);
+                }}
+                onCancel={() => {
+                  setEditingMdId(null);
+                  mdOverlay?.setEditing(null);
+                  selectionRef.current?.setEnabled(true);
+                }}
+              />
+            </React.Suspense>
+          ) : (
+            <MarkdownReadView
+              key={id}
+              content={data.content}
+              textColor={data.textColor}
+              accentColor={data.accentColor}
+              bgColor={data.bgColor}
+              padding={data.padding}
+              onCheckboxToggle={(newContent) => {
+                data.content = newContent;
+                onCanvasChange([id]);
+                mdOverlay?.measureHeight(id);
+              }}
+            />
+          ),
           mountPoint,
         );
       })}

@@ -161,6 +161,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       // Double-click markdown → enter edit mode
       selection.onDoubleClickMarkdown = (item) => {
         if (mdOverlayRef.current) {
+          undoRef.current?.saveState();
           mdOverlayRef.current.setEditing(item.id);
           selection.setEnabled(false);
         }
