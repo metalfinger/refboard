@@ -37,11 +37,25 @@ export interface ImageVisibleFrame {
   display: ImageDisplayTransform;
 }
 
+export interface ImageDisplayGeometry extends ImageVisibleFrame {
+  worldCorners: Point2D[];
+  worldBounds: { x: number; y: number; w: number; h: number };
+}
+
 export interface ImageLocalRect {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+export interface ImageEditorGeometry {
+  editorData: ImageObject;
+  sourceCrop: CropRect;
+  displayCrop: CropRect;
+  fullWorldCorners: Point2D[];
+  cropWorldCorners: Point2D[];
+  cropAnchorWorld: Point2D;
 }
 
 /**
@@ -117,6 +131,61 @@ export function getImageVisibleFrame(data: Pick<ImageObject, 'x' | 'y' | 'w' | '
     sourceRect: getImageSourceRect(data),
     localRect: getImageVisibleLocalRect(data),
     display: getImageDisplayTransform(data),
+  };
+}
+
+export function getImageDisplayCropRect(data: Pick<ImageObject, 'crop' | 'flipX' | 'flipY'>): CropRect {
+  const crop = data.crop ?? { x: 0, y: 0, w: 1, h: 1 };
+  return {
+    x: data.flipX ? 1 - (crop.x + crop.w) : crop.x,
+    y: data.flipY ? 1 - (crop.y + crop.h) : crop.y,
+    w: crop.w,
+    h: crop.h,
+  };
+}
+
+export function displayCropRectToSourceCrop(
+  data: Pick<ImageObject, 'flipX' | 'flipY'>,
+  displayCrop: CropRect,
+): CropRect {
+  return {
+    x: data.flipX ? 1 - (displayCrop.x + displayCrop.w) : displayCrop.x,
+    y: data.flipY ? 1 - (displayCrop.y + displayCrop.h) : displayCrop.y,
+    w: displayCrop.w,
+    h: displayCrop.h,
+  };
+}
+
+export function getImageDisplayGeometry(
+  data: Pick<ImageObject, 'x' | 'y' | 'w' | 'h' | 'sx' | 'sy' | 'angle' | 'flipX' | 'flipY' | 'crop'>,
+): ImageDisplayGeometry {
+  const frame = getImageVisibleFrame(data);
+  const worldCorners = getImageTransformedCorners(data);
+  return {
+    ...frame,
+    worldCorners,
+    worldBounds: getBoundsFromPoints(worldCorners),
+  };
+}
+
+export function getImageEditorGeometry(data: ImageObject): ImageEditorGeometry {
+  const sourceCrop = data.crop ? { ...data.crop } : { x: 0, y: 0, w: 1, h: 1 };
+  const displayCrop = getImageDisplayCropRect(data);
+  const cropAnchorWorld = imageViewPointToWorld(data, displayCrop.x, displayCrop.y);
+  const editorData: ImageObject = {
+    ...data,
+    crop: undefined,
+  };
+  const editorAnchorWorld = imageViewPointToWorld(editorData, displayCrop.x, displayCrop.y);
+  editorData.x += cropAnchorWorld.x - editorAnchorWorld.x;
+  editorData.y += cropAnchorWorld.y - editorAnchorWorld.y;
+  return {
+    editorData,
+    sourceCrop,
+    displayCrop,
+    fullWorldCorners: getImageViewRectWorldCorners(editorData, { x: 0, y: 0, w: 1, h: 1 }),
+    cropWorldCorners: getImageViewRectWorldCorners(editorData, displayCrop),
+    cropAnchorWorld,
   };
 }
 

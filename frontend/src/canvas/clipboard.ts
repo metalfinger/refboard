@@ -91,8 +91,8 @@ export async function writeCanvasToClipboard(
     for (const item of items) {
       const tex = (item.displayObject as any)?.texture;
       const displayW = item.type === 'image'
-        ? getImageVisibleLocalRect(item.data as ImageObject).w
-        : item.data.w;
+        ? getImageVisibleLocalRect(item.data as ImageObject).w * Math.abs(item.data.sx)
+        : item.data.w * Math.abs(item.data.sx);
       if (tex && tex.width > 1 && displayW > 1) {
         maxRatio = Math.max(maxRatio, tex.width / displayW);
       }

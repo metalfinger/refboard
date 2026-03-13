@@ -10,7 +10,15 @@ import { Container, Graphics, FederatedPointerEvent, Polygon, Rectangle } from '
 import type { Viewport } from 'pixi-viewport';
 import type { SceneItem } from './SceneManager';
 import type { ImageObject, CropRect } from './scene-format';
-import { getImageViewRectWorldCorners, imageViewPointToWorld, worldToImageViewPoint } from './imageTransforms';
+import {
+  applyImageDisplayTransform,
+  displayCropRectToSourceCrop,
+  getImageDisplayCropRect,
+  getImageEditorGeometry,
+  getImageViewRectWorldCorners,
+  imageViewPointToWorld,
+  worldToImageViewPoint,
+} from './imageTransforms';
 import { ImageSprite } from './sprites/ImageSprite';
 
 const HANDLE_SIZE = 8;
@@ -37,6 +45,7 @@ export class CropOverlay extends Container {
   private _handles = new Map<HandleId, Graphics>();
   private _crop: CropRect = { x: 0, y: 0, w: 1, h: 1 };
   private _originalCrop: CropRect | undefined;
+  private _editorData: ImageObject | null = null;
   private _drag: { mode: DragMode; startCrop: CropRect; startPoint: { x: number; y: number } } | null = null;
   private _onConfirm: ((item: SceneItem, crop: CropRect, anchorWorld: { x: number; y: number }) => void) | null = null;
   private _onCancel: (() => void) | null = null;
@@ -94,9 +103,12 @@ export class CropOverlay extends Container {
     this._item = item;
     const imgData = item.data as ImageObject;
     this._originalCrop = imgData.crop ? { ...imgData.crop } : undefined;
-    this._crop = imgData.crop ? { ...imgData.crop } : { x: 0, y: 0, w: 1, h: 1 };
+    const editor = getImageEditorGeometry(imgData);
+    this._editorData = editor.editorData;
+    this._crop = editor.sourceCrop;
     if (item.displayObject instanceof ImageSprite) {
       item.displayObject.applyCrop(undefined);
+      applyImageDisplayTransform(item.displayObject, this._editorData);
     }
     this._viewport.plugins.pause('drag');
     this.visible = true;
@@ -120,8 +132,8 @@ export class CropOverlay extends Container {
     if (!this._item) return;
     const item = this._item;
     const crop = { ...this._crop };
-    const data = this._getWorkingImageData();
-    const viewCrop = this._getViewCrop();
+    const data = this._getEditorData();
+    const viewCrop = getImageDisplayCropRect({ crop, flipX: data.flipX, flipY: data.flipY });
     const anchorWorld = imageViewPointToWorld(data, viewCrop.x, viewCrop.y);
     const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
     this._cleanup();
@@ -130,9 +142,6 @@ export class CropOverlay extends Container {
 
   /** Cancel cropping — restore original state. */
   cancel(): void {
-    if (this._item?.displayObject instanceof ImageSprite) {
-      this._item.displayObject.applyCrop(this._originalCrop);
-    }
     this._cleanup();
     this._onCancel?.();
   }
@@ -143,8 +152,10 @@ export class CropOverlay extends Container {
   private _cleanup(): void {
     this._removeDomDragListeners();
     this._viewport.plugins.resume('drag');
+    this._restoreDisplayState();
     this._item = null;
     this._originalCrop = undefined;
+    this._editorData = null;
     this._drag = null;
     this.visible = false;
     this._onStateChange?.(false);
@@ -162,9 +173,9 @@ export class CropOverlay extends Container {
 
   private _draw(): void {
     if (!this._item) return;
-    const data = this._getWorkingImageData();
+    const data = this._getEditorData();
     const zoom = this._viewport.scale.x;
-    const viewCrop = this._getViewCrop();
+    const viewCrop = getImageDisplayCropRect({ crop: this._crop, flipX: data.flipX, flipY: data.flipY });
     const fullCorners = getImageViewRectWorldCorners(data, { x: 0, y: 0, w: 1, h: 1 });
     const cropCorners = getImageViewRectWorldCorners(data, viewCrop);
 
@@ -241,12 +252,12 @@ export class CropOverlay extends Container {
     if ('preventDefault' in e.nativeEvent && typeof e.nativeEvent.preventDefault === 'function') {
       e.nativeEvent.preventDefault();
     }
-    const data = this._getWorkingImageData();
+    const data = this._getEditorData();
     const world = this._viewport.toWorld(e.global.x, e.global.y);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
     this._drag = {
       mode,
-      startCrop: this._getViewCrop(),
+      startCrop: getImageDisplayCropRect({ crop: this._crop, flipX: data.flipX, flipY: data.flipY }),
       startPoint: { x: clamp01(viewPoint.x), y: clamp01(viewPoint.y) },
     };
     this._removeDomDragListeners();
@@ -260,7 +271,7 @@ export class CropOverlay extends Container {
   private _onMoveScreen(screenX: number, screenY: number): void {
     if (!this._drag || !this._item) return;
 
-    const data = this._getWorkingImageData();
+    const data = this._getEditorData();
     const world = this._viewport.toWorld(screenX, screenY);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
     const nx = clamp01(viewPoint.x);
@@ -272,7 +283,7 @@ export class CropOverlay extends Container {
     if (mode === 'move') {
       crop.x = Math.max(0, Math.min(1 - sc.w, sc.x + (nx - startPoint.x)));
       crop.y = Math.max(0, Math.min(1 - sc.h, sc.y + (ny - startPoint.y)));
-      this._setViewCrop(crop);
+      this._crop = displayCropRectToSourceCrop(data, crop);
       this._draw();
       return;
     }
@@ -314,7 +325,7 @@ export class CropOverlay extends Container {
         break;
     }
 
-    this._setViewCrop(crop);
+    this._crop = displayCropRectToSourceCrop(data, crop);
     this._draw();
   }
 
@@ -327,31 +338,6 @@ export class CropOverlay extends Container {
   private _onUp(): void {
     this._drag = null;
     this._removeDomDragListeners();
-  }
-
-  private _getViewCrop(): CropRect {
-    if (!this._item) return { ...this._crop };
-    const data = this._item.data as ImageObject;
-    return {
-      x: data.flipX ? 1 - (this._crop.x + this._crop.w) : this._crop.x,
-      y: data.flipY ? 1 - (this._crop.y + this._crop.h) : this._crop.y,
-      w: this._crop.w,
-      h: this._crop.h,
-    };
-  }
-
-  private _setViewCrop(viewCrop: CropRect): void {
-    if (!this._item) {
-      this._crop = { ...viewCrop };
-      return;
-    }
-    const data = this._item.data as ImageObject;
-    this._crop = {
-      x: data.flipX ? 1 - (viewCrop.x + viewCrop.w) : viewCrop.x,
-      y: data.flipY ? 1 - (viewCrop.y + viewCrop.h) : viewCrop.y,
-      w: viewCrop.w,
-      h: viewCrop.h,
-    };
   }
 
   private _drawPolygon(graphics: Graphics, points: Array<{ x: number; y: number }>): void {
@@ -390,11 +376,17 @@ export class CropOverlay extends Container {
     };
   }
 
-  private _getWorkingImageData(): ImageObject {
-    const data = this._item!.data as ImageObject;
-    return {
-      ...data,
-      crop: undefined,
-    };
+  private _restoreDisplayState(): void {
+    if (!this._item || !(this._item.displayObject instanceof ImageSprite)) return;
+    const data = this._item.data as ImageObject;
+    this._item.displayObject.applyCrop(this._originalCrop);
+    applyImageDisplayTransform(this._item.displayObject, data);
+  }
+
+  private _getEditorData(): ImageObject {
+    if (!this._editorData) {
+      throw new Error('Crop editor data not initialized');
+    }
+    return this._editorData;
   }
 }

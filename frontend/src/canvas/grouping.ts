@@ -14,7 +14,7 @@ import { getItemWorldBounds, rebuildGroupChildSet } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
 import type { GroupObject, ImageObject } from './scene-format';
 import { randomFrameColor } from './sprites/FrameSprite';
-import { applyImageDisplayTransform, transformPoint } from './imageTransforms';
+import { applyImageDisplayTransform, getImageDisplayTransform, getImageVisibleLocalRect, transformPoint } from './imageTransforms';
 
 /**
  * Group selected items into a single group container.
@@ -132,32 +132,55 @@ export function ungroupItems(
 
     const obj = childItem.displayObject;
 
-    // Convert local position to world space, accounting for group scale
-    const worldOrigin = transformPoint(
-      { x: childItem.data.x, y: childItem.data.y },
-      { x: groupX, y: groupY, sx: groupSx, sy: groupSy, angle: groupAngle },
-    );
-    const worldX = worldOrigin.x;
-    const worldY = worldOrigin.y;
-
-    // Propagate group scale to child
-    childItem.data.sx *= groupSx;
-    childItem.data.sy *= groupSy;
-
-    // Propagate group angle to child
-    childItem.data.angle = (childItem.data.angle || 0) + groupAngle;
-
-    // Update DATA to store world coords
-    childItem.data.x = worldX;
-    childItem.data.y = worldY;
-
-    // Reparent display object
-    obj.parent?.removeChild(obj);
-    viewport.addChild(obj);
     if (childItem.type === 'image') {
-      applyImageDisplayTransform(obj, childItem.data as ImageObject);
+      const imgData = childItem.data as ImageObject;
+
+      // For images, transform the display position (with flip compensation) to world,
+      // then back-calculate canonical data.x/y from the new scale/angle.
+      // This is necessary because data.x/y is the canonical anchor, not the visual
+      // top-left — the flip offset must be rotated through the group transform.
+      const localDisplay = getImageDisplayTransform(imgData);
+      const worldDisplay = transformPoint(
+        { x: localDisplay.x, y: localDisplay.y },
+        { x: groupX, y: groupY, sx: groupSx, sy: groupSy, angle: groupAngle },
+      );
+
+      // Propagate group scale and angle
+      imgData.sx *= groupSx;
+      imgData.sy *= groupSy;
+      imgData.angle = (imgData.angle || 0) + groupAngle;
+
+      // Back-calculate canonical x/y: display.x = data.x + flipOffset
+      const newSx = Math.abs(imgData.sx);
+      const newSy = Math.abs(imgData.sy);
+      const visibleRect = getImageVisibleLocalRect(imgData);
+      imgData.x = worldDisplay.x - (imgData.flipX ? visibleRect.w * newSx : 0);
+      imgData.y = worldDisplay.y - (imgData.flipY ? visibleRect.h * newSy : 0);
+
+      // Reparent display object
+      obj.parent?.removeChild(obj);
+      viewport.addChild(obj);
+      applyImageDisplayTransform(obj, imgData);
     } else {
-      obj.position.set(worldX, worldY);
+      // Convert local position to world space, accounting for group scale
+      const worldOrigin = transformPoint(
+        { x: childItem.data.x, y: childItem.data.y },
+        { x: groupX, y: groupY, sx: groupSx, sy: groupSy, angle: groupAngle },
+      );
+
+      // Propagate group scale and angle
+      childItem.data.sx *= groupSx;
+      childItem.data.sy *= groupSy;
+      childItem.data.angle = (childItem.data.angle || 0) + groupAngle;
+
+      // Update DATA to store world coords
+      childItem.data.x = worldOrigin.x;
+      childItem.data.y = worldOrigin.y;
+
+      // Reparent display object
+      obj.parent?.removeChild(obj);
+      viewport.addChild(obj);
+      obj.position.set(worldOrigin.x, worldOrigin.y);
       obj.scale.set(childItem.data.sx, childItem.data.sy);
       obj.angle = childItem.data.angle;
     }
