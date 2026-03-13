@@ -13,6 +13,7 @@ import { UploadManager } from '../stores/uploadManager';
 import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
 import { CropOverlay } from '../canvas/CropOverlay';
+import { MarkdownOverlay } from '../canvas/MarkdownOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
@@ -78,6 +79,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
   const textEditorRef = useRef<TextEditor | null>(null);
   if (!textEditorRef.current) textEditorRef.current = new TextEditor();
   const cropOverlayRef = useRef<CropOverlay | null>(null);
+  const mdOverlayRef = useRef<MarkdownOverlay | null>(null);
 
   useEffect(() => {
     if (!boardData || !resolvedBoardId) return;
@@ -177,6 +179,13 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         sharpness.destroy();
       };
 
+      // ── Markdown overlay — DOM divs positioned over canvas for each markdown card ──
+      if (domContainer) {
+        const mdOverlay = new MarkdownOverlay(viewport, scene, domContainer);
+        mdOverlayRef.current = mdOverlay;
+        mdOverlay.refreshAll();
+      }
+
       // Create InboxZone and add to viewport
       const inboxZone = new InboxZone(scene.textures, scene.springs);
       viewport.addChild(inboxZone);
@@ -198,14 +207,19 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         selection.onItemsTransform = (items) => {
           syncRef.current?.broadcastTransform(items);
           pinOverlayRef.current?.updatePositions();
+          for (const item of items) {
+            if (item.type === 'markdown') mdOverlayRef.current?.updateItem(item.id);
+          }
         };
         selection.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
           pinOverlayRef.current?.updatePositions();
+          if (item.type === 'markdown') mdOverlayRef.current?.updateItem(item.id);
         };
         selection.transformBox.onItemTransform = (item) => {
           syncRef.current?.broadcastTransform(item);
           pinOverlayRef.current?.updatePositions();
+          if (item.type === 'markdown') mdOverlayRef.current?.updateItem(item.id);
         };
         selection.onObjectDragEnd = (itemIds) => {
           onCanvasChange(itemIds); // broadcasts elements + saves + undo + spatial refresh
@@ -483,6 +497,10 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       dropCleanupRef.current?.();
       pasteCleanupRef.current?.();
       textEditorRef.current?.stopEditing(false);
+      if (mdOverlayRef.current) {
+        mdOverlayRef.current.destroy();
+        mdOverlayRef.current = null;
+      }
       if (cropOverlayRef.current) {
         cropOverlayRef.current.destroy();
         cropOverlayRef.current = null;
@@ -499,5 +517,5 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     };
   }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds]);
 
-  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlayRef };
+  return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlayRef, mdOverlay: mdOverlayRef.current };
 }

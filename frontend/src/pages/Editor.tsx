@@ -36,11 +36,13 @@ import { InboxZone } from '../canvas/InboxZone';
 import { getItemWorldBounds } from '../canvas/SceneManager';
 import { getPointAnchorWorld } from '../canvas/reviewAnchors';
 import { resolveReviewTargetAtPoint } from '../canvas/reviewTargeting';
-import type { TextObject, StickyObject } from '../canvas/scene-format';
+import type { TextObject, StickyObject, MarkdownObject } from '../canvas/scene-format';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { StickySprite } from '../canvas/sprites/StickySprite';
 import * as ops from '../canvas/operations';
+import ReactDOM from 'react-dom';
+import MarkdownReadView from '../components/MarkdownReadView';
 
 // Hooks
 import { useBoardLoader } from '../hooks/useBoardLoader';
@@ -197,11 +199,37 @@ export default function Editor({ isPublicView }: EditorProps) {
   });
 
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
-  const { annotationStore, pinOverlay, textEditor, cropOverlayRef } = useCanvasSetup({
+  const { annotationStore, pinOverlay, textEditor, cropOverlayRef, mdOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
   });
+
+  // ── Markdown overlay — sync visible card IDs for React portal rendering ──
+  const [mdCardIds, setMdCardIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!mdOverlay) return;
+
+    const syncIds = () => {
+      const scene = canvasRef.current?.getScene();
+      if (!scene) return;
+      const ids: string[] = [];
+      for (const [id, item] of scene.items) {
+        if (item.type === 'markdown' && item.data.visible) {
+          ids.push(id);
+        }
+      }
+      setMdCardIds(prev => {
+        if (prev.length === ids.length && prev.every((v, i) => v === ids[i])) return prev;
+        return ids;
+      });
+    };
+
+    mdOverlay.onChange = syncIds;
+    syncIds();
+    return () => { mdOverlay.onChange = null; };
+  }, [mdOverlay]);
 
   // Build canvas objects map for FeedbackPanel (memoized on object count changes)
   const canvasObjectMap = React.useMemo(() => {
@@ -1178,6 +1206,30 @@ export default function Editor({ isPublicView }: EditorProps) {
           }}
         />
       )}
+
+      {/* Markdown card portals */}
+      {mdCardIds.map(id => {
+        const mountPoint = mdOverlay?.getMountPoint(id);
+        const item = canvasRef.current?.getScene()?.getById(id);
+        if (!mountPoint || !item || item.type !== 'markdown') return null;
+        const data = item.data as MarkdownObject;
+        return ReactDOM.createPortal(
+          <MarkdownReadView
+            key={id}
+            content={data.content}
+            textColor={data.textColor}
+            accentColor={data.accentColor}
+            bgColor={data.bgColor}
+            padding={data.padding}
+            onCheckboxToggle={(newContent) => {
+              data.content = newContent;
+              onCanvasChange([id]);
+              mdOverlay?.measureHeight(id);
+            }}
+          />,
+          mountPoint,
+        );
+      })}
 
       {/* Export dialog */}
       {showExport && (
