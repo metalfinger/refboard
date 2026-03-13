@@ -25,10 +25,10 @@ export async function writeCanvasToClipboard(
   if (!app) throw new Error('Renderer not available');
 
   const directCanvas = app.canvas as unknown as HTMLCanvasElement | undefined;
-  const fallbackCanvas = app.renderer?.extract
-    ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
-    : undefined;
-  const sourceCanvas = directCanvas ?? fallbackCanvas;
+  const sourceCanvas = directCanvas
+    ?? (app.renderer?.extract
+      ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
+      : undefined);
   if (!sourceCanvas || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
     throw new Error('Rendered canvas unavailable');
   }

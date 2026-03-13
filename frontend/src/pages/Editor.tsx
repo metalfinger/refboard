@@ -605,10 +605,10 @@ export default function Editor({ isPublicView }: EditorProps) {
     setRefreshingPreview(true);
     try {
       const directCanvas = app.canvas as unknown as HTMLCanvasElement | undefined;
-      const fallbackCanvas = viewport && app.renderer?.extract
-        ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
-        : undefined;
-      const sourceCanvas = directCanvas ?? fallbackCanvas;
+      const sourceCanvas = directCanvas
+        ?? (viewport && app.renderer?.extract
+          ? (app.renderer.extract.canvas(viewport) as HTMLCanvasElement)
+          : undefined);
       if (!sourceCanvas || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
         throw new Error('rendered canvas is unavailable');
       }
