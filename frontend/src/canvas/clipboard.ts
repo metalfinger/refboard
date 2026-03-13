@@ -12,6 +12,8 @@ import type { Viewport } from 'pixi-viewport';
 import type { Application } from 'pixi.js';
 import type { SceneManager, SceneItem } from './SceneManager';
 import { getItemWorldBounds } from './SceneManager';
+import { getImageVisibleLocalRect } from './imageTransforms';
+import type { ImageObject } from './scene-format';
 import { uploadImage } from '../api';
 
 /**
@@ -88,8 +90,11 @@ export async function writeCanvasToClipboard(
     let maxRatio = 1;
     for (const item of items) {
       const tex = (item.displayObject as any)?.texture;
-      if (tex && tex.width > 1 && item.data.w > 1) {
-        maxRatio = Math.max(maxRatio, tex.width / item.data.w);
+      const displayW = item.type === 'image'
+        ? getImageVisibleLocalRect(item.data as ImageObject).w
+        : item.data.w;
+      if (tex && tex.width > 1 && displayW > 1) {
+        maxRatio = Math.max(maxRatio, tex.width / displayW);
       }
     }
     const resolution = Math.min(Math.max(maxRatio, window.devicePixelRatio || 1), 4);
