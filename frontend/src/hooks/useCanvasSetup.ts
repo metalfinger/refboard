@@ -17,6 +17,7 @@ import { MarkdownOverlay } from '../canvas/MarkdownOverlay';
 import { TextSprite } from '../canvas/sprites/TextSprite';
 import { TextSharpnessManager } from '../canvas/textSharpness';
 import { getItemWorldBounds } from '../canvas/SceneManager';
+import { applyImageDisplayTransform } from '../canvas/imageTransforms';
 // PresenceOverlay removed — remote selection highlighting was too heavy for minimal benefit
 import { connectSocket, disconnectSocket } from '../socket';
 import api from '../api';
@@ -478,10 +479,17 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
 
       cropOverlay.onConfirm = (item, crop) => {
         const imgData = item.data as any;
+        const before = getItemWorldBounds(item);
         const isFullImage = crop.x < 0.001 && crop.y < 0.001 && crop.w > 0.999 && crop.h > 0.999;
         imgData.crop = isFullImage ? undefined : crop;
         if (item.displayObject instanceof ImageSprite) {
           item.displayObject.applyCrop(imgData.crop);
+        }
+        const after = getItemWorldBounds(item);
+        imgData.x += before.x - after.x;
+        imgData.y += before.y - after.y;
+        if (item.type === 'image') {
+          applyImageDisplayTransform(item.displayObject, imgData);
         }
         scene.updateSpatialEntry(item);
         selection.setEnabled(true);
