@@ -158,6 +158,14 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
         });
       };
 
+      // Double-click markdown → enter edit mode
+      selection.onDoubleClickMarkdown = (item) => {
+        if (mdOverlayRef.current) {
+          mdOverlayRef.current.setEditing(item.id);
+          selection.setEnabled(false);
+        }
+      };
+
       // Refresh transform box when item dimensions change (e.g. video metadata loaded)
       scene.onItemDimensionsChanged = (itemId: string) => {
         if (selection.selectedIds.has(itemId)) {

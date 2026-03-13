@@ -85,6 +85,7 @@ export class SelectionManager {
 
   private _onDoubleClickText: ((item: SceneItem) => void) | null = null;
   private _onDoubleClickImage: ((item: SceneItem) => void) | null = null;
+  private _onDoubleClickMarkdown: ((item: SceneItem) => void) | null = null;
 
   private _enabled = true;
 
@@ -166,6 +167,11 @@ export class SelectionManager {
   /** Called on double-click of an image item (zoom-to-fit). */
   set onDoubleClickImage(fn: (item: SceneItem) => void) {
     this._onDoubleClickImage = fn;
+  }
+
+  /** Called on double-click of a markdown item (for edit mode). */
+  set onDoubleClickMarkdown(fn: (item: SceneItem) => void) {
+    this._onDoubleClickMarkdown = fn;
   }
 
   /** Select only this item, deselecting everything else. */
@@ -393,6 +399,8 @@ export class SelectionManager {
           this._onDoubleClickText?.(item);
         } else if (item.type === 'image' || item.type === 'drawing') {
           this._onDoubleClickImage?.(item);
+        } else if (item.type === 'markdown') {
+          this._onDoubleClickMarkdown?.(item);
         }
         this._lastClickTime = 0;
         this._lastClickItemId = null;
