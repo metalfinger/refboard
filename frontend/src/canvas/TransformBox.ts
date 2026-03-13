@@ -75,6 +75,8 @@ export class TransformBox extends Container {
   private _onDragEnd: ((itemIds: string[]) => void) | null = null;
   private _snapGuides: SnapGuides | null = null;
   private _resizeConstraint: 'full' | 'horizontal' | 'none' = 'full';
+  /** Only images (and videos) support rotation. */
+  private _rotateAllowed = true;
   private _dimLabel!: Text;
   private _dimLabelBg!: Graphics;
 
@@ -195,6 +197,9 @@ export class TransformBox extends Container {
     const allSticky = items.length > 0 && items.every(i => i.type === 'sticky');
     const allMarkdown = items.length > 0 && items.every(i => i.type === 'markdown');
     this._resizeConstraint = allSticky ? 'none' : allMarkdown ? 'horizontal' : 'full';
+    // Only allow rotation for image/video selections
+    const ROTATABLE_TYPES = new Set(['image', 'video']);
+    this._rotateAllowed = items.length > 0 && items.every(i => ROTATABLE_TYPES.has(i.type));
     this._draw();
     this.visible = true;
   }
@@ -265,6 +270,11 @@ export class TransformBox extends Container {
     };
 
     for (const [id, handle] of this._rotateHandles) {
+      if (!this._rotateAllowed) {
+        handle.visible = false;
+        handle.eventMode = 'none';
+        continue;
+      }
       handle.visible = true;
       handle.eventMode = 'static';
       handle.clear();
@@ -309,6 +319,7 @@ export class TransformBox extends Container {
 
   private _onRotateHandleDown(e: FederatedPointerEvent, id: RotateHandleId): void {
     e.stopPropagation();
+    if (!this._rotateAllowed) return;
 
     const origTransforms = new Map<string, { sx: number; sy: number; angle: number; x: number; y: number; w: number; bounds: { x: number; y: number; w: number; h: number } }>();
     for (const item of this._items) {
