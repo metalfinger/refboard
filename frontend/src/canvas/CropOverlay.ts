@@ -22,6 +22,10 @@ const MIN_CROP = 0.05; // minimum 5% of image in each dimension
 type HandleId = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
 type DragMode = HandleId | 'move';
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
 export class CropOverlay extends Container {
   private _item: SceneItem | null = null;
   private _viewport: Viewport;
@@ -88,6 +92,7 @@ export class CropOverlay extends Container {
     this._item = item;
     const imgData = item.data as ImageObject;
     this._crop = imgData.crop ? { ...imgData.crop } : { x: 0, y: 0, w: 1, h: 1 };
+    this._viewport.plugins.pause('drag');
     this.visible = true;
     this._onStateChange?.(true);
     // Ensure overlay renders on top of all scene items
@@ -125,6 +130,7 @@ export class CropOverlay extends Container {
   /** Clean up all state and listeners. Safe to call multiple times. */
   private _cleanup(): void {
     this._removeDragListeners();
+    this._viewport.plugins.resume('drag');
     this._item = null;
     this._drag = null;
     this.visible = false;
@@ -221,7 +227,7 @@ export class CropOverlay extends Container {
     this._drag = {
       mode,
       startCrop: this._getViewCrop(),
-      startPoint: viewPoint,
+      startPoint: { x: clamp01(viewPoint.x), y: clamp01(viewPoint.y) },
     };
 
     // Register move/up on the stage (single handler, not per-handle)
@@ -255,8 +261,8 @@ export class CropOverlay extends Container {
     const data = this._item.data as ImageObject;
     const world = this._viewport.toWorld(e.global.x, e.global.y);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
-    const nx = viewPoint.x;
-    const ny = viewPoint.y;
+    const nx = clamp01(viewPoint.x);
+    const ny = clamp01(viewPoint.y);
 
     const { mode, startCrop: sc, startPoint } = this._drag;
     const crop = { ...sc };
