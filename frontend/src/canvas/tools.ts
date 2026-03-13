@@ -22,6 +22,7 @@ export enum ToolType {
   TEXT = 'TEXT',
   ERASER = 'ERASER',
   STICKY = 'STICKY',
+  MARKDOWN = 'MARKDOWN',
 }
 
 export interface ToolOptions {
@@ -61,6 +62,8 @@ export interface ToolContext {
   switchToSelect?: () => void;
   /** When true, destructive/creative tool clicks (TEXT, ERASER) are suppressed. */
   reviewMode?: boolean;
+  /** Called after a new markdown card is created, to immediately enter edit mode. */
+  onMarkdownCreated?: (id: string) => void;
 }
 
 export function activateTool(
@@ -390,6 +393,53 @@ export function activateTool(
       };
     }
 
+    case ToolType.MARKDOWN: {
+      container.style.cursor = 'crosshair';
+
+      const onClick = (e: PointerEvent) => {
+        if (ctx.reviewMode) return;
+        const rect = container.getBoundingClientRect();
+        const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+        const mdData = {
+          id: crypto.randomUUID(),
+          type: 'markdown' as const,
+          x: world.x - 225,
+          y: world.y - 20,
+          w: 450,
+          h: 60,
+          sx: 1,
+          sy: 1,
+          angle: 0,
+          z: scene.nextZ(),
+          opacity: 1,
+          locked: false,
+          name: '',
+          visible: true,
+          content: '',
+          bgColor: '#232336',
+          textColor: '#e0e0e0',
+          accentColor: '#7950f2',
+          padding: 16,
+          cornerRadius: 10,
+        };
+
+        scene._createItem(mdData, true);
+        scene._applyZOrder();
+        ctx.broadcastElements?.([mdData.id]);
+        ctx.onChange();
+
+        ctx.switchToSelect?.();
+        ctx.onMarkdownCreated?.(mdData.id);
+        container.removeEventListener('pointerdown', onClick);
+      };
+
+      container.addEventListener('pointerdown', onClick);
+      return () => {
+        container.removeEventListener('pointerdown', onClick);
+      };
+    }
+
     default:
       return null;
   }
@@ -400,8 +450,10 @@ export const toolShortcuts: Record<string, ToolType> = {
   p: ToolType.PEN,
   t: ToolType.TEXT,
   s: ToolType.STICKY,
+  m: ToolType.MARKDOWN,
   '1': ToolType.SELECT,
   '3': ToolType.PEN,
   '4': ToolType.TEXT,
   '5': ToolType.STICKY,
+  '6': ToolType.MARKDOWN,
 };

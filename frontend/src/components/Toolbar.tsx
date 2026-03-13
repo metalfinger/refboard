@@ -72,6 +72,18 @@ function IconSticky() {
   );
 }
 
+function IconMarkdown() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="1" width="14" height="16" rx="2" />
+      <path d="M5 5h8" />
+      <path d="M5 8h6" />
+      <path d="M5 11h4" />
+      <circle cx="13" cy="13" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function IconReview() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -124,6 +136,7 @@ const toolButtons: { tool: ToolType; label: string; shortcut: string; numKey: st
   { tool: ToolType.PEN, label: 'Draw', shortcut: 'P', numKey: '3', Icon: IconPen, hint: 'Click and drag to draw freehand' },
   { tool: ToolType.TEXT, label: 'Text', shortcut: 'T', numKey: '4', Icon: IconText, hint: 'Click on the canvas to place text' },
   { tool: ToolType.STICKY, label: 'Sticky', shortcut: 'S', numKey: '5', Icon: IconSticky, hint: 'Click on the canvas to place a sticky note' },
+  { tool: ToolType.MARKDOWN, label: 'Markdown', shortcut: 'M', numKey: '6', Icon: IconMarkdown, hint: 'Click on the canvas to place a markdown card' },
 ];
 
 const REVIEW_HINT = 'Click an object to place a comment pin. Press . to toggle.';
