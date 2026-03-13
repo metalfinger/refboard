@@ -10,6 +10,8 @@ import { Container, Graphics, FederatedPointerEvent, Text, TextStyle } from 'pix
 import type { Viewport } from 'pixi-viewport';
 import { type SceneItem, getItemWorldBounds } from './SceneManager';
 import type { SnapGuides } from './SnapGuides';
+import { applyImageDisplayTransform } from './imageTransforms';
+import type { ImageObject } from './scene-format';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -347,9 +349,12 @@ export class TransformBox extends Container {
 
       item.data.sx = orig.sx * fx;
       item.data.sy = orig.sy * fy;
-      item.displayObject.scale.set(item.data.sx, item.data.sy);
-
-      item.displayObject.position.set(item.data.x, item.data.y);
+      if (item.type === 'image') {
+        applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+      } else {
+        item.displayObject.scale.set(item.data.sx, item.data.sy);
+        item.displayObject.position.set(item.data.x, item.data.y);
+      }
       this._onItemTransform?.(item);
     }
 

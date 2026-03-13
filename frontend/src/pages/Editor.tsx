@@ -493,6 +493,23 @@ export default function Editor({ isPublicView }: EditorProps) {
     }
   }, [showToast]);
 
+  const startCropForSelection = useCallback((showInvalidToast = false) => {
+    const selection = selectionRef.current;
+    if (!selection || !cropOverlayRef.current) return;
+    const items = selection.getSelectedItems();
+    if (items.length !== 1 || items[0].type !== 'image') {
+      if (showInvalidToast) showToast('Select a single image to crop');
+      return;
+    }
+    const image = items[0];
+    if (Math.abs(image.data.angle % 360) > 0.001) {
+      showToast('Crop for rotated images is not supported yet');
+      return;
+    }
+    selection.setEnabled(false);
+    cropOverlayRef.current.start(image);
+  }, [showToast, cropOverlayRef]);
+
   // Keyboard shortcuts
   useShortcutHandler({
     canvasRef, selectionRef, undoRef, clipboardRef, resolvedBoardId,
@@ -500,17 +517,7 @@ export default function Editor({ isPublicView }: EditorProps) {
     handleGroup, handleUngroup,
     setActiveTool, setCanUndo, setCanRedo, setZoom,
     setShowGrid, setShowHelp, setFocusMode, setReviewMode,
-    startCrop: () => {
-      const selection = selectionRef.current;
-      if (!selection || !cropOverlayRef.current) return;
-      const items = selection.getSelectedItems();
-      if (items.length !== 1 || items[0].type !== 'image') {
-        showToast('Select a single image to crop');
-        return;
-      }
-      selection.setEnabled(false);
-      cropOverlayRef.current.start(items[0]);
-    },
+    startCrop: () => startCropForSelection(true),
   });
 
   // Context menu
@@ -531,16 +538,9 @@ export default function Editor({ isPublicView }: EditorProps) {
       handleGroup,
       handleUngroup,
       fitAll: () => canvasRef.current?.fitAll(),
-      startCrop: () => {
-        const selection = selectionRef.current;
-        if (!selection || !cropOverlayRef.current) return;
-        const items = selection.getSelectedItems();
-        if (items.length !== 1 || items[0].type !== 'image') return;
-        selection.setEnabled(false);
-        cropOverlayRef.current.start(items[0]);
-      },
+      startCrop: () => startCropForSelection(false),
     });
-  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers]);
+  }, [writeCanvasToClipboard, onCanvasChange, handleGroup, handleUngroup, refreshLayers, startCropForSelection]);
 
   // Save on page unload (only for users with edit access)
   useEffect(() => {

@@ -12,8 +12,9 @@ import type { Viewport } from 'pixi-viewport';
 import type { SceneManager, SceneItem } from './SceneManager';
 import { getItemWorldBounds, rebuildGroupChildSet } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
-import type { GroupObject } from './scene-format';
+import type { GroupObject, ImageObject } from './scene-format';
 import { randomFrameColor } from './sprites/FrameSprite';
+import { applyImageDisplayTransform, transformPoint } from './imageTransforms';
 
 /**
  * Group selected items into a single group container.
@@ -84,8 +85,12 @@ export function groupItems(
 
     // Reparent display object
     obj.parent?.removeChild(obj);
-    obj.position.set(localX, localY);
     groupItem.displayObject.addChild(obj);
+    if (child.type === 'image') {
+      applyImageDisplayTransform(obj, child.data as ImageObject);
+    } else {
+      obj.position.set(localX, localY);
+    }
   }
 
   selection.clear();
@@ -128,8 +133,12 @@ export function ungroupItems(
     const obj = childItem.displayObject;
 
     // Convert local position to world space, accounting for group scale
-    const worldX = groupX + childItem.data.x * groupSx;
-    const worldY = groupY + childItem.data.y * groupSy;
+    const worldOrigin = transformPoint(
+      { x: childItem.data.x, y: childItem.data.y },
+      { x: groupX, y: groupY, sx: groupSx, sy: groupSy, angle: groupAngle },
+    );
+    const worldX = worldOrigin.x;
+    const worldY = worldOrigin.y;
 
     // Propagate group scale to child
     childItem.data.sx *= groupSx;
@@ -145,9 +154,13 @@ export function ungroupItems(
     // Reparent display object
     obj.parent?.removeChild(obj);
     viewport.addChild(obj);
-    obj.position.set(worldX, worldY);
-    obj.scale.set(childItem.data.sx, childItem.data.sy);
-    obj.angle = childItem.data.angle;
+    if (childItem.type === 'image') {
+      applyImageDisplayTransform(obj, childItem.data as ImageObject);
+    } else {
+      obj.position.set(worldX, worldY);
+      obj.scale.set(childItem.data.sx, childItem.data.sy);
+      obj.angle = childItem.data.angle;
+    }
 
     childIds.push(childId);
   }
@@ -188,9 +201,13 @@ export function reparentGroupChildren(scene: SceneManager): void {
       // Only reparent if currently in viewport (not already in a group)
       if (obj.parent !== groupContainer) {
         obj.parent?.removeChild(obj);
-        // data.x/y are already local coords (saved that way)
-        obj.position.set(childItem.data.x, childItem.data.y);
         groupContainer.addChild(obj);
+        // data.x/y are already local coords (saved that way)
+        if (childItem.type === 'image') {
+          applyImageDisplayTransform(obj, childItem.data as ImageObject);
+        } else {
+          obj.position.set(childItem.data.x, childItem.data.y);
+        }
       }
     }
   }

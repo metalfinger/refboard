@@ -132,6 +132,7 @@ export class CropOverlay extends Container {
     if (!this._item) return;
     const data = this._item.data;
     const zoom = this._viewport.scale.x;
+    const viewCrop = this._getViewCrop();
 
     // Image world rect
     const ix = data.x;
@@ -140,10 +141,10 @@ export class CropOverlay extends Container {
     const ih = data.h * data.sy;
 
     // Crop rect in world space
-    const cx = ix + this._crop.x * iw;
-    const cy = iy + this._crop.y * ih;
-    const cw = this._crop.w * iw;
-    const ch = this._crop.h * ih;
+    const cx = ix + viewCrop.x * iw;
+    const cy = iy + viewCrop.y * ih;
+    const cw = viewCrop.w * iw;
+    const ch = viewCrop.h * ih;
 
     // Dim: draw 4 rectangles around the crop area
     this._dim.clear();
@@ -210,7 +211,7 @@ export class CropOverlay extends Container {
 
   private _onDown(e: FederatedPointerEvent, id: HandleId): void {
     e.stopPropagation();
-    this._drag = { handleId: id, startCrop: { ...this._crop } };
+    this._drag = { handleId: id, startCrop: this._getViewCrop() };
 
     // Register move/up on the stage (single handler, not per-handle)
     this._removeDragListeners();
@@ -288,12 +289,37 @@ export class CropOverlay extends Container {
         break;
     }
 
-    this._crop = crop;
+    this._setViewCrop(crop);
     this._draw();
   }
 
   private _onUp(): void {
     this._drag = null;
     this._removeDragListeners();
+  }
+
+  private _getViewCrop(): CropRect {
+    if (!this._item) return { ...this._crop };
+    const data = this._item.data as ImageObject;
+    return {
+      x: data.flipX ? 1 - (this._crop.x + this._crop.w) : this._crop.x,
+      y: data.flipY ? 1 - (this._crop.y + this._crop.h) : this._crop.y,
+      w: this._crop.w,
+      h: this._crop.h,
+    };
+  }
+
+  private _setViewCrop(viewCrop: CropRect): void {
+    if (!this._item) {
+      this._crop = { ...viewCrop };
+      return;
+    }
+    const data = this._item.data as ImageObject;
+    this._crop = {
+      x: data.flipX ? 1 - (viewCrop.x + viewCrop.w) : viewCrop.x,
+      y: data.flipY ? 1 - (viewCrop.y + viewCrop.h) : viewCrop.y,
+      w: viewCrop.w,
+      h: viewCrop.h,
+    };
   }
 }

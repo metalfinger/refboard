@@ -7,6 +7,7 @@
 import type { SceneItem } from './SceneManager';
 import type { ImageObject } from './scene-format';
 import { ColorMatrixFilter } from 'pixi.js';
+import { applyImageDisplayTransform, getImageDisplayTransform } from './imageTransforms';
 
 // ─── Helpers ───
 
@@ -60,11 +61,14 @@ function _animTick() {
 
 /** Sync displayObject position from item.data with smooth animation. */
 function syncPosition(item: SceneItem): void {
+  const target = item.type === 'image'
+    ? getImageDisplayTransform(item.data as ImageObject)
+    : { x: item.data.x, y: item.data.y };
   _animTargets.set(item, {
     startX: item.displayObject.x,
     startY: item.displayObject.y,
-    endX: item.data.x,
-    endY: item.data.y,
+    endX: target.x,
+    endY: target.y,
     t: 0,
   });
   if (!_animRaf) {
@@ -82,6 +86,12 @@ export function onArrangeAnimationDone(cb: (items: SceneItem[]) => void): void {
 
 /** Sync displayObject scale from item.data. */
 function syncScale(item: SceneItem): void {
+  if (item.type === 'image') {
+    const t = getImageDisplayTransform(item.data as ImageObject);
+    item.displayObject.scale.set(t.scaleX, t.scaleY);
+    item.displayObject.angle = t.angle;
+    return;
+  }
   item.displayObject.scale.set(item.data.sx, item.data.sy);
 }
 
@@ -358,14 +368,22 @@ function layoutAsGrid(sorted: SceneItem[], anchor: { x: number; y: number }) {
 export function flipHorizontal(objects: SceneItem[]) {
   objects.forEach((item) => {
     item.data.flipX = !item.data.flipX;
-    item.displayObject.scale.x = item.data.sx * (item.data.flipX ? -1 : 1);
+    if (item.type === 'image') {
+      applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+    } else {
+      item.displayObject.scale.x = item.data.sx * (item.data.flipX ? -1 : 1);
+    }
   });
 }
 
 export function flipVertical(objects: SceneItem[]) {
   objects.forEach((item) => {
     item.data.flipY = !item.data.flipY;
-    item.displayObject.scale.y = item.data.sy * (item.data.flipY ? -1 : 1);
+    if (item.type === 'image') {
+      applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+    } else {
+      item.displayObject.scale.y = item.data.sy * (item.data.flipY ? -1 : 1);
+    }
   });
 }
 
@@ -446,7 +464,13 @@ export function scaleBy(objects: SceneItem[], factor: number) {
 export function rotate90(objects: SceneItem[], clockwise: boolean) {
   objects.forEach((item) => {
     item.data.angle = ((item.data.angle + (clockwise ? 90 : -90)) % 360 + 360) % 360;
-    item.displayObject.angle = item.data.angle;
+    if (item.type === 'image') {
+      const t = getImageDisplayTransform(item.data as ImageObject);
+      item.displayObject.angle = t.angle;
+      item.displayObject.scale.set(t.scaleX, t.scaleY);
+    } else {
+      item.displayObject.angle = item.data.angle;
+    }
   });
 }
 

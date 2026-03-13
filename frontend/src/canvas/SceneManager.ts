@@ -18,6 +18,15 @@ import { TextSprite } from './sprites/TextSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
 import { SpatialGrid } from './SpatialGrid';
+import {
+  applyImageDisplayTransform,
+  getBoundsFromPoints,
+  getImageTransformedCorners,
+  getImageWorldBounds,
+  getRectTransformedCorners,
+  normalizeImageTransformData,
+  transformPoints,
+} from './imageTransforms';
 import type {
   SceneData,
   AnySceneObject,
@@ -72,9 +81,10 @@ export function isGroupChild(id: string): boolean {
 }
 
 /** Single source of truth for an item's world-space bounding rect.
- *  Uses data.sx/sy (not obj.scale which may be mid-animation).
+ *  Uses canonical scene data for top-level items.
  *  For groups: computes the union of children bounds (w/h on group data may be 0).
- *  For group children: converts local coords to world using parent group transforms. */
+ *  For group children: uses composed Pixi world bounds so parent transforms,
+ *  image flips, and crop masks stay aligned. */
 export function getItemWorldBounds(item: SceneItem): { x: number; y: number; w: number; h: number } {
   if (item.data.type === 'group') {
     return _getGroupWorldBounds(item);
@@ -82,17 +92,22 @@ export function getItemWorldBounds(item: SceneItem): { x: number; y: number; w: 
 
   // If this item is a child of a group, convert local → world
   const parent = item.displayObject.parent;
-  if (parent && parent.label && _groupChildIds?.has(item.id)) {
-    const px = parent.position.x;
-    const py = parent.position.y;
-    const psx = parent.scale.x;
-    const psy = parent.scale.y;
-    return {
-      x: px + item.data.x * psx,
-      y: py + item.data.y * psy,
-      w: item.data.w * Math.abs(item.data.sx * psx),
-      h: item.data.h * Math.abs(item.data.sy * psy),
+  if (parent?.label && _groupChildIds?.has(item.id)) {
+    const parentTransform = {
+      x: parent.position.x,
+      y: parent.position.y,
+      sx: parent.scale.x,
+      sy: parent.scale.y,
+      angle: parent.angle,
     };
+    const localCorners = item.data.type === 'image'
+      ? getImageTransformedCorners(item.data as ImageObject)
+      : getRectTransformedCorners(item.data);
+    return getBoundsFromPoints(transformPoints(localCorners, parentTransform));
+  }
+
+  if (item.data.type === 'image') {
+    return getImageWorldBounds(item.data as ImageObject);
   }
 
   return {
@@ -296,6 +311,7 @@ export class SceneManager {
     switch (data.type) {
       case 'image': {
         const imgData = data as ImageObject;
+        normalizeImageTransformData(imgData);
         if (isGifAsset(imgData.asset)) {
           displayObject = new AnimatedGifSprite(imgData.asset, imgData.w, imgData.h, this.textures);
         } else {
@@ -357,9 +373,13 @@ export class SceneManager {
     }
 
     // Common properties
-    displayObject.position.set(data.x, data.y);
-    displayObject.scale.set(data.sx, data.sy);
-    displayObject.angle = data.angle;
+    if (data.type === 'image') {
+      applyImageDisplayTransform(displayObject, data as ImageObject);
+    } else {
+      displayObject.position.set(data.x, data.y);
+      displayObject.scale.set(data.sx, data.sy);
+      displayObject.angle = data.angle;
+    }
     displayObject.alpha = data.opacity;
     displayObject.visible = data.visible;
     displayObject.eventMode = data.locked ? 'none' : 'static';
@@ -401,9 +421,14 @@ export class SceneManager {
   _updateItem(item: SceneItem, data: AnySceneObject): void {
     const obj = item.displayObject;
 
-    obj.position.set(data.x, data.y);
-    obj.scale.set(data.sx, data.sy);
-    obj.angle = data.angle;
+    if (data.type === 'image') {
+      normalizeImageTransformData(data as ImageObject);
+      applyImageDisplayTransform(obj, data as ImageObject);
+    } else {
+      obj.position.set(data.x, data.y);
+      obj.scale.set(data.sx, data.sy);
+      obj.angle = data.angle;
+    }
     obj.alpha = data.opacity;
     obj.visible = data.visible;
     obj.eventMode = data.locked ? 'none' : 'static';
@@ -532,19 +557,23 @@ export class SceneManager {
     this.spatialGrid.remove(id);
     this.items.delete(id);
 
-    // Scale toward center on removal
-    const halfW = item.data.w * item.data.sx / 2;
-    const halfH = item.data.h * item.data.sy / 2;
-    const startX = item.data.x;
-    const startY = item.data.y;
+    // Scale toward center on removal.
+    const startX = obj.x;
+    const startY = obj.y;
+    const startScaleX = obj.scale.x;
+    const startScaleY = obj.scale.y;
+    const dirX = startScaleX < 0 ? -1 : 1;
+    const dirY = startScaleY < 0 ? -1 : 1;
+    const halfW = item.data.w * Math.abs(item.data.sx) / 2;
+    const halfH = item.data.h * Math.abs(item.data.sy) / 2;
 
     const scaleSpring = new Spring(1.0, 0.8, PRESETS.snappy);
     scaleSpring.onUpdate = (v) => {
       if (!obj.destroyed) {
-        obj.scale.set(v * item.data.sx, v * item.data.sy);
+        obj.scale.set(v * Math.abs(startScaleX) * dirX, v * Math.abs(startScaleY) * dirY);
         obj.position.set(
-          startX + halfW * (1 - v),
-          startY + halfH * (1 - v),
+          startX + halfW * (1 - v) * dirX,
+          startY + halfH * (1 - v) * dirY,
         );
       }
     };

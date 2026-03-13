@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io-client';
 import type { SceneManager, SceneItem } from './SceneManager';
-import type { SceneData, AnySceneObject } from './scene-format';
+import type { SceneData, AnySceneObject, ImageObject } from './scene-format';
+import { applyImageDisplayTransform } from './imageTransforms';
 
 /**
  * Sync protocol v3 — Excalidraw-inspired incremental element sync.
@@ -225,9 +226,13 @@ export function setupSync(
     item.data.sy = t.sy;
     item.data.angle = t.angle;
     const obj = item.displayObject;
-    obj.position.set(t.x, t.y);
-    obj.scale.set(t.sx, t.sy);
-    obj.angle = t.angle;
+    if (item.type === 'image') {
+      applyImageDisplayTransform(obj, item.data as ImageObject);
+    } else {
+      obj.position.set(t.x, t.y);
+      obj.scale.set(t.sx, t.sy);
+      obj.angle = t.angle;
+    }
     options?.onRemoteTransform?.(item);
   }
 

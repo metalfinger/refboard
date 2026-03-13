@@ -12,6 +12,8 @@ import { TransformBox } from './TransformBox';
 import { SnapGuides } from './SnapGuides';
 import { ImageSprite } from './sprites/ImageSprite';
 import { VideoSprite } from './sprites/VideoSprite';
+import type { ImageObject } from './scene-format';
+import { applyImageDisplayTransform } from './imageTransforms';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -289,10 +291,14 @@ export class SelectionManager {
 
         // Move all selected items by corrected delta and broadcast all together
         for (const item of selected) {
-          item.displayObject.x += ddx;
-          item.displayObject.y += ddy;
-          item.data.x = item.displayObject.x;
-          item.data.y = item.displayObject.y;
+          item.data.x += ddx;
+          item.data.y += ddy;
+          if (item.type === 'image') {
+            applyImageDisplayTransform(item.displayObject, item.data as ImageObject);
+          } else {
+            item.displayObject.x = item.data.x;
+            item.displayObject.y = item.data.y;
+          }
         }
         if (this._onItemsTransform) {
           this._onItemsTransform(selected);

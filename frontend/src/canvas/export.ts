@@ -44,24 +44,23 @@ function renderToCanvas(
 
   // Reparent items into temp container
   const tempContainer = new Container();
-  const saved = new Map<string, { parent: Container; x: number; y: number; sx: number; sy: number }>();
-  const worldBoundsMap = new Map<string, { x: number; y: number; w: number; h: number }>();
-
-  for (const item of items) {
-    worldBoundsMap.set(item.id, getItemWorldBounds(item));
-  }
-
+  const saved = new Map<string, { parent: Container; x: number; y: number; sx: number; sy: number; angle: number; globalX: number; globalY: number }>();
   for (const item of items) {
     const obj = item.displayObject;
+    const globalOrigin = obj.parent?.toGlobal(obj.position) ?? obj.position;
     saved.set(item.id, {
       parent: obj.parent as Container,
       x: obj.x, y: obj.y,
       sx: obj.scale.x, sy: obj.scale.y,
+      angle: obj.angle,
+      globalX: globalOrigin.x,
+      globalY: globalOrigin.y,
     });
     obj.parent?.removeChild(obj);
-    const wb = worldBoundsMap.get(item.id)!;
-    obj.position.set(wb.x - minX + pad, wb.y - minY + pad);
-    obj.scale.set(item.data.sx, item.data.sy);
+    const s = saved.get(item.id)!;
+    obj.position.set(s.globalX - minX + pad, s.globalY - minY + pad);
+    obj.scale.set(s.sx, s.sy);
+    obj.angle = s.angle;
     tempContainer.addChild(obj);
   }
 
@@ -91,6 +90,7 @@ function renderToCanvas(
       s.parent.addChild(item.displayObject);
       item.displayObject.position.set(s.x, s.y);
       item.displayObject.scale.set(s.sx, s.sy);
+      item.displayObject.angle = s.angle;
     }
     tempContainer.destroy();
     texture?.destroy(true);
