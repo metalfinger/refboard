@@ -39,6 +39,8 @@ export class CropOverlay extends Container {
   private _onCancel: (() => void) | null = null;
   private _onStateChange: ((active: boolean) => void) | null = null;
   private _keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private _domMove: ((e: PointerEvent) => void) | null = null;
+  private _domUp: ((e: PointerEvent) => void) | null = null;
 
   constructor(viewport: Viewport) {
     super();
@@ -56,9 +58,6 @@ export class CropOverlay extends Container {
     this._cropHitArea.eventMode = 'static';
     this._cropHitArea.cursor = 'move';
     this._cropHitArea.on('pointerdown', (e: FederatedPointerEvent) => this._onDown(e, 'move'));
-    this._cropHitArea.on('globalpointermove', (e: FederatedPointerEvent) => this._onMove(e));
-    this._cropHitArea.on('pointerup', () => this._onUp());
-    this._cropHitArea.on('pointerupoutside', () => this._onUp());
     this.addChild(this._cropHitArea);
 
     // Crop border
@@ -77,9 +76,6 @@ export class CropOverlay extends Container {
       h.eventMode = 'static';
       h.cursor = cursors[id];
       h.on('pointerdown', (e: FederatedPointerEvent) => this._onDown(e, id));
-      h.on('globalpointermove', (e: FederatedPointerEvent) => this._onMove(e));
-      h.on('pointerup', () => this._onUp());
-      h.on('pointerupoutside', () => this._onUp());
       this._handles.set(id, h);
       this.addChild(h);
     }
@@ -132,6 +128,7 @@ export class CropOverlay extends Container {
 
   /** Clean up all state and listeners. Safe to call multiple times. */
   private _cleanup(): void {
+    this._removeDomDragListeners();
     this._viewport.plugins.resume('drag');
     this._item = null;
     this._drag = null;
@@ -223,6 +220,9 @@ export class CropOverlay extends Container {
   private _onDown(e: FederatedPointerEvent, mode: DragMode): void {
     if (!this._item) return;
     e.stopPropagation();
+    if ('preventDefault' in e.nativeEvent && typeof e.nativeEvent.preventDefault === 'function') {
+      e.nativeEvent.preventDefault();
+    }
     const data = this._item.data as ImageObject;
     const world = this._viewport.toWorld(e.global.x, e.global.y);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
@@ -231,13 +231,19 @@ export class CropOverlay extends Container {
       startCrop: this._getViewCrop(),
       startPoint: { x: clamp01(viewPoint.x), y: clamp01(viewPoint.y) },
     };
+    this._removeDomDragListeners();
+    this._domMove = (ev: PointerEvent) => this._onDomMove(ev);
+    this._domUp = () => this._onUp();
+    window.addEventListener('pointermove', this._domMove);
+    window.addEventListener('pointerup', this._domUp, { once: true });
+    window.addEventListener('pointercancel', this._domUp, { once: true });
   }
 
-  private _onMove(e: FederatedPointerEvent): void {
+  private _onMoveScreen(screenX: number, screenY: number): void {
     if (!this._drag || !this._item) return;
 
     const data = this._item.data as ImageObject;
-    const world = this._viewport.toWorld(e.global.x, e.global.y);
+    const world = this._viewport.toWorld(screenX, screenY);
     const viewPoint = worldToImageViewPoint(data, world.x, world.y);
     const nx = clamp01(viewPoint.x);
     const ny = clamp01(viewPoint.y);
@@ -294,8 +300,15 @@ export class CropOverlay extends Container {
     this._draw();
   }
 
+  private _onDomMove(e: PointerEvent): void {
+    const point = this._clientToCanvasPoint(e.clientX, e.clientY);
+    if (!point) return;
+    this._onMoveScreen(point.x, point.y);
+  }
+
   private _onUp(): void {
     this._drag = null;
+    this._removeDomDragListeners();
   }
 
   private _getViewCrop(): CropRect {
@@ -334,5 +347,28 @@ export class CropOverlay extends Container {
 
   private _toHandlePosition(point: { x: number; y: number }): { px: number; py: number } {
     return { px: point.x, py: point.y };
+  }
+
+  private _removeDomDragListeners(): void {
+    if (this._domMove) {
+      window.removeEventListener('pointermove', this._domMove);
+      this._domMove = null;
+    }
+    if (this._domUp) {
+      window.removeEventListener('pointerup', this._domUp);
+      window.removeEventListener('pointercancel', this._domUp);
+      this._domUp = null;
+    }
+  }
+
+  private _clientToCanvasPoint(clientX: number, clientY: number): { x: number; y: number } | null {
+    const domElement = (this._viewport as any)?.options?.events?.domElement as HTMLCanvasElement | undefined;
+    if (!domElement) return null;
+    const rect = domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: (clientX - rect.left) * (domElement.width / rect.width),
+      y: (clientY - rect.top) * (domElement.height / rect.height),
+    };
   }
 }
