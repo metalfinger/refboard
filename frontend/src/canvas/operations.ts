@@ -485,12 +485,29 @@ export function scaleBy(objects: SceneItem[], factor: number) {
 
 export function rotate90(objects: SceneItem[], clockwise: boolean) {
   objects.forEach((item) => {
+    const before = bounds(item);
+    const cx = before.x + before.w / 2;
+    const cy = before.y + before.h / 2;
     item.data.angle = ((item.data.angle + (clockwise ? 90 : -90)) % 360 + 360) % 360;
     if (item.type === 'image') {
       const t = getImageDisplayTransform(item.data as ImageObject);
       item.displayObject.angle = t.angle;
       item.displayObject.scale.set(t.scaleX, t.scaleY);
     } else {
+      item.displayObject.angle = item.data.angle;
+    }
+    const after = bounds(item);
+    item.data.x += cx - (after.x + after.w / 2);
+    item.data.y += cy - (after.y + after.h / 2);
+    if (item.type === 'image') {
+      const t = getImageDisplayTransform(item.data as ImageObject);
+      item.displayObject.x = t.x;
+      item.displayObject.y = t.y;
+      item.displayObject.angle = t.angle;
+      item.displayObject.scale.set(t.scaleX, t.scaleY);
+    } else {
+      item.displayObject.x = item.data.x;
+      item.displayObject.y = item.data.y;
       item.displayObject.angle = item.data.angle;
     }
   });
