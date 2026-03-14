@@ -237,7 +237,9 @@ type StickyObject = {
 
 ---
 
-## Phase 3 — PDF Support
+## Phase 3 — PDF Support ✅ COMPLETED (2026-03-14)
+
+> **Implemented:** Full PDF upload → page rasterization (pdftoppm) → page picker modal → canvas placement as `pdf-page` objects. See `docs/superpowers/specs/2026-03-14-pdf-support-design.md` for detailed spec and `docs/superpowers/plans/2026-03-14-pdf-support-plan.md` for implementation plan.
 
 ### Objective
 
