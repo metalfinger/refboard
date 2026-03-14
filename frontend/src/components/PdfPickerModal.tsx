@@ -121,7 +121,7 @@ export default function PdfPickerModal({
   };
 
   // Build asset URL from key
-  const thumbUrl = (key: string) => `/api/assets/${key}`;
+  const thumbUrl = (key: string) => `/api/images/${key}`;
 
   return (
     <div style={overlayStyle} onClick={onCancel}>
