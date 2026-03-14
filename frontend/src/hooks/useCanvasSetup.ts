@@ -9,6 +9,8 @@ import { InboxZone } from '../canvas/InboxZone';
 import { LaserPointer } from '../canvas/LaserPointer';
 import { VideoSprite } from '../canvas/sprites/VideoSprite';
 import { ImageSprite } from '../canvas/sprites/ImageSprite';
+import { PdfPageSprite } from '../canvas/sprites/PdfPageSprite';
+import type { PdfUploadedData } from '../canvas/image-drop';
 import { UploadManager } from '../stores/uploadManager';
 import { AnnotationStore } from '../stores/annotationStore';
 import { PinOverlay } from '../canvas/PinOverlay';
@@ -61,7 +63,9 @@ interface CanvasSetupDeps {
   pasteOpts?: {
     onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
     onShortTextPaste?: (text: string) => void;
+    onPdfUploaded?: (data: PdfUploadedData) => void;
   };
+  onPdfUploaded?: (data: PdfUploadedData) => void;
   onCropModeChange?: (active: boolean) => void;
 }
 
@@ -74,7 +78,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
-    pasteOpts,
+    pasteOpts, onPdfUploaded,
     onCropModeChange,
   } = deps;
 
@@ -324,6 +328,38 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           // Update upload manager — transitions video jobs from "processing" to "done"
           uploadManager.processingComplete(imageId);
 
+          // PDF thumbnail arrived — update placed pdf-page items
+          if (data.type === 'pdf-thumbnail') {
+            for (const item of scene.items.values()) {
+              if (item.data.type !== 'pdf-page') continue;
+              const d = item.data as any;
+              if (d.pdfImageId === imageId && d.pageNumber === data.pageNumber) {
+                d.thumb = data.thumbAssetKey;
+                if (item.displayObject instanceof PdfPageSprite) {
+                  item.displayObject.setThumb(data.thumbAssetKey);
+                }
+                break;
+              }
+            }
+            return;
+          }
+
+          // PDF hires arrived — upgrade texture on placed pdf-page items
+          if (data.type === 'pdf-hires') {
+            for (const item of scene.items.values()) {
+              if (item.data.type !== 'pdf-page') continue;
+              const d = item.data as any;
+              if (d.pdfImageId === imageId && d.pageNumber === data.pageNumber) {
+                d.asset = data.hiresAssetKey;
+                if (item.displayObject instanceof PdfPageSprite) {
+                  item.displayObject.upgradeTexture(data.hiresAssetKey);
+                }
+                break;
+              }
+            }
+            return;
+          }
+
           // Find the video item by matching its DB image ID stored in scene data
           for (const item of scene.items.values()) {
             if (item.data.type !== 'video') continue;
@@ -513,9 +549,10 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
           dropTarget = canvasEl?.parentElement ?? null;
         }
         if (dropTarget) {
-          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager);
+          dropCleanupRef.current = setupDragDrop(dropTarget, viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager, onPdfUploaded);
         }
-        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager, pasteOpts);
+        const mergedPasteOpts = pasteOpts ? { ...pasteOpts, onPdfUploaded } : { onPdfUploaded };
+        pasteCleanupRef.current = setupPaste(viewport, scene, resolvedBoardId, onCanvasChange, selection, uploadManager, mergedPasteOpts);
       }
     }, 50);
 
@@ -552,7 +589,7 @@ export function useCanvasSetup(deps: CanvasSetupDeps) {
       sharpnessCleanupRef.current = null;
       disconnectSocket();
     };
-  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds, pasteOpts, onCropModeChange]);
+  }, [boardData, resolvedBoardId, user, isPublicView, onCanvasChange, showToast, canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, uploadManager, setOnlineUsers, setSelectedLayerIds, pasteOpts, onPdfUploaded, onCropModeChange]);
 
   return { annotationStore: annotationStoreRef.current, pinOverlay: pinOverlayRef.current, textEditor: textEditorRef.current, cropOverlayRef, mdOverlay: mdOverlayRef.current };
 }
