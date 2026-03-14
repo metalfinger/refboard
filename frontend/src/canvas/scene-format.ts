@@ -4,7 +4,7 @@
 
 export interface SceneObject {
   id: string;
-  type: 'image' | 'video' | 'text' | 'group' | 'drawing' | 'sticky' | 'markdown';
+  type: 'image' | 'video' | 'text' | 'group' | 'drawing' | 'sticky' | 'markdown' | 'pdf-page';
   x: number;
   y: number;
   w: number;
@@ -94,7 +94,19 @@ export interface MarkdownObject extends SceneObject {
   cornerRadius: number;   // border radius, default 10
 }
 
-export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject | StickyObject | MarkdownObject;
+export interface PdfPageObject extends SceneObject {
+  type: 'pdf-page';
+  asset: string | null;   // high-res asset key — null until pdf-hires job completes
+  thumb: string | null;   // thumbnail asset key — null until pdf-thumbnail job completes
+  pdfImageId: string;     // source PDF's image ID
+  pdfName: string;        // original filename
+  pageNumber: number;     // 1-indexed
+  pageCount: number;      // total pages in source PDF
+  nativeW: number;        // pixel dimensions at 200 DPI
+  nativeH: number;
+}
+
+export type AnySceneObject = ImageObject | VideoObject | TextObject | DrawingObject | GroupObject | StickyObject | MarkdownObject | PdfPageObject;
 
 export interface SceneData {
   v: 2;

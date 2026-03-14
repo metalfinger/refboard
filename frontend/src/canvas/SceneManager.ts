@@ -58,7 +58,7 @@ function isGifAsset(asset: string): boolean {
 
 export interface SceneItem {
   id: string;
-  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky' | 'markdown';
+  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky' | 'markdown' | 'pdf-page';
   displayObject: Container;
   data: AnySceneObject;
 }
