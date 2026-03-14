@@ -26,6 +26,7 @@ const MIME_TO_EXT = {
   'video/mp4': '.mp4',
   'video/webm': '.webm',
   'video/quicktime': '.mov',
+  'application/pdf': '.pdf',
 };
 
 /**

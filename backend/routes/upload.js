@@ -6,8 +6,9 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const { authMiddleware } = require('../auth');
-const { getBoard, getCollectionMember, createImage, createMediaJob } = require('../db');
+const { getBoard, getCollectionMember, createImage, createMediaJob, createPdfPage, updateImagePageCount } = require('../db');
 const { putBuffer, getImageUrl, MIME_TO_EXT, MAX_FILE_SIZE } = require('../minio');
+const { pdfInfo, bufferToTempFile } = require('../pdf-utils');
 
 const router = Router();
 
@@ -25,7 +26,9 @@ const VIDEO_MIME_TYPES = [
   'video/quicktime',
 ];
 
-const ALLOWED_MIME_TYPES = [...IMAGE_MIME_TYPES, ...VIDEO_MIME_TYPES];
+const PDF_MIME_TYPES = ['application/pdf'];
+
+const ALLOWED_MIME_TYPES = [...IMAGE_MIME_TYPES, ...VIDEO_MIME_TYPES, ...PDF_MIME_TYPES];
 
 const MAX_FILE_SIZE_LABEL = `${MAX_FILE_SIZE / 1024 / 1024}MB`;
 
@@ -85,6 +88,7 @@ async function getImageDimensions(buffer, mimeType) {
  */
 function classifyMedia(mimeType) {
   if (VIDEO_MIME_TYPES.includes(mimeType)) return 'video';
+  if (PDF_MIME_TYPES.includes(mimeType)) return 'pdf';
   return 'image';
 }
 
@@ -151,6 +155,63 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
     if (isVideo) {
       jobId = uuidv4();
       createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
+    }
+
+    // PDF: extract page info, create pdf_pages rows, queue thumbnail jobs
+    if (mediaType === 'pdf') {
+      const { tmpPath, cleanup } = bufferToTempFile(buffer, '.pdf');
+      try {
+        const info = await pdfInfo(tmpPath);
+        if (info.pageCount > 500) {
+          return res.status(400).json({ error: 'PDF exceeds 500 page limit' });
+        }
+
+        updateImagePageCount(imageId, info.pageCount);
+
+        // Create pdf_pages rows for all pages
+        for (let i = 0; i < info.pageCount; i++) {
+          const dim = info.dimensions[i] || { w: null, h: null };
+          createPdfPage(uuidv4(), imageId, i + 1, dim.w, dim.h);
+        }
+
+        // Queue thumbnail jobs for first 20 pages
+        const thumbLimit = Math.min(info.pageCount, 20);
+        for (let i = 1; i <= thumbLimit; i++) {
+          createMediaJob({
+            id: uuidv4(),
+            imageId,
+            boardId: board.id,
+            type: 'pdf-thumbnail',
+            priority: 0,
+            metaJson: JSON.stringify({ pageNumber: i }),
+          });
+        }
+
+        // For single-page PDFs, also queue hires
+        if (info.pageCount === 1) {
+          createMediaJob({
+            id: uuidv4(),
+            imageId,
+            boardId: board.id,
+            type: 'pdf-hires',
+            priority: 10,
+            metaJson: JSON.stringify({ pageNumber: 1 }),
+          });
+        }
+
+        return res.status(201).json({
+          id: image.id,
+          media_type: 'pdf',
+          page_count: info.pageCount,
+          dimensions: info.dimensions,
+          asset_key: image.asset_key,
+          width: info.dimensions[0]?.w || null,
+          height: info.dimensions[0]?.h || null,
+          single_page: info.pageCount === 1,
+        });
+      } finally {
+        cleanup();
+      }
     }
 
     return res.status(201).json({
