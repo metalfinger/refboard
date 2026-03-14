@@ -42,6 +42,9 @@ import { TextSprite } from '../canvas/sprites/TextSprite';
 import { StickySprite } from '../canvas/sprites/StickySprite';
 import { MarkdownSprite } from '../canvas/sprites/MarkdownSprite';
 import * as ops from '../canvas/operations';
+
+/** Types that cannot be rotated, flipped, or cropped. */
+const NON_TRANSFORMABLE = new Set(['pdf-page', 'sticky', 'markdown', 'text']);
 import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
 import PasteChoicePopup from '../components/PasteChoicePopup';
@@ -1205,10 +1208,10 @@ export default function Editor({ isPublicView }: EditorProps) {
             onRow={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeRow(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onColumn={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.arrangeColumn(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onStack={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.stackObjects(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
-            onFlipH={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
-            onFlipV={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
-            onRotateCW={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.rotate90(s, true); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
-            onRotateCCW={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.rotate90(s, false); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onFlipH={() => { const s = selectionRef.current?.getSelectedItems()?.filter(i => !NON_TRANSFORMABLE.has(i.type)); if (s?.length) { ops.flipHorizontal(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onFlipV={() => { const s = selectionRef.current?.getSelectedItems()?.filter(i => !NON_TRANSFORMABLE.has(i.type)); if (s?.length) { ops.flipVertical(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onRotateCW={() => { const s = selectionRef.current?.getSelectedItems()?.filter(i => !NON_TRANSFORMABLE.has(i.type)); if (s?.length) { ops.rotate90(s, true); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
+            onRotateCCW={() => { const s = selectionRef.current?.getSelectedItems()?.filter(i => !NON_TRANSFORMABLE.has(i.type)); if (s?.length) { ops.rotate90(s, false); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
             onGroup={handleGroup}
             onNormSize={() => { const s = selectionRef.current?.getSelectedItems(); if (s) { ops.normalizeSize(s); selectionRef.current?.transformBox.update(s); onCanvasChange(s.map(i => i.id)); } }}
           />
