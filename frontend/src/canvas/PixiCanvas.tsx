@@ -22,6 +22,7 @@ import { TextureManager } from './TextureManager';
 import { ImageSprite } from './sprites/ImageSprite';
 import { VideoSprite } from './sprites/VideoSprite';
 import { AnimatedGifSprite } from './sprites/AnimatedGifSprite';
+import { PdfPageSprite } from './sprites/PdfPageSprite';
 import { SpringManager } from './spring';
 import { convertFabricToV2 } from './scene-format';
 import type { SceneData } from './scene-format';
@@ -197,7 +198,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
           const vcx = bounds.x + bounds.width / 2;
           const vcy = bounds.y + bounds.height / 2;
 
-          const imageItems: { item: SceneItem; sprite: ImageSprite | AnimatedGifSprite; dist: number; near: boolean }[] = [];
+          const imageItems: { item: SceneItem; sprite: ImageSprite | AnimatedGifSprite | PdfPageSprite; dist: number; near: boolean }[] = [];
           const videoItems: { item: SceneItem; sprite: VideoSprite; dist: number; near: boolean }[] = [];
 
           // Spatial query: only check items within the extended viewport region
@@ -214,6 +215,8 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             const dist = (cx - vcx) ** 2 + (cy - vcy) ** 2;
 
             if (item.type === 'image' && (item.displayObject instanceof ImageSprite || item.displayObject instanceof AnimatedGifSprite)) {
+              imageItems.push({ item, sprite: item.displayObject, dist, near: true });
+            } else if (item.type === 'pdf-page' && item.displayObject instanceof PdfPageSprite) {
               imageItems.push({ item, sprite: item.displayObject, dist, near: true });
             } else if (item.type === 'video' && item.displayObject instanceof VideoSprite) {
               videoItems.push({ item, sprite: item.displayObject, dist, near: true });
@@ -257,7 +260,7 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
             const item = scene.items.get(id);
             if (!item) { loadedImages.delete(id); continue; }
             const sprite = item.displayObject;
-            if ((sprite instanceof ImageSprite || sprite instanceof AnimatedGifSprite) && sprite.loaded) {
+            if ((sprite instanceof ImageSprite || sprite instanceof AnimatedGifSprite || sprite instanceof PdfPageSprite) && sprite.loaded) {
               sprite.unloadTexture();
             }
             loadedImages.delete(id);
