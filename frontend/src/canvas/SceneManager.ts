@@ -15,6 +15,7 @@ import { DrawingSprite } from './sprites/DrawingSprite';
 import { FrameSprite } from './sprites/FrameSprite';
 import { StickySprite } from './sprites/StickySprite';
 import { MarkdownSprite } from './sprites/MarkdownSprite';
+import { PdfPageSprite } from './sprites/PdfPageSprite';
 import { TextSprite } from './sprites/TextSprite';
 import { SpringManager, Spring, PRESETS } from './spring';
 import { reparentGroupChildren } from './grouping';
@@ -38,6 +39,7 @@ import type {
   GroupObject,
   StickyObject,
   MarkdownObject,
+  PdfPageObject,
 } from './scene-format';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +60,7 @@ function isGifAsset(asset: string): boolean {
 
 export interface SceneItem {
   id: string;
-  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky' | 'markdown';
+  type: 'image' | 'video' | 'text' | 'drawing' | 'group' | 'sticky' | 'markdown' | 'pdf-page';
   displayObject: Container;
   data: AnySceneObject;
 }
@@ -371,6 +373,13 @@ export class SceneManager {
       case 'markdown': {
         const mdData = data as MarkdownObject;
         displayObject = new MarkdownSprite(mdData);
+        break;
+      }
+
+      case 'pdf-page': {
+        const d = data as PdfPageObject;
+        const sprite = new PdfPageSprite(d.thumb, d.asset, d.w, d.h, d.pageNumber, d.pageCount, this.textures);
+        displayObject = sprite;
         break;
       }
 
@@ -707,6 +716,34 @@ export class SceneManager {
     this._applyZOrder();
     this._onChange?.();
 
+    return this.items.get(data.id)!;
+  }
+
+  /** Create a PdfPageObject from a PDF upload and add it to the scene. */
+  addPdfPageFromUpload(
+    thumbKey: string | null, assetKey: string | null,
+    w: number, h: number, x: number, y: number,
+    pdfImageId: string, pdfName: string,
+    pageNumber: number, pageCount: number,
+  ): SceneItem {
+    const data: PdfPageObject = {
+      id: crypto.randomUUID(),
+      type: 'pdf-page',
+      x, y, w, h,
+      sx: 1, sy: 1, angle: 0,
+      z: this.nextZ(),
+      opacity: 1,
+      locked: false,
+      visible: true,
+      name: `${pdfName} p.${pageNumber}`,
+      asset: assetKey,
+      thumb: thumbKey,
+      pdfImageId, pdfName, pageNumber, pageCount,
+      nativeW: w, nativeH: h,
+    };
+    this._createItem(data);
+    this._applyZOrder();
+    this._onChange?.();
     return this.items.get(data.id)!;
   }
 

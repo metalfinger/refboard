@@ -238,12 +238,20 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'flip-h', keys: { key: 'h', alt: true, shift: true },
     category: 'image', description: 'Flip horizontal', needsSelection: true,
-    handler: (ctx) => _opUpdate(ctx, ops.flipHorizontal),
+    handler: (ctx) => {
+      const items = ctx.selection.getSelectedItems();
+      if (items.some(i => ['pdf-page', 'sticky', 'markdown', 'text'].includes(i.data.type))) return;
+      _opUpdate(ctx, ops.flipHorizontal);
+    },
   },
   {
     id: 'flip-v', keys: { key: 'v', alt: true, shift: true },
     category: 'image', description: 'Flip vertical', needsSelection: true,
-    handler: (ctx) => _opUpdate(ctx, ops.flipVertical),
+    handler: (ctx) => {
+      const items = ctx.selection.getSelectedItems();
+      if (items.some(i => ['pdf-page', 'sticky', 'markdown', 'text'].includes(i.data.type))) return;
+      _opUpdate(ctx, ops.flipVertical);
+    },
   },
   {
     id: 'reset-transform', keys: { key: 't', ctrl: true, shift: true },
@@ -316,12 +324,20 @@ export const shortcuts: ShortcutDef[] = [
   {
     id: 'rotate-cw', keys: { key: 'r' },
     category: 'image', description: 'Rotate 90° clockwise', needsSelection: true,
-    handler: (ctx) => _opUpdate(ctx, (items) => ops.rotate90(items, true)),
+    handler: (ctx) => {
+      const items = ctx.selection.getSelectedItems();
+      if (items.some(i => ['pdf-page', 'sticky', 'markdown', 'text'].includes(i.data.type))) return;
+      _opUpdate(ctx, (items) => ops.rotate90(items, true));
+    },
   },
   {
     id: 'rotate-ccw', keys: { key: 'r', shift: true },
     category: 'image', description: 'Rotate 90° counter-clockwise', needsSelection: true,
-    handler: (ctx) => _opUpdate(ctx, (items) => ops.rotate90(items, false)),
+    handler: (ctx) => {
+      const items = ctx.selection.getSelectedItems();
+      if (items.some(i => ['pdf-page', 'sticky', 'markdown', 'text'].includes(i.data.type))) return;
+      _opUpdate(ctx, (items) => ops.rotate90(items, false));
+    },
   },
 
   // ═══════════════════════════════════════

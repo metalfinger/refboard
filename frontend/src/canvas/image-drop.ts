@@ -1,4 +1,4 @@
-import { Graphics } from 'pixi.js';
+import { Graphics, Text, TextStyle, Ticker } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SceneManager } from './SceneManager';
 import type { SelectionManager } from './SelectionManager';
@@ -7,6 +7,14 @@ import { uploadImage, uploadImageFromUrl } from '../api';
 import { wasRecentInternalPaste } from './shortcut-definitions';
 
 type OnChange = () => void;
+
+export interface PdfUploadedData {
+  imageId: string;
+  fileName: string;
+  pageCount: number;
+  dimensions: Array<{ w: number; h: number }>;
+  singlePage: boolean;
+}
 
 /** Client-side file size limit (matches backend MAX_FILE_SIZE_MB default) */
 const MAX_FILE_SIZE_MB = 200;
@@ -22,10 +30,11 @@ const ALLOWED_MIME_TYPES = new Set([
   'video/mp4',
   'video/webm',
   'video/quicktime',
+  'application/pdf',
 ]);
 
 /** Fallback: accepted file extensions (for when browser reports empty/wrong MIME). */
-const ALLOWED_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov)$/i;
+const ALLOWED_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|mp4|webm|mov|pdf)$/i;
 
 /** Check if a file should be accepted (MIME or extension fallback). */
 function isFileAllowed(file: File): boolean {
@@ -63,17 +72,37 @@ function extFromMime(mime: string): string {
 function createPlaceholder(viewport: Viewport, x: number, y: number): Graphics {
   const g = new Graphics();
   g.rect(0, 0, 200, 150);
-  g.fill({ color: 0x3d3d3d });
+  g.fill({ color: 0x2a2a2a });
   g.stroke({ width: 2, color: 0x4a9eff });
   g.position.set(x, y);
   g.interactive = false;
+
+  // "Loading..." label
+  const label = new Text({
+    text: 'Loading…',
+    style: new TextStyle({ fontSize: 14, fill: 0xaaaaaa, fontFamily: 'sans-serif' }),
+  });
+  label.anchor.set(0.5);
+  label.position.set(100, 75);
+  g.addChild(label);
+
+  // Pulsing border animation
+  let elapsed = 0;
+  const onTick = (ticker: Ticker) => {
+    elapsed += ticker.deltaMS;
+    g.alpha = 0.6 + 0.4 * Math.sin(elapsed * 0.005);
+  };
+  Ticker.shared.add(onTick);
+  (g as any)._pulseCleanup = () => Ticker.shared.remove(onTick);
+
   viewport.addChild(g);
   return g;
 }
 
 function removePlaceholder(viewport: Viewport, g: Graphics) {
+  (g as any)._pulseCleanup?.();
   viewport.removeChild(g);
-  g.destroy();
+  g.destroy({ children: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -134,6 +163,7 @@ export function setupDragDrop(
   onChange: OnChange,
   selection?: SelectionManager | null,
   uploads?: UploadManager | null,
+  onPdfUploaded?: (data: PdfUploadedData) => void,
 ): () => void {
   function onDragOver(e: DragEvent) {
     e.preventDefault();
@@ -202,18 +232,9 @@ export function setupDragDrop(
     const world = viewport.toWorld(e.clientX - rect.left, e.clientY - rect.top);
     const GAP = 20;
 
-    // Count valid media files to determine grid columns
-    let mediaCount = 0;
-    for (let i = 0; i < files.length; i++) {
-      if (isFileAllowed(files[i])) mediaCount++;
-    }
-    const cols = Math.ceil(Math.sqrt(mediaCount)); // square-ish grid
-    let col = 0;
-    let row = 0;
-    let rowMaxH = 0;
-    let cursorY = world.y;
-    const colWidths: number[] = new Array(cols).fill(0); // track widest per column
-    const newItemIds: string[] = [];
+    // ── Pass 1: validate files, create all jobs upfront so queue is visible ──
+    interface QueuedFile { file: File; jobId: string | undefined; }
+    const queued: QueuedFile[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -222,35 +243,42 @@ export function setupDragDrop(
       if (!isFileAllowed(file)) {
         if (isUnsupportedMedia(file)) {
           const ext = file.name?.match(/\.(\w+)$/)?.[1] || file.type.split('/')[1] || 'unknown';
-          uploads?.addRejected(
-            file.name || 'unknown',
-            `Unsupported format: .${ext}`,
-          );
+          uploads?.addRejected(file.name || 'unknown', `Unsupported format: .${ext}`);
         }
         continue;
       }
-
-      // Compute x from column widths so far
-      let cursorX = world.x;
-      for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
 
       // Client-side size validation
       if (file.size > MAX_FILE_SIZE) {
         const jobId = uploads?.addJob(file, boardId);
         if (jobId) uploads?.setFailed(jobId, `File too large (${(file.size / 1024 / 1024).toFixed(0)}MB, max ${MAX_FILE_SIZE_MB}MB)`);
-        col++;
-        if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
         continue;
       }
 
       const jobId = uploads?.addJob(file, boardId);
+      queued.push({ file, jobId });
+    }
 
+    // ── Pass 2: upload sequentially, placing in grid ──
+    const cols = Math.ceil(Math.sqrt(queued.length)) || 1;
+    let col = 0;
+    let row = 0;
+    let rowMaxH = 0;
+    let cursorY = world.y;
+    const colWidths: number[] = new Array(cols).fill(0);
+    const newItemIds: string[] = [];
+
+    for (const { file, jobId } of queued) {
       // Check if job was cancelled while queued (user clicked cancel)
       if (jobId && uploads?.isCancelled(jobId)) {
         col++;
         if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
         continue;
       }
+
+      // Compute x from column widths so far
+      let cursorX = world.x;
+      for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
 
       const placeholder = createPlaceholder(viewport, cursorX, cursorY);
       if (jobId) uploads?.startUpload(jobId);
@@ -260,11 +288,37 @@ export function setupDragDrop(
           if (jobId) uploads?.setProgress(jobId, p);
         });
         removePlaceholder(viewport, placeholder);
+
+        // PDF fork — single-page goes directly on canvas, multi-page opens picker
+        const resData = res.data.image || res.data;
+        if (resData.media_type === 'pdf') {
+          if (jobId) uploads?.uploadComplete(jobId, resData.id);
+          if (resData.single_page) {
+            const item = sceneManager.addPdfPageFromUpload(
+              null, null, resData.width, resData.height,
+              cursorX, cursorY,
+              resData.id, file.name, 1, 1,
+            );
+            newItemIds.push(item.id);
+            onChange();
+          } else if (onPdfUploaded) {
+            onPdfUploaded({
+              imageId: resData.id,
+              fileName: file.name,
+              pageCount: resData.page_count,
+              dimensions: resData.dimensions,
+              singlePage: false,
+            });
+          }
+          col++;
+          if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
+          continue;
+        }
+
         const { w: placedW, h: placedH, id } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
         newItemIds.push(id);
         if (placedW > (colWidths[col] || 0)) colWidths[col] = placedW;
         if (placedH > rowMaxH) rowMaxH = placedH;
-        // Link upload job to DB image for processing tracking
         const imgData = res.data.image || res.data;
         if (jobId) uploads?.uploadComplete(jobId, imgData.id);
       } catch (err: any) {
@@ -328,8 +382,19 @@ export function setupPaste(
   opts?: {
     onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
     onShortTextPaste?: (text: string) => void;
+    onPdfUploaded?: (data: PdfUploadedData) => void;
   },
 ): () => void {
+  // Track last known cursor position in world coordinates for paste-at-cursor
+  let lastWorldX: number | null = null;
+  let lastWorldY: number | null = null;
+  const onPointerMove = (e: any) => {
+    const world = viewport.toWorld(e.global.x, e.global.y);
+    lastWorldX = world.x;
+    lastWorldY = world.y;
+  };
+  viewport.on('pointermove', onPointerMove);
+
   async function onPaste(e: ClipboardEvent) {
     // If focus is inside a contentEditable (e.g. BlockNote editor), let native paste through
     const active = document.activeElement;
@@ -349,7 +414,7 @@ export function setupPaste(
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.type.startsWith('image/') || item.type.startsWith('video/')) hasMedia = true;
+      if (item.type.startsWith('image/') || item.type.startsWith('video/') || item.type === 'application/pdf') hasMedia = true;
       if (item.type === 'text/plain') textContent = e.clipboardData?.getData('text/plain') || '';
       if (item.type === 'text/html') htmlContent = e.clipboardData?.getData('text/html') || '';
     }
@@ -374,7 +439,7 @@ export function setupPaste(
       const item = items[i];
 
       // Skip non-media clipboard items (text, html, etc.)
-      if (!item.type.startsWith('image/') && !item.type.startsWith('video/')) continue;
+      if (!item.type.startsWith('image/') && !item.type.startsWith('video/') && item.type !== 'application/pdf') continue;
 
       e.preventDefault();
 
@@ -398,10 +463,9 @@ export function setupPaste(
         continue;
       }
 
-      // Place at viewport center (world coords)
-      const center = viewport.center;
-      const cx = center.x;
-      const cy = center.y;
+      // Place at cursor position if known, otherwise fall back to viewport center
+      const cx = lastWorldX ?? viewport.center.x;
+      const cy = lastWorldY ?? viewport.center.y;
 
       const placeholder = createPlaceholder(viewport, cx - 100, cy - 75);
       const jobId = uploads?.addJob(file, boardId);
@@ -411,6 +475,31 @@ export function setupPaste(
           if (jobId) uploads?.setProgress(jobId, p);
         });
         removePlaceholder(viewport, placeholder);
+
+        // PDF fork — single-page goes directly on canvas, multi-page opens picker
+        const resData = res.data.image || res.data;
+        if (resData.media_type === 'pdf') {
+          if (jobId) uploads?.uploadComplete(jobId, resData.id);
+          if (resData.single_page) {
+            const pdfItem = sceneManager.addPdfPageFromUpload(
+              null, null, resData.width, resData.height,
+              cx - 100, cy - 75,
+              resData.id, file.name, 1, 1,
+            );
+            newItemIds.push(pdfItem.id);
+            onChange();
+          } else if (opts?.onPdfUploaded) {
+            opts.onPdfUploaded({
+              imageId: resData.id,
+              fileName: file.name,
+              pageCount: resData.page_count,
+              dimensions: resData.dimensions,
+              singlePage: false,
+            });
+          }
+          continue;
+        }
+
         const { id } = handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
         newItemIds.push(id);
         const imgData = res.data.image || res.data;
@@ -434,5 +523,6 @@ export function setupPaste(
   document.addEventListener('paste', onPaste);
   return () => {
     document.removeEventListener('paste', onPaste);
+    viewport.off('pointermove', onPointerMove);
   };
 }

@@ -46,7 +46,8 @@ import ReactDOM from 'react-dom';
 import MarkdownReadView from '../components/MarkdownReadView';
 import PasteChoicePopup from '../components/PasteChoicePopup';
 import MarkdownFormatToolbar from '../components/MarkdownFormatToolbar';
-import { saveCanvas } from '../api';
+import PdfPickerModal from '../components/PdfPickerModal';
+import api, { saveCanvas } from '../api';
 const LazyMarkdownEditView = React.lazy(() => import('../components/MarkdownEditView'));
 
 // Hooks
@@ -147,6 +148,10 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [minimapData, setMinimapData] = useState<{ items: any[]; viewportBounds: any; contentBounds: any }>({
     items: [], viewportBounds: { x: 0, y: 0, w: 1, h: 1 }, contentBounds: { x: 0, y: 0, w: 1, h: 1 },
   });
+  const [pdfPicker, setPdfPicker] = useState<{
+    imageId: string; fileName: string; pageCount: number;
+    dimensions: Array<{ w: number; h: number }>;
+  } | null>(null);
 
   // Derived
   const { boardData, loading, error } = useBoardLoader(boardId);
@@ -247,18 +252,104 @@ export default function Editor({ isPublicView }: EditorProps) {
     onCanvasChange([textData.id]);
   }, [canvasRef, onCanvasChange]);
 
+  // PDF upload callback — opens picker for multi-page PDFs
+  const onPdfUploaded = useCallback((data: { imageId: string; fileName: string; pageCount: number; dimensions: Array<{ w: number; h: number }>; singlePage: boolean }) => {
+    if (data.singlePage) return; // single-page PDFs are placed directly
+    setPdfPicker({
+      imageId: data.imageId,
+      fileName: data.fileName,
+      pageCount: data.pageCount,
+      dimensions: data.dimensions,
+    });
+  }, []);
+
+  // Handle placing selected PDF pages from the picker
+  const handlePdfPlace = useCallback(async (selectedPages: number[]) => {
+    if (!pdfPicker || !resolvedBoardId) return;
+    const scene = canvasRef.current?.getScene();
+    const viewport = canvasRef.current?.getViewport();
+    if (!scene || !viewport) return;
+
+    try {
+      // Request hires rendering for selected pages
+      await api.post(`/api/boards/${resolvedBoardId}/pdf-pages`, {
+        imageId: pdfPicker.imageId,
+        pages: selectedPages,
+      });
+    } catch (err) {
+      console.error('[Editor] pdf-pages request failed:', err);
+    }
+
+    // Place pages in a grid at viewport center
+    const cx = viewport.center.x;
+    const cy = viewport.center.y;
+    const GAP = 20;
+    const cols = Math.ceil(Math.sqrt(selectedPages.length)) || 1;
+    let col = 0;
+    let cursorY = cy;
+    let rowMaxH = 0;
+    const colWidths: number[] = new Array(cols).fill(0);
+    const newItemIds: string[] = [];
+
+    for (const page of selectedPages) {
+      const dim = pdfPicker.dimensions[page - 1] || { w: 612, h: 792 };
+      // Cap each page to 600px max dimension
+      const maxDim = 600;
+      let w = dim.w;
+      let h = dim.h;
+      if (w > maxDim || h > maxDim) {
+        const scale = maxDim / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+
+      let cursorX = cx;
+      for (let c = 0; c < col; c++) cursorX += (colWidths[c] || 220) + GAP;
+
+      const item = scene.addPdfPageFromUpload(
+        null, null, w, h,
+        cursorX, cursorY,
+        pdfPicker.imageId, pdfPicker.fileName,
+        page, pdfPicker.pageCount,
+      );
+      newItemIds.push(item.id);
+      if (w > (colWidths[col] || 0)) colWidths[col] = w;
+      if (h > rowMaxH) rowMaxH = h;
+
+      col++;
+      if (col >= cols) {
+        col = 0;
+        cursorY += rowMaxH + GAP;
+        rowMaxH = 0;
+      }
+    }
+
+    // Select all placed items
+    const selection = selectionRef.current;
+    if (selection && newItemIds.length > 0) {
+      selection.selectOnly(newItemIds[0]);
+      for (let i = 1; i < newItemIds.length; i++) {
+        selection.toggle(newItemIds[i]);
+      }
+    }
+
+    onCanvasChange();
+    setPdfPicker(null);
+  }, [pdfPicker, resolvedBoardId, canvasRef, selectionRef, onCanvasChange]);
+
   // Memoize pasteOpts so useCanvasSetup's effect doesn't re-run every render
   const pasteOpts = useMemo(() => ({
     onTextPaste: handleTextPaste,
     onShortTextPaste: handleShortTextPaste,
-  }), [handleTextPaste, handleShortTextPaste]);
+    onPdfUploaded,
+  }), [handleTextPaste, handleShortTextPaste, onPdfUploaded]);
 
   // Canvas setup (selection, undo, sync, socket, drag/drop, paste, inbox, annotations)
   const { annotationStore, pinOverlay, textEditor, cropOverlayRef, mdOverlay } = useCanvasSetup({
     boardData, resolvedBoardId, user, isPublicView,
     canvasRef, selectionRef, undoRef, syncRef, inboxZoneRef, canvasContainerRef,
     uploadManager, onCanvasChange, showToast, setOnlineUsers, setSelectedLayerIds,
-    pasteOpts,
+    pasteOpts, onPdfUploaded,
     onCropModeChange: setCropModeActive,
   });
 
@@ -1658,6 +1749,19 @@ export default function Editor({ isPublicView }: EditorProps) {
           mountPoint,
         );
       })}
+
+      {/* PDF page picker modal */}
+      {pdfPicker && resolvedBoardId && (
+        <PdfPickerModal
+          imageId={pdfPicker.imageId}
+          fileName={pdfPicker.fileName}
+          pageCount={pdfPicker.pageCount}
+          dimensions={pdfPicker.dimensions}
+          boardId={resolvedBoardId}
+          onPlace={handlePdfPlace}
+          onCancel={() => setPdfPicker(null)}
+        />
+      )}
 
       {/* Export dialog */}
       {showExport && (

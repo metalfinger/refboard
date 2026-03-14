@@ -29,7 +29,7 @@ RUN mkdir -p /app/data
 
 # ffmpeg for video poster/metadata extraction at upload time
 # Health check utility
-RUN apk add --no-cache wget ffmpeg
+RUN apk add --no-cache wget ffmpeg poppler-utils
 
 EXPOSE 8000
 
