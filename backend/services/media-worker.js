@@ -12,9 +12,12 @@ const {
   updateMediaJob,
   updateImageMedia,
   getImage,
+  updatePdfPageThumb,
+  updatePdfPageHires,
 } = require('../db');
 const { probeVideo, extractPoster } = require('../video-utils');
 const { putBuffer, minioClient, MINIO_BUCKET } = require('../minio');
+const { pdfRenderPage, bufferToTempFile } = require('../pdf-utils');
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_CONCURRENCY = 2;
@@ -81,7 +84,16 @@ async function processJob(job) {
     updateMediaJob(jobId, { status: 'processing', startedAt: new Date().toISOString() });
     emitJobUpdate(boardId, jobId, imageId, 'processing');
 
-    // Fetch the raw video from MinIO
+    // PDF jobs
+    if (job.type === 'pdf-thumbnail' || job.type === 'pdf-hires') {
+      const meta = JSON.parse(job.result_json);
+      const dpi = job.type === 'pdf-thumbnail' ? 72 : 200;
+      const variant = job.type === 'pdf-thumbnail' ? 'thumb' : 'hires';
+      await processPdfPage(job, meta.pageNumber, dpi, variant);
+      return;
+    }
+
+    // Video poster job (original logic)
     const image = getImage(imageId);
     if (!image) {
       updateMediaJob(jobId, { status: 'failed', error: 'Image record not found' });
@@ -149,6 +161,67 @@ async function processJob(job) {
       updateMediaJob(jobId, { status: 'failed', attempts, error: err.message });
       emitJobFailed(boardId, jobId, imageId, userError);
     }
+  }
+}
+
+/**
+ * Process a single PDF page: fetch PDF from MinIO, render page, upload PNG, update DB.
+ */
+async function processPdfPage(job, pageNumber, dpi, variant) {
+  const jobId = job.id;
+  const imageId = job.image_id;
+  const boardId = job.board_id;
+
+  const image = getImage(imageId);
+  if (!image) {
+    updateMediaJob(jobId, { status: 'failed', error: 'Image record not found' });
+    emitJobFailed(boardId, jobId, imageId, 'Image record not found');
+    return;
+  }
+
+  const pdfBuffer = await fetchFromMinio(image.minio_path);
+  if (!pdfBuffer) {
+    updateMediaJob(jobId, { status: 'failed', error: 'Failed to fetch PDF from storage' });
+    emitJobFailed(boardId, jobId, imageId, 'Failed to fetch PDF from storage');
+    return;
+  }
+
+  const { tmpPath, cleanup } = bufferToTempFile(pdfBuffer, '.pdf');
+  try {
+    const pngBuffer = await pdfRenderPage(tmpPath, pageNumber, dpi);
+
+    // Asset key: strip .pdf extension and append page/variant suffix
+    const basePath = image.minio_path.replace(/\.pdf$/i, '');
+    const suffix = variant === 'thumb' ? `_p${pageNumber}_thumb.png` : `_p${pageNumber}.png`;
+    const assetKey = basePath + suffix;
+
+    await putBuffer(assetKey, pngBuffer, 'image/png');
+
+    // Update pdf_pages record
+    if (variant === 'thumb') {
+      updatePdfPageThumb(imageId, pageNumber, assetKey);
+    } else {
+      updatePdfPageHires(imageId, pageNumber, assetKey);
+    }
+
+    updateMediaJob(jobId, {
+      status: 'done',
+      finishedAt: new Date().toISOString(),
+    });
+
+    const eventType = variant === 'thumb' ? 'pdf-thumbnail' : 'pdf-hires';
+    const resultKey = variant === 'thumb' ? 'thumbAssetKey' : 'hiresAssetKey';
+    emitJobUpdate(boardId, jobId, imageId, 'done', {
+      imageId,
+      type: eventType,
+      pageNumber,
+      [resultKey]: assetKey,
+      status: 'done',
+    });
+
+    console.log('[media-worker] Job %s done (pdf %s, image=%s, page=%d)', jobId, variant, imageId, pageNumber);
+  } finally {
+    cleanup();
   }
 }
 
