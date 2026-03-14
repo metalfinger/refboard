@@ -4,7 +4,7 @@ export interface UploadJob {
   id: string;
   fileName: string;
   fileSize: number;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'pdf';
   status: UploadStatus;
   progress: number; // 0-1 for upload phase
   error?: string;
@@ -35,12 +35,13 @@ export class UploadManager {
   /** Create a new upload job from a local file. Returns the job ID. */
   addJob(file: File, boardId: string): string {
     const id = crypto.randomUUID();
-    const isVideo = file.type.startsWith('video/');
+    const isPdf = file.type === 'application/pdf';
+    const isVideo = !isPdf && file.type.startsWith('video/');
     this.jobs.set(id, {
       id,
-      fileName: file.name || (isVideo ? 'video' : 'image'),
+      fileName: file.name || (isPdf ? 'document' : isVideo ? 'video' : 'image'),
       fileSize: file.size,
-      mediaType: isVideo ? 'video' : 'image',
+      mediaType: isPdf ? 'pdf' : isVideo ? 'video' : 'image',
       status: 'queued',
       progress: 0,
       file,
@@ -75,7 +76,7 @@ export class UploadManager {
   }
 
   /** Create a job for a URL-based import (no File object, unknown size). */
-  addUrlJob(fileName: string, mediaType: 'image' | 'video'): string {
+  addUrlJob(fileName: string, mediaType: 'image' | 'video' | 'pdf'): string {
     const id = crypto.randomUUID();
     this.jobs.set(id, {
       id,
