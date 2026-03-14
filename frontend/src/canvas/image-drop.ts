@@ -8,6 +8,14 @@ import { wasRecentInternalPaste } from './shortcut-definitions';
 
 type OnChange = () => void;
 
+export interface PdfUploadedData {
+  imageId: string;
+  fileName: string;
+  pageCount: number;
+  dimensions: Array<{ w: number; h: number }>;
+  singlePage: boolean;
+}
+
 /** Client-side file size limit (matches backend MAX_FILE_SIZE_MB default) */
 const MAX_FILE_SIZE_MB = 200;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -155,6 +163,7 @@ export function setupDragDrop(
   onChange: OnChange,
   selection?: SelectionManager | null,
   uploads?: UploadManager | null,
+  onPdfUploaded?: (data: PdfUploadedData) => void,
 ): () => void {
   function onDragOver(e: DragEvent) {
     e.preventDefault();
@@ -279,6 +288,33 @@ export function setupDragDrop(
           if (jobId) uploads?.setProgress(jobId, p);
         });
         removePlaceholder(viewport, placeholder);
+
+        // PDF fork — single-page goes directly on canvas, multi-page opens picker
+        const resData = res.data.image || res.data;
+        if (resData.media_type === 'pdf') {
+          if (jobId) uploads?.uploadComplete(jobId, resData.id);
+          if (resData.single_page) {
+            const item = sceneManager.addPdfPageFromUpload(
+              null, null, resData.width, resData.height,
+              cursorX, cursorY,
+              resData.id, file.name, 1, 1,
+            );
+            newItemIds.push(item.id);
+            onChange();
+          } else if (onPdfUploaded) {
+            onPdfUploaded({
+              imageId: resData.id,
+              fileName: file.name,
+              pageCount: resData.page_count,
+              dimensions: resData.dimensions,
+              singlePage: false,
+            });
+          }
+          col++;
+          if (col >= cols) { col = 0; row++; cursorY += rowMaxH + GAP; rowMaxH = 0; }
+          continue;
+        }
+
         const { w: placedW, h: placedH, id } = handleUploadResult(res, viewport, sceneManager, cursorX, cursorY, onChange);
         newItemIds.push(id);
         if (placedW > (colWidths[col] || 0)) colWidths[col] = placedW;
@@ -346,6 +382,7 @@ export function setupPaste(
   opts?: {
     onTextPaste?: (data: { text: string; html: string; hasImage: boolean }) => void;
     onShortTextPaste?: (text: string) => void;
+    onPdfUploaded?: (data: PdfUploadedData) => void;
   },
 ): () => void {
   // Track last known cursor position in world coordinates for paste-at-cursor
@@ -377,7 +414,7 @@ export function setupPaste(
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.type.startsWith('image/') || item.type.startsWith('video/')) hasMedia = true;
+      if (item.type.startsWith('image/') || item.type.startsWith('video/') || item.type === 'application/pdf') hasMedia = true;
       if (item.type === 'text/plain') textContent = e.clipboardData?.getData('text/plain') || '';
       if (item.type === 'text/html') htmlContent = e.clipboardData?.getData('text/html') || '';
     }
@@ -402,7 +439,7 @@ export function setupPaste(
       const item = items[i];
 
       // Skip non-media clipboard items (text, html, etc.)
-      if (!item.type.startsWith('image/') && !item.type.startsWith('video/')) continue;
+      if (!item.type.startsWith('image/') && !item.type.startsWith('video/') && item.type !== 'application/pdf') continue;
 
       e.preventDefault();
 
@@ -438,6 +475,31 @@ export function setupPaste(
           if (jobId) uploads?.setProgress(jobId, p);
         });
         removePlaceholder(viewport, placeholder);
+
+        // PDF fork — single-page goes directly on canvas, multi-page opens picker
+        const resData = res.data.image || res.data;
+        if (resData.media_type === 'pdf') {
+          if (jobId) uploads?.uploadComplete(jobId, resData.id);
+          if (resData.single_page) {
+            const pdfItem = sceneManager.addPdfPageFromUpload(
+              null, null, resData.width, resData.height,
+              cx - 100, cy - 75,
+              resData.id, file.name, 1, 1,
+            );
+            newItemIds.push(pdfItem.id);
+            onChange();
+          } else if (opts?.onPdfUploaded) {
+            opts.onPdfUploaded({
+              imageId: resData.id,
+              fileName: file.name,
+              pageCount: resData.page_count,
+              dimensions: resData.dimensions,
+              singlePage: false,
+            });
+          }
+          continue;
+        }
+
         const { id } = handleUploadResult(res, viewport, sceneManager, cx - 100, cy - 75, onChange);
         newItemIds.push(id);
         const imgData = res.data.image || res.data;
