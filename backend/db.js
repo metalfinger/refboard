@@ -113,6 +113,20 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_media_jobs_status ON media_jobs(status);
   CREATE INDEX IF NOT EXISTS idx_media_jobs_image ON media_jobs(image_id);
+
+  CREATE TABLE IF NOT EXISTS pdf_pages (
+    id TEXT PRIMARY KEY,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    thumb_asset_key TEXT,
+    hires_asset_key TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(image_id, page_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pdf_pages_image ON pdf_pages(image_id);
 `);
 
 // ── Comment Threads & Comments ──
@@ -210,6 +224,11 @@ try {
   db.exec("ALTER TABLE users ADD COLUMN mattermost_id TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_mattermost_id ON users(mattermost_id)");
 }
+try { db.prepare('SELECT page_count FROM images LIMIT 0').get(); }
+catch { db.exec('ALTER TABLE images ADD COLUMN page_count INTEGER'); }
+
+try { db.prepare('SELECT priority FROM media_jobs LIMIT 0').get(); }
+catch { db.exec('ALTER TABLE media_jobs ADD COLUMN priority INTEGER DEFAULT 0'); }
 
 // ---------------------
 // User helpers
@@ -504,11 +523,11 @@ function getImageByMmFileId(boardId, mmFileId) {
 // ---------------------
 // Media Jobs
 // ---------------------
-function createMediaJob({ id, imageId, boardId, type }) {
+function createMediaJob({ id, imageId, boardId, type, priority, metaJson }) {
   db.prepare(`
-    INSERT INTO media_jobs (id, image_id, board_id, type, status)
-    VALUES (?, ?, ?, ?, 'queued')
-  `).run(id, imageId, boardId, type || 'poster');
+    INSERT INTO media_jobs (id, image_id, board_id, type, status, priority, result_json)
+    VALUES (?, ?, ?, ?, 'queued', ?, ?)
+  `).run(id, imageId, boardId, type || 'poster', priority || 0, metaJson || null);
   return db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id);
 }
 
@@ -530,7 +549,7 @@ function getMediaJob(id) {
 }
 
 function getPendingMediaJobs(limit = 10) {
-  return db.prepare('SELECT * FROM media_jobs WHERE status IN (?, ?) ORDER BY created_at ASC LIMIT ?')
+  return db.prepare('SELECT * FROM media_jobs WHERE status IN (?, ?) ORDER BY priority DESC, created_at ASC LIMIT ?')
     .all('queued', 'retry', limit);
 }
 
@@ -539,6 +558,33 @@ function updateImageMedia(imageId, { posterAssetKey, duration, nativeWidth, nati
     UPDATE images SET poster_asset_key = ?, duration = ?, native_width = ?, native_height = ?
     WHERE id = ?
   `).run(posterAssetKey || null, duration || null, nativeWidth || null, nativeHeight || null, imageId);
+}
+
+// ---------------------
+// PDF Page helpers
+// ---------------------
+function createPdfPage(id, imageId, pageNumber, width, height) {
+  db.prepare(`INSERT INTO pdf_pages (id, image_id, page_number, width, height, status) VALUES (?, ?, ?, ?, ?, 'pending') ON CONFLICT(image_id, page_number) DO UPDATE SET width = ?, height = ?`).run(id, imageId, pageNumber, width, height, width, height);
+}
+
+function updatePdfPageThumb(imageId, pageNumber, thumbAssetKey) {
+  db.prepare(`UPDATE pdf_pages SET thumb_asset_key = ?, status = 'thumb_ready' WHERE image_id = ? AND page_number = ?`).run(thumbAssetKey, imageId, pageNumber);
+}
+
+function updatePdfPageHires(imageId, pageNumber, hiresAssetKey) {
+  db.prepare(`UPDATE pdf_pages SET hires_asset_key = ?, status = 'done' WHERE image_id = ? AND page_number = ?`).run(hiresAssetKey, imageId, pageNumber);
+}
+
+function getPdfPages(imageId) {
+  return db.prepare('SELECT * FROM pdf_pages WHERE image_id = ? ORDER BY page_number ASC').all(imageId);
+}
+
+function getPdfPage(imageId, pageNumber) {
+  return db.prepare('SELECT * FROM pdf_pages WHERE image_id = ? AND page_number = ?').get(imageId, pageNumber);
+}
+
+function updateImagePageCount(imageId, pageCount) {
+  db.prepare('UPDATE images SET page_count = ? WHERE id = ?').run(pageCount, imageId);
 }
 
 // ---------------------
@@ -672,6 +718,8 @@ module.exports = {
   getAllBoardChannelLinks, getImageByMmFileId,
   // Media Jobs
   createMediaJob, updateMediaJob, getMediaJob, getPendingMediaJobs, updateImageMedia,
+  // PDF Pages
+  createPdfPage, updatePdfPageThumb, updatePdfPageHires, getPdfPages, getPdfPage, updateImagePageCount,
   // Threads
   getThreadsByBoard, getThread, createThread, createThreadWithComment, updateThreadStatus, deleteThread,
   incrementThreadCommentCount, decrementThreadCommentCount,
