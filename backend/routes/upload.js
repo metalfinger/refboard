@@ -131,33 +131,7 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
     const { buffer, originalname, mimetype, size } = req.file;
     const mediaType = classifyMedia(mimetype);
 
-    const { assetKey, minioPath, width, height, isVideo } = await uploadMedia(board.id, imageId, buffer, mimetype);
-    const publicUrl = getImageUrl(minioPath);
-
-    // Save image record first (media_jobs FK references images)
-    const image = createImage({
-      id: imageId,
-      boardId: board.id,
-      filename: originalname,
-      mimeType: mimetype,
-      fileSize: size,
-      width,
-      height,
-      minioPath,
-      publicUrl,
-      uploadedBy: req.user.id,
-      assetKey,
-      mediaType,
-    });
-
-    // Enqueue background processing after image record exists
-    let jobId = null;
-    if (isVideo) {
-      jobId = uuidv4();
-      createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
-    }
-
-    // PDF: extract page info, create pdf_pages rows, queue thumbnail jobs
+    // PDF: validate page count BEFORE uploading to MinIO or creating DB records
     if (mediaType === 'pdf') {
       const { tmpPath, cleanup } = bufferToTempFile(buffer, '.pdf');
       try {
@@ -165,6 +139,25 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
         if (info.pageCount > 500) {
           return res.status(400).json({ error: 'PDF exceeds 500 page limit' });
         }
+
+        // Validation passed — now upload and create records
+        const { assetKey, minioPath, width, height } = await uploadMedia(board.id, imageId, buffer, mimetype);
+        const publicUrl = getImageUrl(minioPath);
+
+        const image = createImage({
+          id: imageId,
+          boardId: board.id,
+          filename: originalname,
+          mimeType: mimetype,
+          fileSize: size,
+          width,
+          height,
+          minioPath,
+          publicUrl,
+          uploadedBy: req.user.id,
+          assetKey,
+          mediaType,
+        });
 
         updateImagePageCount(imageId, info.pageCount);
 
@@ -212,6 +205,32 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       } finally {
         cleanup();
       }
+    }
+
+    const { assetKey, minioPath, width, height, isVideo } = await uploadMedia(board.id, imageId, buffer, mimetype);
+    const publicUrl = getImageUrl(minioPath);
+
+    // Save image record first (media_jobs FK references images)
+    const image = createImage({
+      id: imageId,
+      boardId: board.id,
+      filename: originalname,
+      mimeType: mimetype,
+      fileSize: size,
+      width,
+      height,
+      minioPath,
+      publicUrl,
+      uploadedBy: req.user.id,
+      assetKey,
+      mediaType,
+    });
+
+    // Enqueue background processing after image record exists
+    let jobId = null;
+    if (isVideo) {
+      jobId = uuidv4();
+      createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
     }
 
     return res.status(201).json({

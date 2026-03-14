@@ -144,13 +144,14 @@ async function processJob(job) {
     console.error('[media-worker] Job %s failed:', jobId, err.message);
 
     // Classify error for user-facing message
-    let userError = 'Video processing failed';
+    const typeLabel = job.type.startsWith('pdf-') ? 'PDF page' : 'Video';
+    let userError = `${typeLabel} processing failed`;
     if (err.killed || err.signal === 'SIGTERM') {
-      userError = 'Video processing timed out — file may be too large or corrupt';
+      userError = `${typeLabel} processing timed out — file may be too large or corrupt`;
     } else if (err.message?.includes('ENOMEM') || err.message?.includes('Cannot allocate')) {
-      userError = 'Out of memory — video file is too large to process';
+      userError = `Out of memory — file is too large to process`;
     } else if (err.message?.includes('Invalid data')) {
-      userError = 'Invalid or corrupt video file';
+      userError = `Invalid or corrupt ${typeLabel.toLowerCase()} file`;
     }
 
     const attempts = (job.attempts || 0) + 1;

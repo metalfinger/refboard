@@ -67,8 +67,8 @@ router.post('/:boardId/pdf-pages', async (req, res) => {
       // Check for existing pending/processing hires job for this page
       const { db } = require('../db');
       const existingJob = db.prepare(
-        `SELECT id FROM media_jobs WHERE image_id = ? AND type = 'pdf-hires' AND result_json LIKE ? AND status IN ('queued', 'processing')`
-      ).get(imageId, `%"pageNumber":${pageNum}%`);
+        `SELECT id FROM media_jobs WHERE image_id = ? AND type = 'pdf-hires' AND result_json = ? AND status IN ('queued', 'processing')`
+      ).get(imageId, JSON.stringify({ pageNumber: pageNum }));
 
       if (!existingJob) {
         createMediaJob({
@@ -126,8 +126,8 @@ router.post('/:boardId/pdf-thumbnails', async (req, res) => {
       // Skip if job already pending
       const { db } = require('../db');
       const existingJob = db.prepare(
-        `SELECT id FROM media_jobs WHERE image_id = ? AND type = 'pdf-thumbnail' AND result_json LIKE ? AND status IN ('queued', 'processing')`
-      ).get(imageId, `%"pageNumber":${pageNum}%`);
+        `SELECT id FROM media_jobs WHERE image_id = ? AND type = 'pdf-thumbnail' AND result_json = ? AND status IN ('queued', 'processing')`
+      ).get(imageId, JSON.stringify({ pageNumber: pageNum }));
 
       if (!existingJob) {
         createMediaJob({
