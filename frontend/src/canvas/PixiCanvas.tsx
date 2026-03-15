@@ -460,7 +460,8 @@ const PixiCanvas = forwardRef<PixiCanvasHandle, PixiCanvasProps>(
     useEffect(() => {
       const onKeyDown = (e: KeyboardEvent) => {
         if (e.code !== 'Space' || spaceHeld.current) return;
-        if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+        const t = e.target as HTMLElement | null;
+        if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return;
 
         spaceHeld.current = true;
         const vp = viewportRef.current;
