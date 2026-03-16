@@ -540,24 +540,6 @@ export class SceneManager {
     return Array.from(this.items.values());
   }
 
-  /** Count how many image/video assets have loaded textures vs total. */
-  getLoadProgress(): { loaded: number; total: number } {
-    let loaded = 0;
-    let total = 0;
-    for (const item of this.items.values()) {
-      if (item.type === 'image') {
-        total++;
-        const spr = item.displayObject;
-        if ((spr instanceof ImageSprite || spr instanceof AnimatedGifSprite) && spr.loaded) loaded++;
-      } else if (item.type === 'video') {
-        total++;
-        const spr = item.displayObject;
-        if (spr instanceof VideoSprite && (spr.hasPoster || spr.isPlaying)) loaded++;
-      }
-    }
-    return { loaded, total };
-  }
-
   /** Get only top-level items (excludes group children). Used for selection/hit testing. */
   getTopLevelItems(): SceneItem[] {
     return Array.from(this.items.values()).filter((item) => !isGroupChild(item.id));

@@ -108,7 +108,6 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [zoom, setZoom] = useState(1);
   const [objectCount, setObjectCount] = useState(0);
   const [sceneLoading, setSceneLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState({ loaded: 0, total: 0 });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -409,20 +408,15 @@ export default function Editor({ isPublicView }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectCount]);
 
-  // Track asset load progress during initial load
+  // Track scene loading state (board data parsing, not asset textures — those are culled)
   useEffect(() => {
-    if (!sceneLoading && loadProgress.total > 0 && loadProgress.loaded >= loadProgress.total) return;
+    if (!sceneLoading) return;
     const interval = setInterval(() => {
-      const scene = canvasRef.current?.getScene();
-      if (!scene) return;
-      const progress = scene.getLoadProgress();
-      setLoadProgress(progress);
-      // Also update sceneLoading flag
       const isLoading = canvasRef.current?.isSceneLoading() ?? false;
       setSceneLoading(isLoading);
     }, 300);
     return () => clearInterval(interval);
-  }, [sceneLoading, loadProgress]);
+  }, [sceneLoading]);
 
   // Inline composer position — tracks viewport + scene changes for anchored placement
   const composerAnchor = draftPin ? { objectId: draftPin.objectId, pinX: draftPin.pinX, pinY: draftPin.pinY } : null;
@@ -1150,8 +1144,8 @@ export default function Editor({ isPublicView }: EditorProps) {
           canvasTransform={canvasTransform}
         />
 
-        {/* Loading overlay — blocks interaction until scene is ready */}
-        {(sceneLoading || (objectCount > 0 && loadProgress.total > 0 && loadProgress.loaded < loadProgress.total)) && (
+        {/* Loading overlay — shown only while scene data is being parsed */}
+        {sceneLoading && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 9999,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -1165,23 +1159,7 @@ export default function Editor({ isPublicView }: EditorProps) {
               animation: 'spin 0.8s linear infinite',
             }} />
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-            <div style={{ fontSize: '14px', fontWeight: 500 }}>
-              {sceneLoading
-                ? `Loading ${loadProgress.total || ''} items…`
-                : `Loading assets ${loadProgress.loaded} / ${loadProgress.total}`}
-            </div>
-            {loadProgress.total > 0 && (
-              <div style={{
-                width: '200px', height: '4px', borderRadius: '2px',
-                background: '#333', overflow: 'hidden',
-              }}>
-                <div style={{
-                  width: `${Math.round((loadProgress.loaded / loadProgress.total) * 100)}%`,
-                  height: '100%', background: '#4a9eff', borderRadius: '2px',
-                  transition: 'width 0.3s ease',
-                }} />
-              </div>
-            )}
+            <div style={{ fontSize: '14px', fontWeight: 500 }}>Loading board…</div>
           </div>
         )}
         {objectCount === 0 && !sceneLoading && (
