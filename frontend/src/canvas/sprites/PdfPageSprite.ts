@@ -241,6 +241,9 @@ export class PdfPageSprite extends Container {
 
     // Remove sprite from display tree entirely — avoids PixiJS v8 render crash
     if (this._sprite) {
+      // Swap to EMPTY before destroying so PixiJS never reads a null source
+      // during its render-loop traversal (collectRenderables → alphaMode).
+      this._sprite.texture = Texture.EMPTY;
       this.removeChild(this._sprite);
       this._sprite.destroy();
       this._sprite = null;

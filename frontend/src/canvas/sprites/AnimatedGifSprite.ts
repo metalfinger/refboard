@@ -1,4 +1,4 @@
-import { Container, Graphics } from "pixi.js";
+import { Container, Graphics, Texture } from "pixi.js";
 import { GifSprite } from "pixi.js/gif";
 import { TextureManager } from "../TextureManager";
 
@@ -70,7 +70,7 @@ export class AnimatedGifSprite extends Container {
 
   /** The underlying GIF sprite's current texture (for clipboard/export). */
   get texture() {
-    return this._gif?.texture ?? null;
+    return this._gif?.texture ?? Texture.EMPTY;
   }
 
   /** Whether the GIF is currently animating. */
@@ -134,6 +134,7 @@ export class AnimatedGifSprite extends Container {
       if (this._gif) {
         this._gif.stop();
         this._playing = false;
+        this._gif.texture = Texture.EMPTY;
       }
       this.textures.releaseGif(this.assetKey);
       this.loaded = false;
@@ -148,6 +149,9 @@ export class AnimatedGifSprite extends Container {
     if (this._gif) {
       this._gif.stop();
       this._playing = false;
+      // Swap to EMPTY before destroying so PixiJS never reads a null source
+      // during its render-loop traversal (collectRenderables → alphaMode).
+      this._gif.texture = Texture.EMPTY;
       this.removeChild(this._gif);
       this._gif.destroy();
       this._gif = null;

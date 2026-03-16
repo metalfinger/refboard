@@ -1150,21 +1150,29 @@ export default function Editor({ isPublicView }: EditorProps) {
           canvasTransform={canvasTransform}
         />
 
-        {/* Loading / Empty canvas guide */}
+        {/* Loading overlay — blocks interaction until scene is ready */}
         {(sceneLoading || (objectCount > 0 && loadProgress.total > 0 && loadProgress.loaded < loadProgress.total)) && (
           <div style={{
-            position: 'absolute', bottom: '48px', left: '50%', transform: 'translateX(-50%)',
-            pointerEvents: 'none', textAlign: 'center', color: '#888', userSelect: 'none',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+            position: 'absolute', inset: 0, zIndex: 9999,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(26, 26, 26, 0.85)', backdropFilter: 'blur(4px)',
+            color: '#ccc', userSelect: 'none', fontFamily: 'system-ui, sans-serif',
+            gap: '16px',
           }}>
-            <div style={{ fontSize: '12px', fontFamily: 'system-ui, sans-serif' }}>
+            <div style={{
+              width: '32px', height: '32px',
+              border: '3px solid #333', borderTopColor: '#4a9eff', borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+            <div style={{ fontSize: '14px', fontWeight: 500 }}>
               {sceneLoading
-                ? `Loading ${loadProgress.total || '...'} items`
-                : `Loading assets ${loadProgress.loaded}/${loadProgress.total}`}
+                ? `Loading ${loadProgress.total || ''} items…`
+                : `Loading assets ${loadProgress.loaded} / ${loadProgress.total}`}
             </div>
             {loadProgress.total > 0 && (
               <div style={{
-                width: '160px', height: '3px', borderRadius: '2px',
+                width: '200px', height: '4px', borderRadius: '2px',
                 background: '#333', overflow: 'hidden',
               }}>
                 <div style={{
