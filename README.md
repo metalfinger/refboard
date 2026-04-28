@@ -50,7 +50,7 @@ Built because we needed PureRef's painlessness, Miro's collaboration, and a code
 - First user is auto-admin
 - `SEED_ADMIN_*` env vars to bootstrap an admin on first boot
 - `ALLOW_SELF_REGISTRATION` flag — when off, only admins can create accounts
-- **Admin dashboard** at `/admin` — list users, create accounts, reset passwords, promote/demote between admin and member, deactivate / reactivate (admin-only, JWT-gated)
+- **Admin dashboard** at `/admin` — list users, create accounts, reset passwords, promote/demote between admin and member, deactivate / reactivate, and toggle self-registration on or off at runtime (admin-only, JWT-gated)
 - Admin REST endpoints work with either a JWT belonging to an admin user or an `X-API-Key` header for bots
 
 **Deployment**
@@ -140,7 +140,7 @@ All knobs live in `.env`. See [`.env.example`](.env.example) for the full annota
 | `DB_PATH` | no | SQLite file path. Defaults to `/app/data/refboard.db` (Docker). |
 | `MINIO_ENDPOINT` / `_PORT` / `_ACCESS_KEY` / `_SECRET_KEY` / `_BUCKET` | yes | S3-compatible storage. |
 | `SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` | no | Idempotent first-boot admin bootstrap. |
-| `ALLOW_SELF_REGISTRATION` | no | When `true`, anyone can register. Default `false`. |
+| `ALLOW_SELF_REGISTRATION` | no | Initial seed only — sets the runtime toggle on first boot. After that, control it from the admin dashboard. Default `false`. |
 | `MAX_FILE_SIZE_MB` | no | Per-file upload cap. Default 200. |
 | `REFBOARD_API_KEY` | no | Enables programmatic upload via X-API-Key header. |
 
@@ -241,7 +241,7 @@ Anyone in your tailnet can hit it; no one else can.
 - [ ] Set `JWT_SECRET` to a real random value (`openssl rand -base64 64`).
 - [ ] Set `NODE_ENV=production` (the backend refuses to start in prod without `JWT_SECRET`).
 - [ ] Set `CORS_ORIGIN=https://your.domain` (drop the wildcard).
-- [ ] Set `ALLOW_SELF_REGISTRATION=false` and pre-create accounts via the admin endpoints.
+- [ ] Confirm self-registration is **off** in the admin dashboard (defaults off; only flips on if you set `ALLOW_SELF_REGISTRATION=true` on first boot).
 - [ ] Restrict the MinIO console (port 9001) to localhost — only the S3 API on 9000 needs to be reachable from the backend, and the backend already proxies media bytes through `/api/images/*`, so MinIO does **not** need to be exposed publicly.
 - [ ] Keep `./.docker-data/` (or `DB_PATH` + MinIO data dir) backed up — that's all your state.
 

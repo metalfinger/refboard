@@ -208,6 +208,50 @@ try { db.prepare('SELECT priority FROM media_jobs LIMIT 0').get(); }
 catch { db.exec('ALTER TABLE media_jobs ADD COLUMN priority INTEGER DEFAULT 0'); }
 
 // ---------------------
+// Settings (runtime-tunable key/value pairs)
+// ---------------------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setSetting(key, value) {
+  db.prepare(`
+    INSERT INTO settings (key, value, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+  `).run(key, String(value));
+}
+
+function getAllSettings() {
+  return db.prepare('SELECT key, value, updated_at FROM settings').all();
+}
+
+function getBoolSetting(key, defaultValue = false) {
+  const v = getSetting(key);
+  if (v === null) return defaultValue;
+  return v === 'true' || v === '1';
+}
+
+// First-boot: seed allow_self_registration from env var if it has never been
+// stored. After first boot, the env var is ignored — admins control it from
+// the dashboard.
+(function seedSettingsFromEnv() {
+  if (getSetting('allow_self_registration') === null) {
+    const envValue = (process.env.ALLOW_SELF_REGISTRATION || '').toLowerCase() === 'true';
+    setSetting('allow_self_registration', envValue ? 'true' : 'false');
+  }
+})();
+
+// ---------------------
 // User helpers
 // ---------------------
 function getUserByEmail(email) {
@@ -701,6 +745,8 @@ module.exports = {
   incrementThreadCommentCount, decrementThreadCommentCount,
   // Comments
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
+  // Settings
+  getSetting, setSetting, getAllSettings, getBoolSetting,
   // Bootstrap
   seedAdminFromEnv,
 };

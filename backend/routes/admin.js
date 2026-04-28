@@ -15,11 +15,68 @@ const {
   updateCollection,
   addCollectionMember,
   createBoard,
+  getAllSettings,
+  setSetting,
+  getBoolSetting,
 } = require('../db');
 
 const router = Router();
 
 router.use(adminOrApiKeyMiddleware);
+
+// ---- Settings ----
+
+const KNOWN_SETTINGS = {
+  allow_self_registration: { type: 'bool', default: false },
+};
+
+router.get('/settings', (_req, res) => {
+  try {
+    const stored = getAllSettings();
+    const map = Object.fromEntries(stored.map((s) => [s.key, s]));
+    const out = {};
+    for (const [key, def] of Object.entries(KNOWN_SETTINGS)) {
+      const row = map[key];
+      let value;
+      if (def.type === 'bool') {
+        value = row ? row.value === 'true' || row.value === '1' : def.default;
+      } else {
+        value = row ? row.value : def.default;
+      }
+      out[key] = { value, updated_at: row?.updated_at || null, type: def.type };
+    }
+    return res.json({ settings: out });
+  } catch (err) {
+    console.error('[admin] get settings error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/settings/:key', (req, res) => {
+  try {
+    const { key } = req.params;
+    const def = KNOWN_SETTINGS[key];
+    if (!def) {
+      return res.status(404).json({ error: `Unknown setting: ${key}` });
+    }
+    const raw = req.body?.value;
+    if (raw === undefined || raw === null) {
+      return res.status(400).json({ error: 'Missing "value" in request body' });
+    }
+    let stringValue;
+    if (def.type === 'bool') {
+      const b = raw === true || raw === 'true' || raw === 1 || raw === '1';
+      stringValue = b ? 'true' : 'false';
+    } else {
+      stringValue = String(raw);
+    }
+    setSetting(key, stringValue);
+    return res.json({ key, value: def.type === 'bool' ? stringValue === 'true' : stringValue });
+  } catch (err) {
+    console.error('[admin] set setting error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ---- User management ----
 

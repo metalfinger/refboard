@@ -14,6 +14,12 @@ interface AdminUser {
   updated_at: string;
 }
 
+interface SettingsResponse {
+  settings: {
+    allow_self_registration?: { value: boolean; updated_at: string | null; type: string };
+  };
+}
+
 const inputStyle: React.CSSProperties = {
   padding: '10px 12px',
   background: '#0d0d0d',
@@ -201,20 +207,26 @@ export default function Admin() {
   const [showCreate, setShowCreate] = useState(false);
   const [resetFor, setResetFor] = useState<AdminUser | null>(null);
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
+  const [allowSelfReg, setAllowSelfReg] = useState<boolean | null>(null);
+  const [allowSelfRegSaving, setAllowSelfRegSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoadErr('');
     try {
-      const res = await api.get('/api/admin/users');
-      const list: AdminUser[] = res.data?.users || [];
+      const [usersRes, settingsRes] = await Promise.all([
+        api.get('/api/admin/users'),
+        api.get<SettingsResponse>('/api/admin/settings'),
+      ]);
+      const list: AdminUser[] = usersRes.data?.users || [];
       list.sort((a, b) => {
         if (a.is_active !== b.is_active) return b.is_active - a.is_active;
         if (a.role !== b.role) return a.role === 'admin' ? -1 : 1;
         return a.email.localeCompare(b.email);
       });
       setUsers(list);
+      setAllowSelfReg(!!settingsRes.data?.settings?.allow_self_registration?.value);
     } catch (e: any) {
-      setLoadErr(e?.response?.data?.error || 'Failed to load users');
+      setLoadErr(e?.response?.data?.error || 'Failed to load admin data');
     } finally {
       setLoading(false);
     }
@@ -223,6 +235,26 @@ export default function Admin() {
   useEffect(() => {
     if (!authLoading) refresh();
   }, [authLoading, refresh]);
+
+  async function toggleSelfRegistration() {
+    if (allowSelfReg === null || allowSelfRegSaving) return;
+    const next = !allowSelfReg;
+    setAllowSelfRegSaving(true);
+    try {
+      await api.put('/api/admin/settings/allow_self_registration', { value: next });
+      setAllowSelfReg(next);
+      setToast({
+        msg: next
+          ? 'Self-registration enabled — anyone can sign up from the login page'
+          : 'Self-registration disabled — only admins can create accounts',
+        kind: 'ok',
+      });
+    } catch (e: any) {
+      setToast({ msg: e?.response?.data?.error || 'Failed to update setting', kind: 'err' });
+    } finally {
+      setAllowSelfRegSaving(false);
+    }
+  }
 
   if (authLoading) {
     return <div style={{ padding: 40, color: '#888', background: '#0a0a0a', minHeight: '100vh' }}>Loading…</div>;
@@ -315,6 +347,27 @@ export default function Admin() {
           <Stat label="Members" value={memberCount} accent="#9aa9bb" />
           <Stat label="Inactive" value={inactiveCount} accent="#5a5a5a" />
           <Stat label="Total" value={users.length} accent="#cfd6df" />
+        </div>
+
+        {/* Settings card */}
+        <div style={{
+          background: '#101010', border: '1px solid #1c1c1c', borderRadius: 10,
+          padding: '16px 18px', marginBottom: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+        }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#dadada', marginBottom: 3 }}>
+              Allow self-registration
+            </div>
+            <div style={{ fontSize: 12, color: '#777', lineHeight: 1.5, maxWidth: 600 }}>
+              When on, anyone with the URL can create an account. When off, only admins can create accounts (the Register link disappears from the login page).
+            </div>
+          </div>
+          <Toggle
+            checked={!!allowSelfReg}
+            disabled={allowSelfReg === null || allowSelfRegSaving}
+            onChange={toggleSelfRegistration}
+          />
         </div>
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
@@ -421,6 +474,36 @@ function Stat({ label, value, accent }: { label: string; value: number; accent: 
       <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color: accent, letterSpacing: '-0.5px' }}>{value}</div>
     </div>
+  );
+}
+
+function Toggle({ checked, disabled, onChange }: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      onClick={onChange}
+      disabled={disabled}
+      style={{
+        position: 'relative', width: 44, height: 24, borderRadius: 12,
+        background: checked ? '#386fe5' : '#252525',
+        border: `1px solid ${checked ? '#4a9eff' : '#333'}`,
+        cursor: disabled ? 'wait' : 'pointer',
+        padding: 0, flexShrink: 0, transition: 'background 0.18s, border-color 0.18s',
+        opacity: disabled ? 0.6 : 1,
+      }}
+      aria-pressed={checked}
+    >
+      <span style={{
+        position: 'absolute', top: 2, left: checked ? 22 : 2,
+        width: 18, height: 18, borderRadius: '50%',
+        background: '#fff',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+        transition: 'left 0.18s',
+      }} />
+    </button>
   );
 }
 

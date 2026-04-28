@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import api from '../api';
-
-const ALLOW_REGISTER = (import.meta.env.VITE_ALLOW_SELF_REGISTRATION || '').toLowerCase() === 'true';
 
 export default function Login() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -13,12 +11,24 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [allowRegister, setAllowRegister] = useState(false);
+  const [hasUsers, setHasUsers] = useState(true);
   const navigate = useNavigate();
   const { login, user } = useAuth();
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (user) navigate('/', { replace: true });
   }, [user, navigate]);
+
+  useEffect(() => {
+    api.get('/api/auth/config')
+      .then((res) => {
+        setAllowRegister(!!res.data?.allowSelfRegistration);
+        setHasUsers(!!res.data?.hasUsers);
+        if (!res.data?.hasUsers) setMode('register');
+      })
+      .catch(() => { /* fall through; defaults are safe */ });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +89,7 @@ export default function Login() {
             RefBoard
           </h1>
           <p style={{ margin: 0, fontSize: '13px', color: '#666' }}>
-            {mode === 'login' ? 'Sign in to continue' : 'Create your account'}
+            {!hasUsers ? 'Create the first admin account' : mode === 'login' ? 'Sign in to continue' : 'Create your account'}
           </p>
         </div>
 
@@ -149,13 +159,13 @@ export default function Login() {
           </button>
         </form>
 
-        {ALLOW_REGISTER && (
+        {(allowRegister || !hasUsers) && (
           <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#666' }}>
             {mode === 'login' ? (
               <>Need an account? <a href="#" onClick={(e) => { e.preventDefault(); setMode('register'); setError(''); }} style={{ color: '#4a9eff' }}>Register</a></>
-            ) : (
+            ) : hasUsers ? (
               <>Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); setMode('login'); setError(''); }} style={{ color: '#4a9eff' }}>Sign in</a></>
-            )}
+            ) : null}
           </div>
         )}
       </div>

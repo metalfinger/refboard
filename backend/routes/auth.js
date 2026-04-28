@@ -6,6 +6,7 @@ const {
   createUser,
   getUserById,
   getUserCount,
+  getBoolSetting,
 } = require('../db');
 const {
   hashPassword,
@@ -15,6 +16,24 @@ const {
 } = require('../auth');
 
 const router = Router();
+
+/**
+ * GET /api/auth/config
+ * Public, no auth — used by the Login page to decide whether to show the
+ * "Register" link. Only exposes booleans the UI needs; no internals.
+ */
+router.get('/config', (_req, res) => {
+  try {
+    const userCount = getUserCount();
+    return res.json({
+      allowSelfRegistration: getBoolSetting('allow_self_registration', false),
+      hasUsers: userCount > 0,
+    });
+  } catch (err) {
+    console.error('[auth] config error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 /**
  * POST /api/auth/register
@@ -32,8 +51,8 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    const allowRegistration = (process.env.ALLOW_SELF_REGISTRATION || '').toLowerCase() === 'true';
     const userCount = getUserCount();
+    const allowRegistration = getBoolSetting('allow_self_registration', false);
     if (!allowRegistration && userCount > 0) {
       return res.status(403).json({
         error: 'Self-registration is disabled. Ask an admin to create your account.',
