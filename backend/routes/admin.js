@@ -1,11 +1,13 @@
 const { Router } = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { apiKeyMiddleware, hashPassword } = require('../auth');
+const { adminOrApiKeyMiddleware, hashPassword } = require('../auth');
 const {
+  db,
   createUser,
   getAllUsers,
   getUserById,
   getUserByEmail,
+  getUserByUsername,
   deactivateUser,
   updateUserPassword,
   createCollection,
@@ -17,20 +19,28 @@ const {
 
 const router = Router();
 
-router.use(apiKeyMiddleware);
+router.use(adminOrApiKeyMiddleware);
 
 // ---- User management ----
 
 router.post('/users', async (req, res) => {
   try {
-    const { email, username, password, display_name, role } = req.body;
+    const { email, username, password, display_name, displayName, role } = req.body;
+    const dn = display_name || displayName;
     if (!email || !username || !password) {
       return res.status(400).json({ error: 'Email, username, and password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
     const existing = getUserByEmail(email);
     if (existing) {
       return res.status(409).json({ error: 'Email already registered' });
+    }
+    const existingUsername = getUserByUsername(username);
+    if (existingUsername) {
+      return res.status(409).json({ error: 'Username already taken' });
     }
 
     const passwordHash = await hashPassword(password);
@@ -39,8 +49,8 @@ router.post('/users', async (req, res) => {
       email,
       username,
       passwordHash,
-      displayName: display_name || username,
-      role: role || 'member',
+      displayName: dn || username,
+      role: role === 'admin' ? 'admin' : 'member',
     });
 
     return res.status(201).json({
@@ -75,10 +85,48 @@ router.delete('/users/:userId', (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    if (req.user && req.user.id === req.params.userId) {
+      return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
     deactivateUser(req.params.userId);
     return res.json({ message: 'User deactivated' });
   } catch (err) {
     console.error('[admin] deactivate user error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/users/:userId/reactivate', (req, res) => {
+  try {
+    const row = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.userId);
+    if (!row) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    db.prepare("UPDATE users SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.userId);
+    return res.json({ message: 'User reactivated' });
+  } catch (err) {
+    console.error('[admin] reactivate user error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/users/:userId/role', (req, res) => {
+  try {
+    const { role } = req.body || {};
+    if (role !== 'admin' && role !== 'member') {
+      return res.status(400).json({ error: "role must be 'admin' or 'member'" });
+    }
+    const user = getUserById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (req.user && req.user.id === req.params.userId && role !== 'admin') {
+      return res.status(400).json({ error: 'You cannot demote your own admin account' });
+    }
+    db.prepare("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?").run(role, req.params.userId);
+    return res.json({ message: 'Role updated', role });
+  } catch (err) {
+    console.error('[admin] update role error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

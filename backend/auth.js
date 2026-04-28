@@ -81,6 +81,38 @@ function apiKeyMiddleware(req, res, next) {
   next();
 }
 
+/**
+ * Express middleware: accepts EITHER a valid X-API-Key (server-to-server / bot)
+ * OR a Bearer JWT belonging to a user with role=admin (UI dashboard).
+ *
+ * On JWT path: attaches decoded user to req.user.
+ */
+function adminOrApiKeyMiddleware(req, res, next) {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey && REFBOARD_API_KEY && apiKey === REFBOARD_API_KEY) {
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const decoded = verifyToken(authHeader.slice(7));
+      if (decoded.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      req.user = decoded;
+      return next();
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expired' });
+      }
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+  }
+
+  return res.status(401).json({ error: 'Admin authentication required' });
+}
+
 module.exports = {
   generateToken,
   verifyToken,
@@ -89,5 +121,6 @@ module.exports = {
   authMiddleware,
   adminMiddleware,
   apiKeyMiddleware,
+  adminOrApiKeyMiddleware,
   JWT_SECRET,
 };

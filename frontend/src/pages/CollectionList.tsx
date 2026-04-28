@@ -238,6 +238,20 @@ export default function CollectionList() {
             {(user?.display_name || user?.email || '?')[0].toUpperCase()}
           </div>
           <span style={{ fontSize: '13px', color: '#888' }}>{user?.display_name || user?.email}</span>
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => navigate('/admin')}
+              style={{
+                padding: '6px 14px', background: 'transparent', border: '1px solid #2a3a5c',
+                borderRadius: '6px', color: '#7ba9ff', fontSize: '12px', cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4a9eff'; e.currentTarget.style.color = '#a8c8ff'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3a5c'; e.currentTarget.style.color = '#7ba9ff'; }}
+            >
+              Admin
+            </button>
+          )}
           <button
             onClick={() => { logout(); navigate('/login', { replace: true }); }}
             style={{

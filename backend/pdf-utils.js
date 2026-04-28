@@ -15,6 +15,32 @@ const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 60_000;
 
+class PopplerMissingError extends Error {
+  constructor(binary) {
+    super(
+      `RefBoard couldn't run "${binary}". PDF support requires poppler-utils to be installed on the host. ` +
+      `On macOS: brew install poppler. On Debian/Ubuntu: apt install poppler-utils. ` +
+      `The provided Dockerfile already installs it — this only matters for manual installs.`
+    );
+    this.code = 'POPPLER_MISSING';
+    this.binary = binary;
+    this.statusCode = 501;
+  }
+}
+
+function wrapEnoent(binary, fn) {
+  return async (...args) => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      if (err && err.code === 'ENOENT' && (err.path === binary || err.syscall === `spawn ${binary}`)) {
+        throw new PopplerMissingError(binary);
+      }
+      throw err;
+    }
+  };
+}
+
 /**
  * Write a buffer to a temporary file. Returns { tmpPath, cleanup }.
  * Caller MUST call cleanup() when done.
@@ -131,4 +157,12 @@ async function pdfRenderPage(filePath, pageNum, dpi = 150) {
   }
 }
 
-module.exports = { pdfInfo, pdfRenderPage, bufferToTempFile };
+const safePdfInfo = wrapEnoent('pdfinfo', pdfInfo);
+const safePdfRenderPage = wrapEnoent('pdftoppm', pdfRenderPage);
+
+module.exports = {
+  pdfInfo: safePdfInfo,
+  pdfRenderPage: safePdfRenderPage,
+  bufferToTempFile,
+  PopplerMissingError,
+};

@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import CollectionList from './pages/CollectionList';
 import CollectionDetail from './pages/CollectionDetail';
 import Editor from './pages/Editor';
+import Admin from './pages/Admin';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -34,6 +35,7 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><CollectionList /></ProtectedRoute>} />
       <Route path="/collection/:collectionId" element={<ProtectedRoute><CollectionDetail /></ProtectedRoute>} />
       <Route path="/board/:boardId" element={<ProtectedRoute><Editor /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/c/:shareToken" element={<CollectionDetail isPublicView />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

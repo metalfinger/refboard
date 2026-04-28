@@ -50,7 +50,8 @@ Built because we needed PureRef's painlessness, Miro's collaboration, and a code
 - First user is auto-admin
 - `SEED_ADMIN_*` env vars to bootstrap an admin on first boot
 - `ALLOW_SELF_REGISTRATION` flag — when off, only admins can create accounts
-- Admin endpoints to list/create/deactivate users (UI dashboard coming next)
+- **Admin dashboard** at `/admin` — list users, create accounts, reset passwords, promote/demote between admin and member, deactivate / reactivate (admin-only, JWT-gated)
+- Admin REST endpoints work with either a JWT belonging to an admin user or an `X-API-Key` header for bots
 
 **Deployment**
 - One `docker compose up` starts RefBoard + a bundled MinIO for object storage
@@ -86,7 +87,19 @@ Persistent state lives under `./.docker-data/` (SQLite + MinIO objects). Back th
 
 ## Manual install (without Docker)
 
-Requires Node.js 20+, ffmpeg, and poppler-utils on your `PATH`. You also need an S3-compatible object store reachable from the backend — easiest is to run MinIO standalone.
+Requires Node.js 20+, **ffmpeg**, and **poppler-utils** on your `PATH`. The Docker image installs these automatically; for a manual install you need to bring them yourself.
+
+```bash
+# macOS
+brew install ffmpeg poppler
+
+# Debian / Ubuntu
+sudo apt install ffmpeg poppler-utils
+```
+
+If `poppler-utils` is missing, image and video uploads still work, but PDF uploads will fail with a clear `501 POPPLER_MISSING` error rather than crashing.
+
+You also need an S3-compatible object store reachable from the backend — easiest is to run MinIO standalone.
 
 ```bash
 # 1. Object storage
@@ -269,8 +282,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history (v0.1.0 → v0.5.0).
 
 ## Roadmap
 
+- [x] Admin dashboard frontend (live at `/admin` — user create / reset-password / role / deactivate)
 - [ ] Per-board activity log (who added/deleted what, when)
-- [ ] Admin dashboard frontend (backend endpoints already exist at `/api/admin/users`)
 - [ ] Mobile-friendly read-only board view
 - [ ] Export board → PDF / image grid
 - [ ] Optional remote storage adapters (S3 direct, R2)

@@ -250,6 +250,10 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({ error: `File too large (max ${MAX_FILE_SIZE_LABEL})` });
     }
+    if (err.code === 'POPPLER_MISSING') {
+      console.error('[upload] poppler-utils missing — PDF support disabled until host installs it');
+      return res.status(err.statusCode || 501).json({ error: err.message, code: err.code });
+    }
     console.error('[upload] error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
