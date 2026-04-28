@@ -182,4 +182,4 @@ function leaveRoom(io, socket, roomName) {
   console.log(`[socket] ${socket.userDisplayName} left ${roomName}`);
 }
 
-module.exports = { setupBoardRoom };
+module.exports = { setupBoardRoom, getRoomName };

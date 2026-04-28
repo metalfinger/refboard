@@ -39,6 +39,11 @@ Built because we needed PureRef's painlessness, Miro's collaboration, and a code
 - Threaded comments with status (open / resolved)
 - Review mode toggles a clean overlay for walking through feedback
 
+**Activity log**
+- Per-board audit trail visible from the toolbar — uploads, board renames, threads, replies
+- Live updates over Socket.IO (no refresh needed when collaborators are working)
+- Time-grouped feed (Today / Yesterday / older), pagination, deactivation-safe author labels
+
 **Media pipeline**
 - Image variants (thumbnail / hires / LOD) generated on upload via Sharp
 - Video poster + duration + dimensions extracted via ffmpeg
@@ -283,7 +288,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history (v0.1.0 → v0.5.0).
 ## Roadmap
 
 - [x] Admin dashboard frontend (live at `/admin` — user create / reset-password / role / deactivate)
-- [ ] Per-board activity log (who added/deleted what, when)
+- [x] Per-board activity log (uploads, board events, threads, comments — live via Socket.IO)
 - [ ] Mobile-friendly read-only board view
 - [ ] Export board → PDF / image grid
 - [ ] Optional remote storage adapters (S3 direct, R2)

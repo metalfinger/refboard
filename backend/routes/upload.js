@@ -6,9 +6,10 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const { authMiddleware } = require('../auth');
-const { getBoard, getCollectionMember, createImage, createMediaJob, createPdfPage, updateImagePageCount } = require('../db');
+const { getBoard, getCollectionMember, createImage, getImage, createMediaJob, createPdfPage, updateImagePageCount } = require('../db');
 const { putBuffer, getImageUrl, MIME_TO_EXT, MAX_FILE_SIZE } = require('../minio');
 const { pdfInfo, bufferToTempFile } = require('../pdf-utils');
+const { recordActivity } = require('../activity');
 
 const router = Router();
 
@@ -192,6 +193,15 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
           });
         }
 
+        recordActivity(req, {
+          boardId: board.id,
+          action: 'pdf.added',
+          targetType: 'pdf',
+          targetId: imageId,
+          targetLabel: originalname,
+          metadata: { pageCount: info.pageCount, fileSize: size },
+        });
+
         return res.status(201).json({
           id: image.id,
           media_type: 'pdf',
@@ -232,6 +242,15 @@ router.post('/boards/:boardId/images', upload.single('image'), async (req, res) 
       jobId = uuidv4();
       createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
     }
+
+    recordActivity(req, {
+      boardId: board.id,
+      action: `${mediaType}.added`,
+      targetType: mediaType,
+      targetId: imageId,
+      targetLabel: originalname,
+      metadata: { fileSize: size, mimeType: mimetype, source: 'upload' },
+    });
 
     return res.status(201).json({
       id: image.id,
@@ -353,6 +372,15 @@ router.post('/boards/:boardId/images/from-url', async (req, res) => {
       jobId = uuidv4();
       createMediaJob({ id: jobId, imageId, boardId: board.id, type: 'poster' });
     }
+
+    recordActivity(req, {
+      boardId: board.id,
+      action: `${mediaType}.added`,
+      targetType: mediaType,
+      targetId: imageId,
+      targetLabel: filename,
+      metadata: { fileSize: buffer.length, mimeType, source: 'url', sourceUrl: url },
+    });
 
     return res.status(201).json({
       id: image.id,

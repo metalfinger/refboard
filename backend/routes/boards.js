@@ -12,6 +12,7 @@ const {
   getCollectionMember,
 } = require('../db');
 const { deleteBoardImages: deleteBoardMinioImages } = require('../minio');
+const { recordActivity } = require('../activity');
 
 const router = Router();
 
@@ -79,6 +80,14 @@ router.post('/', (req, res) => {
       name: name.trim(),
       description: description || '',
       createdBy: req.user.id,
+    });
+
+    recordActivity(req, {
+      boardId: board.id,
+      action: 'board.created',
+      targetType: 'board',
+      targetId: board.id,
+      targetLabel: board.name,
     });
 
     return res.status(201).json({ board });
@@ -171,7 +180,19 @@ router.put('/:boardId', (req, res) => {
     if (!result) return;
 
     const { name, description } = req.body;
+    const prevName = result.board.name;
     const updated = updateBoard(result.board.id, { name, description });
+
+    if (typeof name === 'string' && name.trim() && name.trim() !== prevName) {
+      recordActivity(req, {
+        boardId: updated.id,
+        action: 'board.renamed',
+        targetType: 'board',
+        targetId: updated.id,
+        targetLabel: updated.name,
+        metadata: { from: prevName, to: updated.name },
+      });
+    }
 
     return res.json({ board: updated });
   } catch (err) {
@@ -194,6 +215,14 @@ router.delete('/:boardId', async (req, res) => {
     } catch (e) {
       console.error('[boards] MinIO cleanup error:', e);
     }
+
+    recordActivity(req, {
+      boardId: result.board.id,
+      action: 'board.deleted',
+      targetType: 'board',
+      targetId: result.board.id,
+      targetLabel: result.board.name,
+    });
 
     deleteBoard(result.board.id);
 

@@ -18,6 +18,7 @@ const {
   getUserById,
 } = require('../db');
 const { hasCollectionRole, resolveBoard } = require('./board-access');
+const { recordActivity } = require('../activity');
 
 function resolveAuthorName(reqUser) {
   if (reqUser.display_name || reqUser.username) {
@@ -108,6 +109,14 @@ router.post('/:boardId/threads', (req, res) => {
       });
     }
 
+    recordActivity(req, {
+      boardId: req.params.boardId,
+      action: 'thread.created',
+      targetType: 'thread',
+      targetId: threadId,
+      targetLabel: content.trim().slice(0, 80),
+    });
+
     return res.status(201).json({ thread, comment });
   } catch (err) {
     console.error('[threads] create error:', err);
@@ -141,6 +150,15 @@ router.patch('/:boardId/threads/:threadId', (req, res) => {
         status: updated.status,
         resolvedBy: updated.resolved_by,
         resolvedAt: updated.resolved_at,
+      });
+    }
+
+    if (status === 'resolved' || status === 'open') {
+      recordActivity(req, {
+        boardId: req.params.boardId,
+        action: status === 'resolved' ? 'thread.resolved' : 'thread.reopened',
+        targetType: 'thread',
+        targetId: req.params.threadId,
       });
     }
 
@@ -220,6 +238,14 @@ router.post('/:boardId/threads/:threadId/comments', (req, res) => {
         comment,
       });
     }
+
+    recordActivity(req, {
+      boardId: req.params.boardId,
+      action: 'comment.added',
+      targetType: 'thread',
+      targetId: req.params.threadId,
+      targetLabel: content.trim().slice(0, 80),
+    });
 
     return res.status(201).json({ comment });
   } catch (err) {

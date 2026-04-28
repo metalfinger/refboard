@@ -208,6 +208,82 @@ try { db.prepare('SELECT priority FROM media_jobs LIMIT 0').get(); }
 catch { db.exec('ALTER TABLE media_jobs ADD COLUMN priority INTEGER DEFAULT 0'); }
 
 // ---------------------
+// Activity log (per-board audit trail)
+// ---------------------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS activity_logs (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    user_id TEXT,
+    actor_name TEXT,
+    actor_email TEXT,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    target_label TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_activity_board_time
+    ON activity_logs(board_id, created_at DESC);
+`);
+
+const { v4: _activityUuid } = require('uuid');
+
+/**
+ * Append a single activity entry. Resolves user → denormalised actor fields
+ * at log time so the entry survives user rename / deactivation.
+ */
+function logActivity({ boardId, userId, action, targetType, targetId, targetLabel, metadata }) {
+  if (!boardId || !action) return null;
+  let actorName = null;
+  let actorEmail = null;
+  if (userId) {
+    const user = db.prepare('SELECT display_name, email FROM users WHERE id = ?').get(userId);
+    if (user) {
+      actorName = user.display_name;
+      actorEmail = user.email;
+    }
+  }
+  const id = _activityUuid();
+  db.prepare(`
+    INSERT INTO activity_logs (id, board_id, user_id, actor_name, actor_email, action, target_type, target_id, target_label, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    boardId,
+    userId || null,
+    actorName,
+    actorEmail,
+    action,
+    targetType || null,
+    targetId || null,
+    targetLabel || null,
+    metadata ? JSON.stringify(metadata) : null,
+  );
+  return db.prepare('SELECT * FROM activity_logs WHERE id = ?').get(id);
+}
+
+function getBoardActivity(boardId, { limit = 50, before = null } = {}) {
+  const lim = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
+  if (before) {
+    return db.prepare(`
+      SELECT * FROM activity_logs
+      WHERE board_id = ? AND created_at < ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(boardId, before, lim);
+  }
+  return db.prepare(`
+    SELECT * FROM activity_logs
+    WHERE board_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(boardId, lim);
+}
+
+// ---------------------
 // Settings (runtime-tunable key/value pairs)
 // ---------------------
 db.exec(`
@@ -747,6 +823,8 @@ module.exports = {
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
   // Settings
   getSetting, setSetting, getAllSettings, getBoolSetting,
+  // Activity log
+  logActivity, getBoardActivity,
   // Bootstrap
   seedAdminFromEnv,
 };

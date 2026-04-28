@@ -25,6 +25,7 @@ import { getStickyWidthForSize } from '../canvas/stickyPresets';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
 import Minimap from '../components/Minimap';
+import ActivityPanel from '../components/ActivityPanel';
 import UploadPanel from '../components/UploadPanel';
 import ExportDialog from '../components/ExportDialog';
 import FeedbackPanel from '../components/feedback/FeedbackPanel';
@@ -115,6 +116,7 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
   const [showLayers, setShowLayers] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -1090,6 +1092,8 @@ export default function Editor({ isPublicView }: EditorProps) {
         followingUserId={followingUserId}
         onToggleLayers={() => setShowLayers((v) => !v)}
         showLayers={showLayers}
+        onToggleActivity={() => setShowActivity((v) => !v)}
+        showActivity={showActivity}
         onToggleHelp={() => setShowHelp((v) => !v)}
         onExport={() => setShowExport(true)}
         onRefreshPreview={readOnly || isPublicView ? undefined : handleRefreshPreview}
@@ -1537,6 +1541,11 @@ export default function Editor({ isPublicView }: EditorProps) {
             }}
             onDismiss={() => setPastePopup(null)}
           />
+        )}
+
+        {/* Activity log */}
+        {showActivity && resolvedBoardId && (
+          <ActivityPanel boardId={resolvedBoardId} onClose={() => setShowActivity(false)} />
         )}
 
         {/* Layer panel */}

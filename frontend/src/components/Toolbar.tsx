@@ -30,6 +30,8 @@ interface ToolbarProps {
   onToggleLayers?: () => void;
   showLayers?: boolean;
   onToggleHelp?: () => void;
+  onToggleActivity?: () => void;
+  showActivity?: boolean;
   onExport?: () => void;
   onRefreshPreview?: () => void;
   previewRefreshing?: boolean;
@@ -164,6 +166,8 @@ export default function Toolbar({
   onToggleLayers,
   showLayers,
   onToggleHelp,
+  onToggleActivity,
+  showActivity,
   onExport,
   onRefreshPreview,
   previewRefreshing,
@@ -314,6 +318,17 @@ export default function Toolbar({
         <ActionBtn onClick={onToggleLayers} title="Layers panel"
           active={showLayers}>
           <IconLayers />
+        </ActionBtn>
+      )}
+
+      {/* Activity log */}
+      {onToggleActivity && (
+        <ActionBtn onClick={onToggleActivity} title="Activity log"
+          active={showActivity}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <circle cx="7" cy="7" r="5.5" />
+            <path d="M7 4v3.2L9.2 8.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </ActionBtn>
       )}
 
