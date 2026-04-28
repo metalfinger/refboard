@@ -24,7 +24,6 @@ import TextFormatToolbar from '../components/TextFormatToolbar';
 import { getStickyWidthForSize } from '../canvas/stickyPresets';
 import VideoControls from '../components/VideoControls';
 import ShortcutsHelp from '../components/ShortcutsHelp';
-import MattermostImport from '../components/MattermostImport';
 import Minimap from '../components/Minimap';
 import UploadPanel from '../components/UploadPanel';
 import ExportDialog from '../components/ExportDialog';
@@ -118,7 +117,6 @@ export default function Editor({ isPublicView }: EditorProps) {
   const [showLayers, setShowLayers] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
-  const [showMmImport, setShowMmImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [refreshingPreview, setRefreshingPreview] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
@@ -1093,7 +1091,6 @@ export default function Editor({ isPublicView }: EditorProps) {
         onToggleLayers={() => setShowLayers((v) => !v)}
         showLayers={showLayers}
         onToggleHelp={() => setShowHelp((v) => !v)}
-        onMmImport={() => setShowMmImport(true)}
         onExport={() => setShowExport(true)}
         onRefreshPreview={readOnly || isPublicView ? undefined : handleRefreshPreview}
         previewRefreshing={refreshingPreview}
@@ -1699,19 +1696,6 @@ export default function Editor({ isPublicView }: EditorProps) {
       {/* Shortcuts help overlay */}
       {showHelp && (
         <ShortcutsHelp shortcuts={shortcutDefs} onClose={() => setShowHelp(false)} />
-      )}
-
-      {/* Mattermost import modal */}
-      {showMmImport && resolvedBoardId && (
-        <MattermostImport
-          boardId={resolvedBoardId}
-          onClose={() => setShowMmImport(false)}
-          onMediaArrived={(assets) => {
-            if (inboxZoneRef.current) {
-              inboxZoneRef.current.addMedia(assets);
-            }
-          }}
-        />
       )}
 
       {/* Markdown card portals (read-only previews on canvas) */}

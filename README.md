@@ -1,0 +1,187 @@
+# RefBoard
+
+A self-hosted, real-time collaborative reference board — like PureRef, but on the web, multiplayer, and with markdown notes, threaded review comments, and PDF support baked in.
+
+Drop images, videos, and PDFs onto an infinite GPU canvas. Pan, zoom, group, align, annotate. Share a board with your team and watch each others' cursors in real time. Pin a comment to a thumbnail and resolve it like a code review.
+
+Built because we needed PureRef's painlessness, Miro's collaboration, and a code-review's threading — without paying three different SaaS subscriptions for them.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+---
+
+## Features
+
+**Canvas**
+- Infinite, GPU-accelerated canvas (Pixi.js v8) — handles thousands of items without dropping frames
+- Drag & drop images, videos, and PDFs from your filesystem or clipboard
+- Drop image URLs directly from the browser
+- Pan / zoom / fit-all, selection, lasso, group, ungroup
+- Undo / redo, locked layers, hidden layers
+- Pen / draw tool, sticky notes, text labels
+- Markdown cards (BlockNote-powered editor) right on the canvas
+
+**PureRef-parity power tools**
+- 40+ keyboard shortcuts mapped to PureRef defaults
+- Align, distribute, normalize size / scale / width / height
+- Auto-arrange in grid / row / column / by name / by z-order / random / stack
+- Optimal pack, overlay compare (Ctrl+Y), flip H/V, reset transform, grayscale, lock
+- Right-click context menu with everything
+
+**Real-time collaboration**
+- Live cursors with name labels
+- Full-scene sync over Socket.IO with interaction-aware deferral
+- Presence (online avatars), follow-user mode, share dialog with role-based access (owner / editor / viewer)
+- Public, read-only sharing links via collection share token
+
+**Review & threads**
+- Pin a comment to any object on the canvas → starts a thread
+- Threaded comments with status (open / resolved)
+- Review mode toggles a clean overlay for walking through feedback
+
+**Media pipeline**
+- Image variants (thumbnail / hires / LOD) generated on upload via Sharp
+- Video poster + duration + dimensions extracted via ffmpeg
+- PDF → page thumbnails + hires renders via poppler
+- Background media worker so the upload feels instant
+
+**Auth & admin**
+- JWT-based email/password auth
+- First user is auto-admin
+- `SEED_ADMIN_*` env vars to bootstrap an admin on first boot
+- `ALLOW_SELF_REGISTRATION` flag — when off, only admins can create accounts
+- Admin endpoints to list/create/deactivate users (UI dashboard coming next)
+
+**Deployment**
+- One `docker compose up` starts RefBoard + a bundled MinIO for object storage
+- Dockerfile is multi-stage and self-contained
+- SQLite (WAL mode) for metadata — zero external DB dependency
+
+---
+
+## Quick start (Docker, recommended)
+
+Requires Docker + Docker Compose v2.
+
+```bash
+git clone https://github.com/metalfinger/refboard
+cd refboard
+cp .env.example .env
+
+# Edit .env and at minimum set:
+#   JWT_SECRET=<run: openssl rand -base64 64>
+#   SEED_ADMIN_EMAIL=you@example.com
+#   SEED_ADMIN_PASSWORD=<a long password>
+
+docker compose up --build
+```
+
+Then open <http://localhost:8000> and sign in with the seeded admin email / password.
+
+MinIO console (S3 dashboard) is at <http://localhost:9001> — login is whatever you set as `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` in `.env` (defaults to `minioadmin` / `minioadmin`).
+
+Persistent state lives under `./.docker-data/` (SQLite + MinIO objects). Back this up.
+
+---
+
+## Manual install (without Docker)
+
+Requires Node.js 20+, ffmpeg, and poppler-utils on your `PATH`. You also need an S3-compatible object store reachable from the backend — easiest is to run MinIO standalone.
+
+```bash
+# 1. Object storage
+docker run -d --name minio -p 9000:9000 -p 9001:9001 \
+  -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+  -v $(pwd)/.docker-data/minio:/data \
+  minio/minio server /data --console-address ":9001"
+
+# 2. Backend
+cd backend
+npm install
+DB_PATH=./data/refboard.db \
+JWT_SECRET=$(openssl rand -base64 64) \
+MINIO_ENDPOINT=localhost \
+SEED_ADMIN_EMAIL=you@example.com \
+SEED_ADMIN_PASSWORD=changeme \
+node server.js
+
+# 3. Frontend (dev mode, separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+In dev mode the Vite server proxies `/api` and `/socket.io` to the backend on port 8000 — open the URL Vite prints.
+
+For production, run `npm run build` in `frontend/` — the backend serves the built `frontend/dist` automatically.
+
+---
+
+## Configuration
+
+All knobs live in `.env`. See [`.env.example`](.env.example) for the full annotated list. Highlights:
+
+| Variable | Required? | What it does |
+|---|---|---|
+| `JWT_SECRET` | yes (in prod) | Signs auth tokens. Make it long and random. |
+| `DB_PATH` | no | SQLite file path. Defaults to `/app/data/refboard.db` (Docker). |
+| `MINIO_ENDPOINT` / `_PORT` / `_ACCESS_KEY` / `_SECRET_KEY` / `_BUCKET` | yes | S3-compatible storage. |
+| `SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` | no | Idempotent first-boot admin bootstrap. |
+| `ALLOW_SELF_REGISTRATION` | no | When `true`, anyone can register. Default `false`. |
+| `MAX_FILE_SIZE_MB` | no | Per-file upload cap. Default 200. |
+| `REFBOARD_API_KEY` | no | Enables programmatic upload via X-API-Key header. |
+
+---
+
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Browser                                                    │
+│  React + TypeScript + Vite                                 │
+│  Pixi.js v8 canvas · BlockNote markdown · Socket.IO client │
+└──────────────────┬─────────────────────────────┬───────────┘
+                   │ HTTPS / WS                  │
+                   ▼                             ▼
+       ┌───────────────────────┐    ┌──────────────────────┐
+       │ Express + Socket.IO   │    │  Static frontend     │
+       │  /api/* REST          │    │  (served by backend) │
+       │  /socket.io WS rooms  │    └──────────────────────┘
+       │  Media worker (queue) │
+       └────┬──────────┬───────┘
+            │          │
+            ▼          ▼
+    ┌──────────┐   ┌──────────────────┐
+    │ SQLite   │   │ MinIO (S3)       │
+    │ (WAL)    │   │ images / videos  │
+    │ metadata │   │ pdf renders      │
+    └──────────┘   └──────────────────┘
+```
+
+- **Frontend** — React + Vite + TypeScript. Pixi.js v8 powers the canvas (LOD-aware, viewport-culled, GPU-batched). BlockNote provides the markdown editor used for sticky cards. Socket.IO syncs scene state.
+- **Backend** — Express for REST, Socket.IO for real-time, better-sqlite3 for metadata (WAL mode), Sharp + ffmpeg + poppler for media processing. A background worker handles thumbnails/hires/PDF rasterization out of the request path.
+- **Storage** — MinIO (or any S3 API). The backend proxies media bytes through `/api/images/*` so URLs stay stable across deployment moves.
+
+See [CHANGELOG.md](CHANGELOG.md) for the version history (v0.1.0 → v0.5.0).
+
+---
+
+## Roadmap
+
+- [ ] Per-board activity log (who added/deleted what, when)
+- [ ] Admin dashboard frontend (backend endpoints already exist at `/api/admin/users`)
+- [ ] Mobile-friendly read-only board view
+- [ ] Export board → PDF / image grid
+- [ ] Optional remote storage adapters (S3 direct, R2)
+
+---
+
+## Contributing
+
+Issues and PRs welcome. The codebase is single-language on the frontend (TypeScript + React) and small on the backend (a few hundred lines per route file). The hardest parts are in `frontend/src/canvas/` (the Pixi-powered scene graph and sync engine).
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). Built and maintained by [Hiren Kangad](https://metalfinger.xyz).

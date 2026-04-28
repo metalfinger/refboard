@@ -22,13 +22,22 @@ const router = Router();
  */
 router.post('/register', async (req, res) => {
   try {
-    const { email, username, password, display_name } = req.body;
+    const { email, username, password, display_name, displayName } = req.body;
+    const dn = display_name || displayName;
 
     if (!email || !username || !password) {
       return res.status(400).json({ error: 'Email, username, and password are required' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const allowRegistration = (process.env.ALLOW_SELF_REGISTRATION || '').toLowerCase() === 'true';
+    const userCount = getUserCount();
+    if (!allowRegistration && userCount > 0) {
+      return res.status(403).json({
+        error: 'Self-registration is disabled. Ask an admin to create your account.',
+      });
     }
 
     const existing = getUserByEmail(email);
@@ -42,7 +51,6 @@ router.post('/register', async (req, res) => {
     }
 
     const passwordHash = await hashPassword(password);
-    const userCount = getUserCount();
     const role = userCount === 0 ? 'admin' : 'member';
 
     const user = createUser({
@@ -50,7 +58,7 @@ router.post('/register', async (req, res) => {
       email,
       username,
       passwordHash,
-      displayName: display_name || username,
+      displayName: dn || username,
       role,
     });
 

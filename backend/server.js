@@ -95,22 +95,18 @@ app.get('/api/users/search', (req, res) => {
 
 // ---- API routes ----
 const authRoutes = require('./routes/auth');
-const oauthRoutes = require('./routes/oauth');
 const collectionRoutes = require('./routes/collections');
 const boardRoutes = require('./routes/boards');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
-const mmBridgeRoutes = require('./routes/mattermost-bridge');
 const threadRoutes = require('./routes/threads');
 const pdfRoutes = require('./routes/pdf');
 
 app.use('/api/auth', authRoutes);
-app.use('/api/auth', oauthRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/boards', mmBridgeRoutes);
 app.use('/api/boards', threadRoutes);
 app.use('/api/boards', pdfRoutes);
 
@@ -161,8 +157,14 @@ app.set('io', io);
 
 // ---- Initialize services and start ----
 async function start() {
-  require('./db');
+  const dbModule = require('./db');
   console.log('[server] Database initialized');
+
+  try {
+    await dbModule.seedAdminFromEnv();
+  } catch (err) {
+    console.error('[server] SEED_ADMIN bootstrap failed:', err.message);
+  }
 
   try {
     const { initBucket } = require('./minio');
@@ -171,14 +173,6 @@ async function start() {
   } catch (err) {
     console.error('[server] MinIO initialization failed:', err.message);
     console.error('[server] Image uploads will not work until MinIO is available');
-  }
-
-  // Start Mattermost auto-sync watcher (no-op if env vars missing)
-  try {
-    const { startWatcher } = require('./services/mm-watcher');
-    startWatcher(io);
-  } catch (err) {
-    console.error('[server] MM watcher failed to start:', err.message);
   }
 
   // Start media processing worker
@@ -197,11 +191,6 @@ async function start() {
 // ---- Graceful shutdown ----
 function shutdown(signal) {
   console.log(`[server] Received ${signal}, shutting down gracefully...`);
-
-  try {
-    const { stopWatcher } = require('./services/mm-watcher');
-    stopWatcher();
-  } catch {}
 
   try {
     const { stopMediaWorker } = require('./services/media-worker');

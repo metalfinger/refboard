@@ -84,18 +84,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_boards_created_by ON boards(created_by);
   CREATE INDEX IF NOT EXISTS idx_images_board ON images(board_id);
 
-  CREATE TABLE IF NOT EXISTS board_channel_links (
-    id TEXT PRIMARY KEY,
-    board_id TEXT NOT NULL,
-    channel_id TEXT NOT NULL,
-    channel_name TEXT,
-    created_by TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(board_id, channel_id)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_board_channel_links_board ON board_channel_links(board_id);
-
   CREATE TABLE IF NOT EXISTS media_jobs (
     id TEXT PRIMARY KEY,
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
@@ -198,11 +186,6 @@ try {
   db.exec("ALTER TABLE images ADD COLUMN media_type TEXT DEFAULT 'image'");
 }
 try {
-  db.prepare("SELECT mm_file_id FROM images LIMIT 0").get();
-} catch {
-  db.exec("ALTER TABLE images ADD COLUMN mm_file_id TEXT");
-}
-try {
   db.prepare("SELECT poster_asset_key FROM images LIMIT 0").get();
 } catch {
   db.exec("ALTER TABLE images ADD COLUMN poster_asset_key TEXT");
@@ -217,12 +200,6 @@ try {
 } catch {
   db.exec("ALTER TABLE images ADD COLUMN native_width INTEGER");
   db.exec("ALTER TABLE images ADD COLUMN native_height INTEGER");
-}
-try {
-  db.prepare("SELECT mattermost_id FROM users LIMIT 0").get();
-} catch {
-  db.exec("ALTER TABLE users ADD COLUMN mattermost_id TEXT");
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_mattermost_id ON users(mattermost_id)");
 }
 try { db.prepare('SELECT page_count FROM images LIMIT 0').get(); }
 catch { db.exec('ALTER TABLE images ADD COLUMN page_count INTEGER'); }
@@ -243,14 +220,6 @@ function getUserById(id) {
 
 function getUserByUsername(username) {
   return db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username);
-}
-
-function getUserByMattermostId(mmId) {
-  return db.prepare('SELECT * FROM users WHERE mattermost_id = ? AND is_active = 1').get(mmId);
-}
-
-function updateUserMattermostId(userId, mmId) {
-  db.prepare("UPDATE users SET mattermost_id = ?, updated_at = datetime('now') WHERE id = ?").run(mmId, userId);
 }
 
 function createUser({ id, email, username, passwordHash, displayName, role }) {
@@ -461,11 +430,11 @@ function saveBoardCanvas(boardId, canvasState, thumbnail) {
 // ---------------------
 // Images
 // ---------------------
-function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy, assetKey, mediaType, mmFileId }) {
+function createImage({ id, boardId, filename, mimeType, fileSize, width, height, minioPath, publicUrl, uploadedBy, assetKey, mediaType }) {
   db.prepare(`
-    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by, asset_key, media_type, mm_file_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy, assetKey || null, mediaType || 'image', mmFileId || null);
+    INSERT INTO images (id, board_id, filename, mime_type, file_size, width, height, minio_path, public_url, uploaded_by, asset_key, media_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, boardId, filename, mimeType, fileSize, width || null, height || null, minioPath, publicUrl || null, uploadedBy, assetKey || null, mediaType || 'image');
   return db.prepare('SELECT * FROM images WHERE id = ?').get(id);
 }
 
@@ -487,37 +456,6 @@ function deleteBoardImageRecords(boardId) {
   const images = getBoardImages(boardId);
   db.prepare('DELETE FROM images WHERE board_id = ?').run(boardId);
   return images;
-}
-
-// ---------------------
-// Board–Channel Links
-// ---------------------
-function createBoardChannelLink({ id, boardId, channelId, channelName, createdBy }) {
-  db.prepare(`
-    INSERT INTO board_channel_links (id, board_id, channel_id, channel_name, created_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, boardId, channelId, channelName || null, createdBy);
-  return db.prepare('SELECT * FROM board_channel_links WHERE id = ?').get(id);
-}
-
-function getBoardChannelLinks(boardId) {
-  return db.prepare('SELECT * FROM board_channel_links WHERE board_id = ? ORDER BY created_at DESC').all(boardId);
-}
-
-function getBoardChannelLink(linkId) {
-  return db.prepare('SELECT * FROM board_channel_links WHERE id = ?').get(linkId);
-}
-
-function deleteBoardChannelLink(linkId) {
-  db.prepare('DELETE FROM board_channel_links WHERE id = ?').run(linkId);
-}
-
-function getAllBoardChannelLinks() {
-  return db.prepare('SELECT * FROM board_channel_links ORDER BY created_at DESC').all();
-}
-
-function getImageByMmFileId(boardId, mmFileId) {
-  return db.prepare('SELECT * FROM images WHERE board_id = ? AND mm_file_id = ?').get(boardId, mmFileId);
 }
 
 // ---------------------
@@ -698,11 +636,52 @@ function deleteComment(commentId) {
   db.prepare('DELETE FROM comments WHERE id = ?').run(commentId);
 }
 
+// ---------------------
+// Seed admin from env (idempotent)
+// ---------------------
+async function seedAdminFromEnv() {
+  const email = process.env.SEED_ADMIN_EMAIL;
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!email || !password) return;
+
+  const existing = getUserByEmail(email);
+  if (existing) {
+    if (existing.role !== 'admin') {
+      db.prepare("UPDATE users SET role = 'admin', updated_at = datetime('now') WHERE id = ?").run(existing.id);
+      console.log(`[db] Promoted ${email} to admin via SEED_ADMIN_EMAIL.`);
+    }
+    return;
+  }
+
+  const bcrypt = require('bcryptjs');
+  const { v4: uuidv4 } = require('uuid');
+  const username = (process.env.SEED_ADMIN_USERNAME || email.split('@')[0]).replace(/[^a-zA-Z0-9_-]/g, '');
+  const displayName = process.env.SEED_ADMIN_DISPLAY_NAME || username;
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  // Avoid username collision
+  let finalUsername = username;
+  let suffix = 1;
+  while (getUserByUsername(finalUsername)) {
+    finalUsername = `${username}${suffix++}`;
+  }
+
+  createUser({
+    id: uuidv4(),
+    email,
+    username: finalUsername,
+    passwordHash,
+    displayName,
+    role: 'admin',
+  });
+  console.log(`[db] Seeded admin user: ${email} (username: ${finalUsername})`);
+}
+
 module.exports = {
   db,
   // Users
-  getUserByEmail, getUserById, getUserByUsername, getUserByMattermostId,
-  createUser, updateUserMattermostId,
+  getUserByEmail, getUserById, getUserByUsername,
+  createUser,
   getAllUsers, updateUserPassword, deactivateUser, getUserCount,
   // Collections
   getCollections, getCollection, getCollectionByShareToken,
@@ -713,9 +692,6 @@ module.exports = {
   getCollectionBoards, getBoard, createBoard, updateBoard, deleteBoard, saveBoardCanvas,
   // Images
   createImage, getBoardImages, getImage, deleteImage, deleteBoardImageRecords,
-  // Board–Channel Links
-  createBoardChannelLink, getBoardChannelLinks, getBoardChannelLink, deleteBoardChannelLink,
-  getAllBoardChannelLinks, getImageByMmFileId,
   // Media Jobs
   createMediaJob, updateMediaJob, getMediaJob, getPendingMediaJobs, updateImageMedia,
   // PDF Pages
@@ -725,4 +701,6 @@ module.exports = {
   incrementThreadCommentCount, decrementThreadCommentCount,
   // Comments
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
+  // Bootstrap
+  seedAdminFromEnv,
 };
