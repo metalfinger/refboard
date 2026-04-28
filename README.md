@@ -133,6 +133,107 @@ All knobs live in `.env`. See [`.env.example`](.env.example) for the full annota
 
 ---
 
+## Putting it on a public domain
+
+RefBoard is just an HTTP server on port 8000 — every reverse-proxy / tunneling option works. The only non-obvious bit is that it uses Socket.IO over WebSockets, so whatever fronts it must allow WS upgrades.
+
+### Cloudflare Tunnel (zero open ports, free TLS, recommended for home / studio servers)
+
+This is what I run my own instance behind. No router config, no public IP, no Let's Encrypt — Cloudflare proxies the connection through an outbound tunnel from the box.
+
+```bash
+# 1. Install cloudflared (macOS / Linux examples)
+brew install cloudflared          # macOS
+# OR
+sudo apt install cloudflared      # Debian/Ubuntu (see Cloudflare docs for repo setup)
+
+# 2. Authenticate (opens browser to pick a Cloudflare account / zone)
+cloudflared tunnel login
+
+# 3. Create a named tunnel
+cloudflared tunnel create refboard
+
+# 4. Route a hostname to it (replace example.com with your zone)
+cloudflared tunnel route dns refboard refboard.example.com
+
+# 5. Run the tunnel pointed at the local RefBoard
+cloudflared tunnel run --url http://localhost:8000 refboard
+```
+
+For a permanent install, generate a config at `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: refboard
+credentials-file: /Users/you/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: refboard.example.com
+    service: http://localhost:8000
+  - service: http_status:404
+```
+
+Then `cloudflared service install` to make it boot at startup.
+
+> **Heads-up:** Cloudflare's free plan caps proxied request bodies at **100 MB**. If you regularly upload videos / large PDFs above that, set `MAX_FILE_SIZE_MB` accordingly, or pair Cloudflare Tunnel with a direct path for uploads (e.g. tunnel only the SPA, expose the upload API via something else), or upgrade your Cloudflare plan.
+
+### Caddy reverse proxy (one-line TLS via Let's Encrypt)
+
+If the box is publicly reachable (cloud VPS, port 443 open):
+
+```caddy
+refboard.example.com {
+    reverse_proxy localhost:8000
+}
+```
+
+That's the whole `Caddyfile`. Caddy auto-provisions and renews the certificate, and `reverse_proxy` upgrades WebSockets transparently.
+
+### nginx reverse proxy
+
+```nginx
+server {
+    server_name refboard.example.com;
+    listen 443 ssl;
+    # ssl_certificate / ssl_certificate_key from certbot or your CA
+
+    client_max_body_size 250M;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+### Tailscale (private-to-your-team access without a domain)
+
+If you don't want it on the public internet at all:
+
+```bash
+tailscale serve --bg http://localhost:8000
+# now reachable at https://<machine>.<tailnet>.ts.net
+```
+
+Anyone in your tailnet can hit it; no one else can.
+
+### Checklist when going public
+
+- [ ] Set `JWT_SECRET` to a real random value (`openssl rand -base64 64`).
+- [ ] Set `NODE_ENV=production` (the backend refuses to start in prod without `JWT_SECRET`).
+- [ ] Set `CORS_ORIGIN=https://your.domain` (drop the wildcard).
+- [ ] Set `ALLOW_SELF_REGISTRATION=false` and pre-create accounts via the admin endpoints.
+- [ ] Restrict the MinIO console (port 9001) to localhost — only the S3 API on 9000 needs to be reachable from the backend, and the backend already proxies media bytes through `/api/images/*`, so MinIO does **not** need to be exposed publicly.
+- [ ] Keep `./.docker-data/` (or `DB_PATH` + MinIO data dir) backed up — that's all your state.
+
+---
+
 ## Architecture
 
 ```
