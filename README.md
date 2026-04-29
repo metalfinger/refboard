@@ -289,6 +289,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history (v0.1.0 → v0.5.0).
 
 - [x] Admin dashboard frontend (live at `/admin` — user create / reset-password / role / deactivate)
 - [x] Per-board activity log (uploads, board events, threads, comments — live via Socket.IO)
+- [ ] **One-click `setup.sh` installer** for designers — see [`docs/install-roadmap.md`](docs/install-roadmap.md)
+- [ ] **Native installer** (`.dmg` / `.exe`) with no Docker dependency — see [`docs/install-roadmap.md`](docs/install-roadmap.md)
 - [ ] Mobile-friendly read-only board view
 - [ ] Export board → PDF / image grid
 - [ ] Optional remote storage adapters (S3 direct, R2)
