@@ -23,7 +23,7 @@ app.get('/api/images/*', async (req, res) => {
   try {
     const objectPath = req.params[0]; // everything after /api/images/
     if (!objectPath) return res.status(400).json({ error: 'Missing path' });
-    const { minioClient, MINIO_BUCKET } = require('./minio');
+    const { minioClient, MINIO_BUCKET } = require('./storage');
     const stat = await minioClient.statObject(MINIO_BUCKET, objectPath);
     const contentType = stat.metaData?.['content-type'] || 'application/octet-stream';
     const totalSize = stat.size;
@@ -162,6 +162,10 @@ async function start() {
   const dbModule = require('./db');
   console.log('[server] Database initialized');
 
+  // Resolve/generate the JWT secret eagerly so the "generated a fresh one"
+  // log line surfaces at boot, not on the first auth request.
+  dbModule.getOrCreateJwtSecret();
+
   try {
     await dbModule.seedAdminFromEnv();
   } catch (err) {
@@ -169,12 +173,12 @@ async function start() {
   }
 
   try {
-    const { initBucket } = require('./minio');
+    const { initBucket } = require('./storage');
     await initBucket();
-    console.log('[server] MinIO initialized');
+    console.log('[server] Storage backend initialized');
   } catch (err) {
-    console.error('[server] MinIO initialization failed:', err.message);
-    console.error('[server] Image uploads will not work until MinIO is available');
+    console.error('[server] Storage initialization failed:', err.message);
+    console.error('[server] Image uploads will not work until storage is available');
   }
 
   // Start media processing worker

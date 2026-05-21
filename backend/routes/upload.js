@@ -7,7 +7,7 @@ const http = require('http');
 const { URL } = require('url');
 const { authMiddleware } = require('../auth');
 const { getBoard, getCollectionMember, createImage, getImage, createMediaJob, createPdfPage, updateImagePageCount } = require('../db');
-const { putBuffer, getImageUrl, MIME_TO_EXT, MAX_FILE_SIZE } = require('../minio');
+const { putBuffer, getImageUrl, MIME_TO_EXT, MAX_FILE_SIZE } = require('../storage');
 const { pdfInfo, bufferToTempFile } = require('../pdf-utils');
 const { recordActivity } = require('../activity');
 

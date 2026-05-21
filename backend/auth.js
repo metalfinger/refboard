@@ -1,27 +1,31 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-const JWT_SECRET = process.env.JWT_SECRET || (() => {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('JWT_SECRET environment variable is required in production');
-  }
-  return 'refboard-dev-secret-do-not-use-in-prod';
-})();
-
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const BCRYPT_ROUNDS = 12;
 const REFBOARD_API_KEY = process.env.REFBOARD_API_KEY || '';
 
+// Memoized — resolved lazily so db.js is required after its module
+// initialization side-effects have run. After the first call the secret is
+// cached for the life of the process.
+let _cachedJwtSecret = null;
+function jwtSecret() {
+  if (_cachedJwtSecret) return _cachedJwtSecret;
+  const { getOrCreateJwtSecret } = require('./db');
+  _cachedJwtSecret = getOrCreateJwtSecret();
+  return _cachedJwtSecret;
+}
+
 function generateToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role, username: user.username, display_name: user.display_name },
-    JWT_SECRET,
+    jwtSecret(),
     { expiresIn: JWT_EXPIRES_IN }
   );
 }
 
 function verifyToken(token) {
-  return jwt.verify(token, JWT_SECRET);
+  return jwt.verify(token, jwtSecret());
 }
 
 async function hashPassword(password) {
@@ -122,5 +126,4 @@ module.exports = {
   adminMiddleware,
   apiKeyMiddleware,
   adminOrApiKeyMiddleware,
-  JWT_SECRET,
 };

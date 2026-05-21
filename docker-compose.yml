@@ -19,6 +19,7 @@ services:
     restart: unless-stopped
 
   refboard:
+    image: ${REFBOARD_IMAGE:-ghcr.io/metalfinger/refboard:latest}
     build: .
     container_name: refboard
     depends_on:
@@ -36,6 +37,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-refboard}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
+      STORAGE_DATA_DIR: ${STORAGE_DATA_DIR:-/app/data/storage}
       PUBLIC_URL: ${PUBLIC_URL:-}
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-200}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}

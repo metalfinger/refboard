@@ -1,0 +1,39 @@
+# Single-container RefBoard with local-filesystem storage.
+#
+# Use this instead of the repo-root docker-compose.yml when you don't want to
+# run MinIO. State is stored under ./.docker-data/refboard/ (SQLite + media
+# bytes + JWT secret, all together — back this directory up).
+#
+# Usage:
+#   cp .env.example .env       # most values can stay at defaults
+#   docker compose -f examples/compose/minimal-fs.yml up -d
+
+services:
+  refboard:
+    image: ${REFBOARD_IMAGE:-ghcr.io/metalfinger/refboard:latest}
+    container_name: refboard
+    environment:
+      PORT: 8000
+      NODE_ENV: ${NODE_ENV:-production}
+      # JWT_SECRET is optional — RefBoard generates one on first boot and
+      # persists it in the SQLite settings table. Override here if you'd
+      # rather manage it out-of-band.
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      DB_PATH: /app/data/refboard.db
+      STORAGE_BACKEND: fs
+      STORAGE_DATA_DIR: /app/data/storage
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-200}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-}
+      SEED_ADMIN_DISPLAY_NAME: ${SEED_ADMIN_DISPLAY_NAME:-}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+      REFBOARD_API_KEY: ${REFBOARD_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.docker-data/refboard:/app/data
+    restart: unless-stopped

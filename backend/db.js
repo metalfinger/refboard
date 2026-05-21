@@ -327,6 +327,25 @@ function getBoolSetting(key, defaultValue = false) {
   }
 })();
 
+// JWT secret resolution.
+//   1. process.env.JWT_SECRET wins if set (lets ops manage secrets via env).
+//   2. Otherwise read from settings.jwt_secret.
+//   3. If neither exists, generate a 64-byte random secret and persist it.
+//
+// This removes the need to set JWT_SECRET in .env before first boot. The
+// first boot of a fresh install lands directly on the Login page in "create
+// the first admin" mode; tokens minted there are signed with the auto-
+// generated secret.
+function getOrCreateJwtSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  const existing = getSetting('jwt_secret');
+  if (existing) return existing;
+  const generated = require('crypto').randomBytes(64).toString('base64');
+  setSetting('jwt_secret', generated);
+  console.log('[db] JWT_SECRET was not set in the environment — generated a fresh one and persisted it in the settings table.');
+  return generated;
+}
+
 // ---------------------
 // User helpers
 // ---------------------
@@ -823,6 +842,7 @@ module.exports = {
   getCommentsByThread, getCommentsByBoard, getComment, createComment, updateComment, deleteComment,
   // Settings
   getSetting, setSetting, getAllSettings, getBoolSetting,
+  getOrCreateJwtSecret,
   // Activity log
   logActivity, getBoardActivity,
   // Bootstrap

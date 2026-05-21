@@ -11,7 +11,7 @@ const {
   getCollection,
   getCollectionMember,
 } = require('../db');
-const { deleteBoardImages: deleteBoardMinioImages } = require('../minio');
+const { deleteBoardImages: deleteBoardMinioImages } = require('../storage');
 const { recordActivity } = require('../activity');
 
 const router = Router();

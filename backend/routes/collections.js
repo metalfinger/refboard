@@ -14,7 +14,7 @@ const {
   getCollectionBoards,
   getUserByEmail,
 } = require('../db');
-const { deleteBoardImages: deleteBoardMinioImages } = require('../minio');
+const { deleteBoardImages: deleteBoardMinioImages } = require('../storage');
 
 const router = Router();
 

@@ -72,21 +72,36 @@ Requires Docker + Docker Compose v2.
 ```bash
 git clone https://github.com/metalfinger/refboard
 cd refboard
+bash scripts/setup.sh           # macOS / Linux
+# or, on Windows PowerShell:
+# .\scripts\setup.ps1
+```
+
+The script copies `.env.example` → `.env`, pulls the pre-built multi-arch image from GHCR, brings the stack up, waits for the backend to report healthy, and opens the URL in your browser. Re-running it is safe.
+
+Prefer the raw commands? They're equivalent to:
+
+```bash
 cp .env.example .env
+docker compose pull
+docker compose up -d
+```
 
-# Edit .env and at minimum set:
-#   JWT_SECRET=<run: openssl rand -base64 64>
-#   SEED_ADMIN_EMAIL=you@example.com
-#   SEED_ADMIN_PASSWORD=<a long password>
+Open <http://localhost:8000>, create the first admin account on the screen RefBoard shows you, and you're in. No env-var editing required to get started — `JWT_SECRET` is generated and persisted on first boot, and the first user you register is auto-promoted to admin.
 
+For production / non-localhost installs, see the [going-public checklist](#checklist-when-going-public) below — you'll want to set `JWT_SECRET` explicitly, lock down `CORS_ORIGIN`, and turn off self-registration.
+
+To build from source instead of pulling (slower; needed only if you've modified the code):
+
+```bash
 docker compose up --build
 ```
 
-Then open <http://localhost:8000> and sign in with the seeded admin email / password.
+The default image is `ghcr.io/metalfinger/refboard:latest`. Pin a specific version by setting `REFBOARD_IMAGE=ghcr.io/metalfinger/refboard:v0.5.0` in `.env`.
 
 MinIO console (S3 dashboard) is at <http://localhost:9001> — login is whatever you set as `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` in `.env` (defaults to `minioadmin` / `minioadmin`).
 
-Persistent state lives under `./.docker-data/` (SQLite + MinIO objects). Back this up.
+Persistent state lives under `./.docker-data/` (SQLite + MinIO objects). Back this up — that's also where the auto-generated `JWT_SECRET` lives, so losing it logs everyone out.
 
 ---
 
@@ -117,11 +132,11 @@ docker run -d --name minio -p 9000:9000 -p 9001:9001 \
 cd backend
 npm install
 DB_PATH=./data/refboard.db \
-JWT_SECRET=$(openssl rand -base64 64) \
 MINIO_ENDPOINT=localhost \
-SEED_ADMIN_EMAIL=you@example.com \
-SEED_ADMIN_PASSWORD=changeme \
 node server.js
+# JWT_SECRET is auto-generated and persisted on first boot — set it explicitly
+# only if you want to manage it via an external secrets manager. The first user
+# you register in the browser becomes admin automatically.
 
 # 3. Frontend (dev mode, separate terminal)
 cd frontend
@@ -154,6 +169,8 @@ All knobs live in `.env`. See [`.env.example`](.env.example) for the full annota
 ## Putting it on a public domain
 
 RefBoard is just an HTTP server on port 8000 — every reverse-proxy / tunneling option works. The only non-obvious bit is that it uses Socket.IO over WebSockets, so whatever fronts it must allow WS upgrades.
+
+Pre-baked deployment configs for the common patterns (Cloudflare Tunnel sidecar, Caddy auto-TLS, Fly.io, Render, single-container FS-storage) live in [`examples/`](examples/README.md). The hand-rolled instructions below are still valid; the examples just spare you the YAML.
 
 ### Cloudflare Tunnel (zero open ports, free TLS, recommended for home / studio servers)
 
@@ -243,8 +260,8 @@ Anyone in your tailnet can hit it; no one else can.
 
 ### Checklist when going public
 
-- [ ] Set `JWT_SECRET` to a real random value (`openssl rand -base64 64`).
-- [ ] Set `NODE_ENV=production` (the backend refuses to start in prod without `JWT_SECRET`).
+- [ ] Set `JWT_SECRET` explicitly (`openssl rand -base64 64`). For production installs we recommend pinning the secret in `.env` rather than relying on the auto-generated one in the SQLite settings table — easier to rotate, easier to back up to a secrets manager.
+- [ ] Set `NODE_ENV=production`.
 - [ ] Set `CORS_ORIGIN=https://your.domain` (drop the wildcard).
 - [ ] Confirm self-registration is **off** in the admin dashboard (defaults off; only flips on if you set `ALLOW_SELF_REGISTRATION=true` on first boot).
 - [ ] Restrict the MinIO console (port 9001) to localhost — only the S3 API on 9000 needs to be reachable from the backend, and the backend already proxies media bytes through `/api/images/*`, so MinIO does **not** need to be exposed publicly.
@@ -289,8 +306,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history (v0.1.0 → v0.5.0).
 
 - [x] Admin dashboard frontend (live at `/admin` — user create / reset-password / role / deactivate)
 - [x] Per-board activity log (uploads, board events, threads, comments — live via Socket.IO)
-- [ ] **One-click `setup.sh` installer** for designers — see [`docs/install-roadmap.md`](docs/install-roadmap.md)
-- [ ] **Native installer** (`.dmg` / `.exe`) with no Docker dependency — see [`docs/install-roadmap.md`](docs/install-roadmap.md)
+- [x] **Pre-built multi-arch image** at `ghcr.io/metalfinger/refboard` (linux/amd64 + linux/arm64) — published on every push to main
+- [x] **Zero-edit first boot** — `JWT_SECRET` auto-generated and persisted, first registered user is auto-admin
+- [x] **FS storage adapter** — `STORAGE_BACKEND=fs` drops the MinIO dependency for single-container installs
+- [x] **One-click installers** — `scripts/setup.sh` (macOS / Linux) and `scripts/setup.ps1` (Windows)
+- [x] **PaaS deploy templates** — Fly.io, Render, Cloudflare Tunnel sidecar, Caddy auto-TLS in [`examples/`](examples/README.md)
 - [ ] Mobile-friendly read-only board view
 - [ ] Export board → PDF / image grid
 - [ ] Optional remote storage adapters (S3 direct, R2)

@@ -16,7 +16,7 @@ const {
   updatePdfPageHires,
 } = require('../db');
 const { probeVideo, extractPoster } = require('../video-utils');
-const { putBuffer, minioClient, MINIO_BUCKET } = require('../minio');
+const { putBuffer, minioClient, MINIO_BUCKET } = require('../storage');
 const { pdfRenderPage, bufferToTempFile } = require('../pdf-utils');
 
 const POLL_INTERVAL_MS = 3000;
