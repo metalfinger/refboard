@@ -1,0 +1,46 @@
+# RefBoard + Cloudflare Tunnel sidecar.
+#
+# Publishes RefBoard at a hostname routed through Cloudflare without opening
+# any inbound ports. Recommended for home / studio servers.
+#
+# Setup:
+#   1. Create a tunnel + DNS record in the Cloudflare Zero Trust dashboard.
+#      Point its public hostname (e.g. refboard.example.com) at
+#      http://refboard:8000  (the in-network service name below).
+#   2. Copy the tunnel token from the dashboard and put it in your .env:
+#        TUNNEL_TOKEN=eyJhIjoi...
+#   3. docker compose -f examples/compose/cloudflared-paired.yml up -d
+#
+# Heads-up: Cloudflare's free plan caps proxied request bodies at 100 MB.
+# If you upload large videos / PDFs regularly, set MAX_FILE_SIZE_MB in .env
+# accordingly or upgrade your Cloudflare plan.
+
+services:
+  refboard:
+    image: ${REFBOARD_IMAGE:-ghcr.io/metalfinger/refboard:latest}
+    container_name: refboard
+    environment:
+      PORT: 8000
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:-}
+      STORAGE_BACKEND: fs
+      STORAGE_DATA_DIR: /app/data/storage
+      DB_PATH: /app/data/refboard.db
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-90}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+    volumes:
+      - ./.docker-data/refboard:/app/data
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: refboard-cloudflared
+    depends_on:
+      - refboard
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN must be set in .env}
+    restart: unless-stopped

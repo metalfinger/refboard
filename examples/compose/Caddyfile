@@ -1,0 +1,14 @@
+{$REFBOARD_DOMAIN} {
+    encode zstd gzip
+
+    # Raise upload cap to match RefBoard's MAX_FILE_SIZE_MB. Caddy's default
+    # is 10MB; the value below permits up to 250MB request bodies.
+    request_body {
+        max_size 250MB
+    }
+
+    reverse_proxy refboard:8000 {
+        # WebSocket upgrade is automatic in Caddy 2; nothing extra needed.
+        flush_interval -1
+    }
+}

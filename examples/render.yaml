@@ -1,0 +1,43 @@
+# Render.com Blueprint for RefBoard.
+#
+# Quick start:
+#   1. Push this file to a Git repo (it lives at refboard/examples/render.yaml
+#      already, but Render's "New Blueprint" expects render.yaml at the repo
+#      root — copy or symlink it).
+#   2. On Render: New > Blueprint > pick your repo. Render parses this file,
+#      provisions the disk, and starts the service.
+#   3. After first deploy: set JWT_SECRET in the service's Environment tab
+#      (`openssl rand -base64 64`) and re-deploy. Optional but recommended for
+#      production — without it, RefBoard auto-generates one in SQLite.
+#
+# State (SQLite + media bytes + JWT secret) lives on the attached 10 GB disk.
+
+services:
+  - type: web
+    name: refboard
+    runtime: image
+    image:
+      url: ghcr.io/metalfinger/refboard:latest
+    plan: starter         # bump to standard if you want more RAM / CPU
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8000"
+      - key: STORAGE_BACKEND
+        value: fs
+      - key: STORAGE_DATA_DIR
+        value: /app/data/storage
+      - key: DB_PATH
+        value: /app/data/refboard.db
+      - key: MAX_FILE_SIZE_MB
+        value: "200"
+      - key: ALLOW_SELF_REGISTRATION
+        value: "false"
+      - key: JWT_SECRET
+        sync: false       # set manually in the dashboard
+    disk:
+      name: refboard-data
+      mountPath: /app/data
+      sizeGB: 10

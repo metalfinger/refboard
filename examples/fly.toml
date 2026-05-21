@@ -1,0 +1,53 @@
+# Fly.io deployment manifest for RefBoard.
+#
+# Quick start:
+#   fly auth signup                                  # if you don't have an account
+#   fly launch --copy-config --no-deploy             # creates the app
+#   fly secrets set JWT_SECRET=$(openssl rand -base64 64)
+#   fly volumes create refboard_data --size 10 --region <your-region>
+#   fly deploy
+#
+# Notes:
+# - This uses the pre-built GHCR image and the FS storage adapter so no MinIO
+#   is needed. All state (SQLite + media bytes + JWT secret) lives on the
+#   attached volume.
+# - The first user you sign up in the browser becomes admin. After that, turn
+#   self-registration off in /admin and set ALLOW_SELF_REGISTRATION=false as
+#   a fly secret to lock it in across rebuilds.
+
+app = "refboard"           # change to your unique Fly app name
+primary_region = "iad"     # change to your closest region (fly platform regions)
+
+[build]
+  image = "ghcr.io/metalfinger/refboard:latest"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8000"
+  STORAGE_BACKEND = "fs"
+  STORAGE_DATA_DIR = "/app/data/storage"
+  DB_PATH = "/app/data/refboard.db"
+  MAX_FILE_SIZE_MB = "200"
+  ALLOW_SELF_REGISTRATION = "false"
+  # Set CORS_ORIGIN via `fly secrets set CORS_ORIGIN=https://<app>.fly.dev`
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+[[mounts]]
+  source = "refboard_data"
+  destination = "/app/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024

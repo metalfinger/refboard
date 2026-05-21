@@ -1,0 +1,55 @@
+# RefBoard + Caddy reverse proxy with automatic TLS.
+#
+# Use this on a publicly-reachable host (cloud VPS, dedicated box on a public
+# IP, port 443 open). Caddy provisions and renews a Let's Encrypt cert for
+# the hostname you set in REFBOARD_DOMAIN, and transparently upgrades the
+# Socket.IO WebSocket connection.
+#
+# Setup:
+#   1. Point an A / AAAA record for your hostname at this server's public IP.
+#   2. In .env set:
+#        REFBOARD_DOMAIN=refboard.example.com
+#        CORS_ORIGIN=https://refboard.example.com
+#        JWT_SECRET=$(openssl rand -base64 64)
+#        ALLOW_SELF_REGISTRATION=false
+#   3. docker compose -f examples/compose/behind-caddy.yml up -d
+
+services:
+  refboard:
+    image: ${REFBOARD_IMAGE:-ghcr.io/metalfinger/refboard:latest}
+    container_name: refboard
+    environment:
+      PORT: 8000
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env for public deploys}
+      STORAGE_BACKEND: fs
+      STORAGE_DATA_DIR: /app/data/storage
+      DB_PATH: /app/data/refboard.db
+      CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN to your public URL}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-200}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+    volumes:
+      - ./.docker-data/refboard:/app/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: refboard-caddy
+    depends_on:
+      - refboard
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      REFBOARD_DOMAIN: ${REFBOARD_DOMAIN:?set REFBOARD_DOMAIN in .env}
+    volumes:
+      - ./examples/compose/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
